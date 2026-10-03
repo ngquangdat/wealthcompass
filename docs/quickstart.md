@@ -70,6 +70,18 @@ Chạy lại `setup` sau khi đã áp patch thì không còn gì để sửa (ch
 
 Sau đó `git apply`, `npm install`, chạy backend và web, rồi `npx wealthcompass doctor --app .` để kiểm tra: gói đã cài, style, provider, `getToken` không còn là TODO, widget, `TourIdDirective` có mặt nơi có `tourId`, backend chạy và cùng số màn hình, LLM của backend, CORS cho cổng dev.
 
+## Cấu hình AI cho `setup`
+
+AI trong `setup` (và `enrich`, `tour:record`) do **chính lệnh CLI gọi thẳng tới nhà cung cấp LLM** từ máy đang chạy lệnh, không đi qua backend. Cấu hình bằng biến môi trường của terminal chạy lệnh; `wealthcompass.env` chỉ dành cho backend, CLI không đọc file đó.
+
+```bash
+COMPASS_LLM_API_KEY=... npm run setup -- --app ~/du-an/my-web          # DeepSeek (mặc định)
+COMPASS_LLM_PROVIDER=gemini GOOGLE_API_KEY=... npm run setup -- --app ...
+export COMPASS_ENV_FILE=~/du-an-khac/.env                               # dùng chung khóa trong file .env có sẵn (chỉ đọc đúng một biến)
+```
+
+Thứ tự tìm khóa: `COMPASS_LLM_API_KEY` → `DEEPSEEK_API_KEY` (hoặc `GOOGLE_API_KEY` khi `COMPASS_LLM_PROVIDER=gemini`) → đúng biến đó trong file `COMPASS_ENV_FILE` nếu có đặt. Không có khóa thì `setup` vẫn chạy, chỉ bỏ bước AI soạn nháp. `COMPASS_LLM_MODEL`, `COMPASS_LLM_BASE_URL` để dùng model hoặc LLM on-prem tương thích OpenAI.
+
 ## AI làm gì, không làm gì
 
 | | Mặc định | Với `--ai-code` | Không bao giờ |

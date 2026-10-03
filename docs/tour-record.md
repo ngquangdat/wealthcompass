@@ -19,7 +19,7 @@ Tài liệu này dành cho người ghi tour. Muốn biết hệ thống tổng 
 - [ ] Các phần tử tour sẽ trỏ tới **đã có `tourId`** trong template (xem mục 5 của [integration-guide.md](integration-guide.md)); gắn hàng loạt nhanh bằng `npm run annotate` (mục 5.1). Phần tử chưa có `tourId` sẽ bị bỏ qua khi ghi.
 - [ ] Mọi nút **gây thay đổi dữ liệu hay tiền** (đặt lệnh, xác nhận, hủy lệnh, chuyển tiền) đã gắn `tourRole="user-only"`. Nút đó bị chặn khi ghi nên không vô tình chạy.
 - [ ] Đã chạy **`scan`** để có `feature-map.json` (công cụ lấy nhãn và tính năng đích từ đó). Trong repo này: `npm run scan`.
-- [ ] (Tùy chọn) Khóa LLM. Không có khóa vẫn ghi được, chữ sẽ theo mẫu. Thứ tự tìm khóa: `COMPASS_LLM_API_KEY` → biến theo nhà cung cấp (`DEEPSEEK_API_KEY` mặc định, `GOOGLE_API_KEY` nếu `COMPASS_LLM_PROVIDER=gemini`) → đúng biến đó trong `~/tcbs-agent/.env`.
+- [ ] (Tùy chọn) Khóa LLM. Không có khóa vẫn ghi được, chữ sẽ theo mẫu. Thứ tự tìm khóa: `COMPASS_LLM_API_KEY` → biến theo nhà cung cấp (`DEEPSEEK_API_KEY` mặc định, `GOOGLE_API_KEY` nếu `COMPASS_LLM_PROVIDER=gemini`) → đúng biến đó trong file chỉ định bởi `COMPASS_ENV_FILE` (nếu đặt). Ví dụ dùng chung khóa với dự án khác: `export COMPASS_ENV_FILE=~/du-an-khac/.env`.
 
 ## 3. Lệnh
 

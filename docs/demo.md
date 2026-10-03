@@ -30,7 +30,7 @@ Các câu hỏi khác để thử: "nộp tiền vào tài khoản", "xem lãi l
 
 ## Cấu hình LLM
 
-Xem `server/.env.example`. Mặc định server dùng **DeepSeek** (`deepseek-v4-flash`) qua endpoint tương thích OpenAI; khóa lấy theo thứ tự `COMPASS_LLM_API_KEY` → `DEEPSEEK_API_KEY` → biến `DEEPSEEK_API_KEY` trong `~/tcbs-agent/.env` (chỉ đọc đúng biến đó). Đổi sang Gemini bằng `COMPASS_LLM_PROVIDER=gemini` (khóa `GOOGLE_API_KEY`; khóa hiện có đã hết tiền trả trước ngày 2026-10-03), hay model on-prem bằng `COMPASS_LLM_BASE_URL` + `COMPASS_LLM_MODEL` + `COMPASS_LLM_API_KEY`.
+Xem `server/.env.example`. Mặc định server dùng **DeepSeek** (`deepseek-v4-flash`) qua endpoint tương thích OpenAI; khóa lấy theo thứ tự `COMPASS_LLM_API_KEY` → `DEEPSEEK_API_KEY` → biến `DEEPSEEK_API_KEY` trong file chỉ định bởi `COMPASS_ENV_FILE` (chỉ đọc đúng biến đó, ví dụ `export COMPASS_ENV_FILE=~/du-an-khac/.env`). Đổi sang Gemini bằng `COMPASS_LLM_PROVIDER=gemini` (khóa `GOOGLE_API_KEY`; khóa hiện có đã hết tiền trả trước ngày 2026-10-03), hay model on-prem bằng `COMPASS_LLM_BASE_URL` + `COMPASS_LLM_MODEL` + `COMPASS_LLM_API_KEY`.
 
 **Chế độ dự phòng:** khi LLM lỗi (hết hạn mức, mất mạng), agent vẫn trả lời từ bản đồ tính năng (đường đi, các bước, nút tour) và ghi chú rõ "chế độ dự phòng". `GET /v1/health` cho biết cấu hình LLM; log server ghi `chat_error` khi gọi LLM thất bại.
 

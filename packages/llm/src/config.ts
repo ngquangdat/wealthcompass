@@ -16,8 +16,8 @@ export interface LlmConfig {
   reasoningEffort?: string;
 }
 
-// Chỉ lấy ĐÚNG một biến từ file .env, không nạp cả file vào process.env.
-// File của tcbs-agent còn chứa mật khẩu và token khác không liên quan tới công cụ này.
+// Chỉ lấy ĐÚNG một biến từ file .env, không nạp cả file vào process.env:
+// file .env của dự án khác thường còn chứa mật khẩu và token không liên quan tới công cụ này.
 export function readSingleEnv(file: string, key: string): string | null {
   if (!existsSync(file)) return null;
   for (const line of readFileSync(file, 'utf8').split('\n')) {
@@ -30,10 +30,12 @@ export function readSingleEnv(file: string, key: string): string | null {
 export function resolveLlmConfig(env: NodeJS.ProcessEnv = process.env): LlmConfig {
   const provider = (env['COMPASS_LLM_PROVIDER'] ?? 'deepseek') as keyof typeof LLM_PRESETS;
   const preset = LLM_PRESETS[provider] ?? LLM_PRESETS.deepseek;
+  // Không tự mò vào file của dự án khác: chỉ đọc file .env khi người dùng chỉ rõ bằng COMPASS_ENV_FILE
+  const envFile = env['COMPASS_ENV_FILE'];
   const apiKey =
     env['COMPASS_LLM_API_KEY'] ??
     env[preset.keyVar] ??
-    readSingleEnv(env['COMPASS_ENV_FILE'] ?? resolve(homedir(), 'tcbs-agent', '.env'), preset.keyVar);
+    (envFile ? readSingleEnv(resolve(envFile.replace(/^~(?=$|\/)/, homedir())), preset.keyVar) : null);
   return {
     provider,
     baseUrl: env['COMPASS_LLM_BASE_URL'] ?? preset.baseUrl,

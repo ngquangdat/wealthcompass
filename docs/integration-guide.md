@@ -55,7 +55,7 @@ npm run server
 | `COMPASS_LLM_REASONING_EFFORT` | `low`/`high`/`max` cho mô hình suy luận, `low` nhanh hơn | không đặt |
 | `COMPASS_RATE_MAX` | Số câu hỏi tối đa mỗi người trong 10 phút | `30` |
 
-Khóa LLM tìm theo thứ tự: `COMPASS_LLM_API_KEY` → biến môi trường của preset (`DEEPSEEK_API_KEY`/`GOOGLE_API_KEY`) → đúng biến đó trong `COMPASS_ENV_FILE` (mặc định `~/tcbs-agent/.env`, chỉ đọc một biến, không nạp cả file). **Môi trường thật nên đặt `COMPASS_LLM_API_KEY` bằng secret của hệ thống, không dựa vào file `.env` của dự án khác.**
+Khóa LLM tìm theo thứ tự: `COMPASS_LLM_API_KEY` → biến môi trường của preset (`DEEPSEEK_API_KEY`/`GOOGLE_API_KEY`) → đúng biến đó trong file chỉ định bởi `COMPASS_ENV_FILE` nếu bạn đặt (chỉ đọc một biến, không nạp cả file; không có mặc định). **Môi trường thật nên đặt `COMPASS_LLM_API_KEY` bằng secret của hệ thống, không dựa vào file `.env` của dự án khác.**
 
 Kiểm tra: `GET /v1/health` trả `llmConfigured: true`, số `features` và `tours` đúng kỳ vọng.
 

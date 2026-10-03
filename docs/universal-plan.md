@@ -11,6 +11,8 @@ Tài liệu này mở rộng [plan v1](technical-plan.md). Plan v1 đúng cho m�
 | Mô hình triển khai | **Tự host**: mỗi khách chạy một bản riêng trong hạ tầng của họ | Không đa tenant, không RLS, không tính phí/hạn mức theo tenant; dữ liệu và LLM key nằm trong tay khách |
 | Mức tích hợp | **Chỉ mức A**: có source và sửa được | Phân tích tĩnh là nguồn chính, được gắn `tourId`/`route.data`; không làm crawl hộp đen, không làm embed script |
 | Angular tối thiểu | **v20** | Standalone là mặc định, control flow `@if/@for` và signals ổn định; không phải lo Angular cũ. Dải hỗ trợ `>=20 <24` |
+| Xác thực | **Khách đăng nhập bằng JWT** | Backend xác minh JWT bằng JWKS của hệ thống đăng nhập (mục 6.2, cách 1); quyền lấy từ claim `roles` đã xác minh |
+| Giai đoạn đầu | **Demo local trước, không Helm** | `docker compose`/Helm lùi sang sau; demo chạy bằng `npm run server` + `npm run demo` (xem [demo.md](demo.md)). Web đầu tiên là web tài chính |
 
 **Lưu ý vòng đời phiên bản** (theo lịch phát hành công bố): Angular 20 hết LTS ngày 2026-11-28, Angular 21 hết LTS 2027-05-19, Angular 22 (7/2026) hỗ trợ đến 2028-06-30. Hỗ trợ "tối thiểu v20" vì thế chủ yếu để không loại khách chưa kịp nâng cấp; fixture CI ưu tiên 21 và 22.
 
@@ -205,7 +207,7 @@ Quy tắc:
 
 ### 5.4 Tour engine
 
-- `TourRenderer` là interface; mặc định cài bằng **Driver.js** (MIT, bản 1.3.x). Chưa xác minh được Driver.js xử lý shadow DOM/iframe, nên có thể thay renderer nếu gặp giới hạn. CSS của tour được cô lập bằng tiền tố hoặc Shadow DOM để không đụng CSS của web.
+- `TourRenderer` là interface; mặc định cài bằng **Driver.js** (MIT, bản 1.8.x). Chưa xác minh được Driver.js xử lý shadow DOM/iframe, nên có thể thay renderer nếu gặp giới hạn. CSS của tour được cô lập bằng tiền tố hoặc Shadow DOM để không đụng CSS của web.
 - Loại bước: `navigate`, `highlight`, `wait_for`, `ask_user_to_act`, `explain`. Mỗi bước có `onMissing: skip | stop | ask_agent`.
 - Phần tử cần tương tác trước khi hiện (dropdown, tab, dialog): dùng `ask_user_to_act`, engine không tự click.
 - Điều hướng qua `RouterAdapter`; guard chặn thì báo `route_denied`, agent giải thích cần quyền gì; xử lý redirect đăng nhập.
@@ -405,13 +407,40 @@ G2 và G3 có thể chồng một phần nếu thêm người. Không nên rút 
 | Phiên bản Angular mới đổi cách khai báo route/template | Analyzer và adapter hỏng | CI chạy fixture trên bản `next`; chỉ dùng API công khai |
 | Khách đòi tùy biến riêng | Thành dịch vụ gia công | Mọi tùy biến đi qua config/pack; không nhánh code theo khách |
 
+## 13b. Trạng thái hiện thực (2026-10-03)
+
+Bản demo local đã hiện thực lát cắt dọc đầu tiên của kiến trúc ở trên, chạy được từ đầu đến cuối. Chi tiết chạy và giới hạn: [demo.md](demo.md).
+
+| Hạng mục trong plan | Trạng thái | Ghi chú |
+| --- | --- | --- |
+| 3. Hợp đồng (`@wealthcompass/contracts`) | Có | Schema zod: Feature Map v2, ngữ cảnh, sự kiện SSE, cấu hình. Chưa sinh JSON Schema ra file |
+| 4.1 Phân tích tĩnh, 4.2 overrides, 4.5 khóa ổn định, 4.6 báo cáo | Có | `ts-morph` + `angular-html-parser`; hiểu `loadComponent`/`loadChildren`, route con, guard kế thừa, `templateUrl`, component con qua `imports`, `@if/@for`. `compass.lock.json` giữ id khi đổi tên route |
+| 4.3 LLM làm giàu, 4.4 `annotate`, 4.6 đối chiếu runtime | Chưa | Mô tả/từ khóa hiện lấy từ `route.data` và overrides |
+| 5.1 `core`, `angular`, 5.3 `ng add` | Một phần | `core` + `angular` có; `provideCompass()`, widget, `[tourId]`, `TourService`. Chưa có schematic `ng add` và build ng-packagr (demo nạp thẳng source qua tsconfig paths) |
+| 5.3 `TargetResolver`, 5.4 tour engine, 5.5 an toàn client | Một phần | Có `data-tour-id`/testid/id/aria-label, chờ bằng MutationObserver, bước `advanceOn: click`, tour qua nhiều route, `user-only`. Chưa có `tour:record`, lưu trạng thái tour khi reload |
+| 6.1 Triển khai tự host | Một phần | Chạy bằng npm; chưa có `docker compose`/Helm (đã hoãn) |
+| 6.2 Xác thực JWT/JWKS | Có | Xác minh RS256 qua JWKS, kiểm issuer/audience; IdP giả lập chỉ để demo. Đã thử token `alg:none` giả mạo (bị từ chối) |
+| 6.3 Dữ liệu, index theo phiên bản | Chưa | Feature Map nạp từ file và tự nạp lại khi đổi; chưa có Postgres/pgvector, version `active` |
+| 6.4 LLM | Một phần | Client tương thích OpenAI, stream, tool-calling; chế độ dự phòng khi LLM lỗi. Chưa có hai bậc mô hình, cache ngữ nghĩa, hạn mức token |
+| 6.6 Tìm kiếm | Một phần | BM25 + từ điển đồng nghĩa + thưởng cụm từ + lọc quyền + ngưỡng điểm; chưa có embedding/rerank |
+| 7. Domain Pack | Một phần | `packs/finance-vn` (glossary, topics chặn, mẫu từ chối, system prompt); chưa có `pack-generic`, chưa có seed eval |
+| 9. Kiểm thử | Một phần | 16 test (scanner 7, agent 9 với LLM giả). Chưa có ma trận fixture nhiều phiên bản Angular, hit@3, Playwright |
+
+**Phát hiện khi hiện thực**
+
+- Xác thực quyền ở **backend**: server dùng `roles` từ JWT đã xác minh, không tin danh sách quyền client gửi trong ngữ cảnh. Đúng với ADR 7 (quyền chỉ để lọc) và chặn được việc client tự khai quyền để lấy tour của tính năng bị khóa (`/v1/tours/:id` trả 403).
+- Câu hỏi "ở đâu/cách làm" chứa động từ như "đặt lệnh bán ở đâu" suýt bị chặn nhầm là "nhờ đặt hộ"; mẫu chặn phải yêu cầu từ "giúp/hộ" đi kèm. Đã có test.
+- Route cha chỉ làm khung (có `children`) không phải là màn hình; target của khung (thanh tab dưới) được gán cho mọi route con, và route của bước tour lấy route đầu tiên chứa target đó. Engine chỉ điều hướng khi phần tử chưa hiện.
+- Hạn mức LLM là rủi ro vận hành thật (khóa Gemini dùng thử đã hết tiền trả trước khi demo): chế độ dự phòng không chỉ là tính năng phụ mà cần có từ MVP.
+- Model mặc định đã phải đổi: `gemini-2.5-flash` không còn cho tài khoản mới (404), dùng `gemini-3.5-flash`. Tên model nên luôn nằm trong cấu hình, không nằm trong code.
+
 ## 14. Câu hỏi mở
 
 Các câu hỏi v1 về pháp chế, LLM cloud/on-prem, dữ liệu ticket CSKH, nhóm pilot vẫn còn hiệu lực. Bổ sung:
 
 - [ ] Web thứ nhất (tài chính) và web thứ hai (ngoài ngành) dùng để chứng minh tính tổng quát là web nào? Hai web đang ở Angular bao nhiêu và NgModule hay standalone?
-- [ ] Hệ thống đăng nhập của khách cấp JWT có JWKS không, hay token opaque/gateway (mục 6.2)?
-- [ ] Môi trường tự host của khách: Kubernetes hay VM thuần? (quyết định Helm hay chỉ docker compose ở G2)
+- [x] Hệ thống đăng nhập của khách cấp JWT (đã chốt 2026-10-03); còn cần xác nhận có JWKS URL công khai không
+- [x] Demo local trước, không Helm (đã chốt 2026-10-03); Kubernetes hay VM thuần sẽ hỏi lại khi có khách thật
 - [ ] Khách có buộc LLM on-prem không, và mô hình on-prem nào hỗ trợ tool-use đủ tốt?
 - [ ] Có cần ngôn ngữ ngoài tiếng Việt và tiếng Anh ở giai đoạn đầu không?
 - [ ] Đổi tên sản phẩm cho nền tảng (WealthCompass mang nghĩa tài chính) và giữ tên cho pack `finance-vn`?

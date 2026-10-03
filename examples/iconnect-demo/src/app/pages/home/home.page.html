@@ -1,0 +1,102 @@
+<div class="home">
+  <header class="top">
+    <button class="avatar" type="button" aria-label="Tài khoản" (click)="auth.logout()" title="Đăng xuất (demo)">
+      <span class="material-icons">person</span>
+      <i class="badge"><span class="material-icons">menu</span></i>
+    </button>
+    <div class="search"><span class="material-icons">search</span><span>Tìm kiếm</span></div>
+    <span class="material-icons ic">calendar_month</span>
+    <span class="material-icons ic">smart_toy</span>
+    <span class="material-icons ic">notifications</span>
+  </header>
+
+  <div class="scroll">
+    <div class="banner">
+      <div class="banner-copy">
+        <small>Tháng 10 gieo yêu thương</small>
+        <strong>Đầu tư đều tay</strong>
+        <span class="cta">Tìm hiểu ngay »</span>
+      </div>
+      <div class="dots"><i class="on"></i><i></i><i></i><i></i></div>
+    </div>
+
+    <section class="card money">
+      <div class="total">
+        <span class="label">Tổng tiền <span class="material-icons tiny">swap_horiz</span></span>
+        <div class="amount">
+          <b class="green">{{ hideMoney() ? '0' : '2,450,000' }}</b>
+          <button type="button" class="eye" (click)="hideMoney.set(!hideMoney())" aria-label="Ẩn hiện số dư">
+            <span class="material-icons">{{ hideMoney() ? 'visibility' : 'visibility_off' }}</span>
+          </button>
+        </div>
+      </div>
+      <div class="money-actions">
+        <a routerLink="/money/deposit" tourId="home-deposit" tourLabel="Nộp tiền" tourHint="Nộp tiền vào tài khoản giao dịch">
+          <span class="material-icons">account_balance_wallet</span><span>Nộp tiền</span>
+        </a>
+        <a routerLink="/money/transfer">
+          <span class="material-icons">currency_exchange</span><span>Chuyển tiền</span>
+        </a>
+      </div>
+    </section>
+
+    <section class="favorites">
+      <div class="section-head">
+        <h4>Tính năng ưa thích</h4>
+        <span class="link">Tuỳ chỉnh</span>
+      </div>
+      <div class="shortcuts">
+        <a routerLink="/market/price-board"><span class="material-icons">leaderboard</span><span>Thị trường</span></a>
+        <a routerLink="/ipower"><span class="material-icons">trending_up</span><span>iPower - TK Nhàn lãi</span></a>
+        <a routerLink="/iconnect/price-board" tourId="home-shortcut-iconnect" tourLabel="Giao dịch iConnect" tourHint="Lối vào bảng giá và giao dịch trái phiếu iConnect"><span class="material-icons">handshake</span><span>Giao dịch iConnect</span></a>
+        <a routerLink="/analysis"><span class="material-icons">query_stats</span><span>Phân tích đầu tư</span></a>
+      </div>
+      <div class="pager"><i class="on"></i><i></i></div>
+    </section>
+
+    <section class="card assets">
+      <div class="section-head">
+        <h4>Tài sản <span class="material-icons eye-inline">visibility</span></h4>
+        <span class="material-icons dim">more_vert</span>
+      </div>
+      <div class="assets-body">
+        <svg viewBox="0 0 180 180" class="donut" role="img" aria-label="Cơ cấu tài sản">
+          @for (arc of donut(); track arc.color) {
+            <circle cx="90" cy="90" [attr.r]="arc.radius" fill="none" [attr.stroke]="arc.color" stroke-width="30"
+                    [attr.stroke-dasharray]="arc.dash" [attr.stroke-dashoffset]="arc.offset" transform="rotate(-90 90 90)" />
+          }
+          <text x="90" y="82" text-anchor="middle" class="d-label">Tổng tài sản</text>
+          <text x="90" y="104" text-anchor="middle" class="d-value">1.8 tr</text>
+        </svg>
+        <ul class="legend">
+          @for (s of slices; track s.label) {
+            <li [style.border-color]="s.color">
+              <span class="l">{{ s.label }}</span>
+              <span class="v">{{ s.value }}</span>
+            </li>
+          }
+        </ul>
+      </div>
+      <p class="updated">Cập nhật lúc 07:38 03/10</p>
+    </section>
+
+    <section class="discover">
+      <h4>Khám phá sản phẩm</h4>
+      <div class="cards-row">
+        <article><b>iPower</b><span>Nhận lãi trên tiền chờ</span></article>
+        <article><b>Cổ phiếu</b><span>Miễn phí giao dịch và margin</span></article>
+        <article><b>Trái phiếu</b><span>Đầu tư an toàn, cuộc sống an nhàn</span></article>
+      </div>
+    </section>
+
+    <div class="scroll-pad"></div>
+  </div>
+
+  <nav class="bb">
+    <a class="bb-item" routerLink="/home" routerLinkActive="active"><span class="material-icons">home</span>Trang chủ</a>
+    <a class="bb-item" routerLink="/market/price-board" routerLinkActive="active"><span class="material-icons">bar_chart</span>Bảng giá</a>
+    <a class="bb-item invest" routerLink="/invest" routerLinkActive="active"><span class="orb material-icons">paid</span>Đầu tư</a>
+    <a class="bb-item" routerLink="/assets" routerLinkActive="active"><span class="material-icons">pie_chart</span>Tài sản</a>
+    <a class="bb-item" routerLink="/menu" routerLinkActive="active"><span class="material-icons">menu</span>Menu</a>
+  </nav>
+</div>

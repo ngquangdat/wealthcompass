@@ -1,0 +1,101 @@
+/* Design token đo từ giao diện mobile của TCInvest (nền tối, Roboto) */
+:root {
+  --bg: #121212;
+  --card: #202020;
+  --header: #2e2e2e;
+  --elev: #3d3d3d;
+  --elev-2: #434343;
+  --text: #f5f5f5;
+  --text-2: #bebebe;
+  --link: #64baff;
+  --red: #ff3747;
+  --mint: #00f4b0;
+  --yellow: #fbac20;
+  --note: #31312d;
+  --phone-width: 430px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Roboto, 'Helvetica Neue', sans-serif;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font-family: inherit; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+
+.material-icons { font-size: 24px; line-height: 1; vertical-align: middle; user-select: none; }
+
+/* Khung điện thoại căn giữa: web thật chạy bố cục mobile ở màn hình hẹp */
+.phone {
+  position: relative;
+  width: 100%;
+  max-width: var(--phone-width);
+  height: 100vh;
+  height: 100dvh;
+  margin: 0 auto;
+  overflow: clip;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 0 1px #1e1e1e;
+}
+
+/* Popover tour: tối, khớp giao diện */
+.driver-popover.compass-popover {
+  background: #2e2e2e;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 14px 16px;
+  max-width: 300px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
+  font-family: Roboto, sans-serif;
+
+  .driver-popover-title { font-size: 15px; font-weight: 500; color: var(--text); }
+  .driver-popover-description { font-size: 13.5px; line-height: 1.5; color: var(--text-2); margin-top: 6px; }
+  .driver-popover-progress-text { color: var(--text-2); font-size: 12px; }
+  .driver-popover-footer button {
+    background: var(--red);
+    color: #fff;
+    border: 0;
+    text-shadow: none;
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .driver-popover-footer button.driver-popover-prev-btn { background: var(--elev-2); }
+  .driver-popover-close-btn { color: var(--text-2); }
+  .driver-popover-arrow-side-top.driver-popover-arrow { border-bottom-color: #2e2e2e; }
+  .driver-popover-arrow-side-bottom.driver-popover-arrow { border-top-color: #2e2e2e; }
+  .driver-popover-arrow-side-left.driver-popover-arrow { border-right-color: #2e2e2e; }
+  .driver-popover-arrow-side-right.driver-popover-arrow { border-left-color: #2e2e2e; }
+}
+
+/* Thanh điều hướng dưới (mobile) dùng chung cho các màn hình */
+.bb {
+  flex: none; height: 55px; background: var(--header); display: flex; position: relative; z-index: 10;
+  .bb-item {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    color: var(--text-2); font-size: 12px; background: transparent; border: 0; padding: 0;
+    .material-icons { font-size: 22px; }
+    &.active { color: var(--red); }
+  }
+}
+
+/* Thanh tiêu đề trang con */
+.page-header {
+  flex: none; height: 44px; background: var(--header); display: flex; align-items: center; padding: 0 16px; gap: 10px;
+  .title { font-size: 16px; font-weight: 500; flex: 1; white-space: nowrap; }
+}
+.pill {
+  display: flex; align-items: center; height: 32px; border-radius: 16px; border: 1px solid var(--elev-2); overflow: hidden;
+  button { background: transparent; border: 0; color: var(--text); height: 100%; width: 36px; display: grid; place-items: center; }
+  .sep { width: 1px; height: 18px; background: var(--elev-2); }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "wealthcompass",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "packages/*",
+    "server",
+    "examples/*"
+  ],
+  "scripts": {
+    "scan": "tsx packages/cli/src/main.ts scan --config examples/iconnect-demo/compass.config.yaml",
+    "server": "npm run start -w server",
+    "demo": "npm run start -w iconnect-demo -- --port 4200 --host 127.0.0.1",
+    "test": "tsx --test server/src/agent.test.ts packages/cli/src/scan.test.ts",
+    "check": "tsc --noEmit -p server && tsc --noEmit -p packages/core && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.20.0",
+    "typescript": "~6.0.2"
+  }
+}

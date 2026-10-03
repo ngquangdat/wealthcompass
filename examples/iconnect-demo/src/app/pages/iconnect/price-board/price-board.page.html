@@ -1,0 +1,64 @@
+<header class="page-header">
+  <span class="title">Trái phiếu iConnect</span>
+  <button class="select" type="button">Tổng hợp <span class="material-icons">arrow_drop_down</span></button>
+  <span class="grow"></span>
+  <div class="pill">
+    <button type="button" aria-label="Thêm"><span class="material-icons">more_vert</span></button>
+    <i class="sep"></i>
+    <button type="button" aria-label="Đóng" (click)="close()"><span class="material-icons">close</span></button>
+  </div>
+</header>
+
+<div class="scroller">
+  <div class="tools">
+    <button type="button" class="tool"><i class="new">New</i><span class="material-icons">emoji_events</span>TOP TP</button>
+    <button type="button" class="tool"><i class="new">New</i><span class="material-icons">balance</span>So sánh</button>
+    <button type="button" class="tool"><span class="material-icons">add_comment</span>Tín hiệu</button>
+    <button type="button" class="tool"><span class="material-icons">bolt</span>Lệnh nhanh</button>
+  </div>
+
+  <div class="filters">
+    <button type="button" class="f-select market"><span class="material-icons">public</span><b>Toàn thị trường</b><span class="material-icons">arrow_drop_down</span></button>
+    <button type="button" class="f-btn" aria-label="Bộ lọc"><span class="material-icons">filter_alt</span></button>
+    <button type="button" class="f-select ls">LS: <b>Đã tái</b><span class="material-icons">arrow_drop_down</span></button>
+  </div>
+
+  <div class="thead">
+    <div class="c-code">Mã trái phiếu <span class="count">30</span><span class="material-icons sort">arrow_upward</span></div>
+    <div class="c-buy">Bên mua</div>
+    <div class="c-sell">Bên bán</div>
+  </div>
+
+  @for (q of quotes; track q.code) {
+    <div class="row">
+      <div class="c-code">
+        <div class="code-line"><span class="material-icons caret">arrow_right</span><b>{{ q.code }}</b><span class="material-icons kebab">more_vert</span></div>
+        <div class="meta">{{ q.issuer }} - {{ q.tenor }} - {{ q.size }}</div>
+      </div>
+      <div class="c-buy">
+        <b>{{ q.buyYield ?? '---' }}</b>
+        <span class="v">{{ q.buyValue ?? '---' }}</span>
+        @if (q.buyAction === 'sell') {
+          <button type="button" class="btn sell">BÁN</button>
+        } @else {
+          <button type="button" class="btn view">XEM</button>
+        }
+      </div>
+      <div class="c-sell">
+        <b>{{ q.sellYield ?? '---' }}</b>
+        <span class="v">{{ q.sellValue ?? '---' }}</span>
+        <button type="button" class="btn buy" [class.all]="q.sellAction === 'buy-all'">MUA</button>
+      </div>
+    </div>
+  }
+</div>
+
+@if (showLegend()) {
+  <div class="legend">
+    <span class="tag all">MUA</span><span>Tất cả NĐT</span>
+    <span class="tag pro">BÁN</span><span>NĐT chuyên nghiệp</span>
+    <button type="button" class="more">+5 <span class="material-icons">arrow_drop_down</span></button>
+    <i class="vsep"></i>
+    <button type="button" class="x" (click)="showLegend.set(false)" aria-label="Đóng chú thích"><span class="material-icons">close</span></button>
+  </div>
+}

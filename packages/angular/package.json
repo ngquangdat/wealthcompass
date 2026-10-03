@@ -1,0 +1,11 @@
+{
+  "name": "@wealthcompass/angular",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@wealthcompass/contracts": "*", "@wealthcompass/core": "*", "driver.js": "^1.8.0" },
+  "peerDependencies": { "@angular/core": ">=20 <24", "@angular/common": ">=20 <24", "@angular/router": ">=20 <24" }
+}

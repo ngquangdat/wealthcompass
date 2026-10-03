@@ -1,0 +1,19 @@
+{
+  "name": "server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@wealthcompass/contracts": "*",
+    "@wealthcompass/core": "*",
+    "fastify": "^5.0.0",
+    "@fastify/cors": "^11.0.0",
+    "jose": "^6.0.0",
+    "yaml": "^2.8.0"
+  }
+}

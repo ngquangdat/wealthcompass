@@ -1,0 +1,56 @@
+{
+  "features": {
+    "home": {
+      "route": "/home",
+      "component": "HomePage"
+    },
+    "iconnect.price-board": {
+      "route": "/iconnect/price-board",
+      "component": "PriceBoardPage"
+    },
+    "iconnect.assets": {
+      "route": "/iconnect/assets",
+      "component": "AssetsPage"
+    },
+    "iconnect.orders": {
+      "route": "/iconnect/orders",
+      "component": "PlaceholderPage"
+    },
+    "iconnect.cashflow": {
+      "route": "/iconnect/cashflow",
+      "component": "PlaceholderPage"
+    },
+    "iconnect.pnl": {
+      "route": "/iconnect/pnl",
+      "component": "PlaceholderPage"
+    },
+    "money.deposit": {
+      "route": "/money/deposit",
+      "component": "PlaceholderPage"
+    },
+    "money.transfer": {
+      "route": "/money/transfer",
+      "component": "PlaceholderPage"
+    },
+    "market.price-board": {
+      "route": "/market/price-board",
+      "component": "PlaceholderPage"
+    },
+    "analysis": {
+      "route": "/analysis",
+      "component": "PlaceholderPage"
+    },
+    "ipower": {
+      "route": "/ipower",
+      "component": "PlaceholderPage"
+    },
+    "invest": {
+      "route": "/invest",
+      "component": "PlaceholderPage"
+    },
+    "assets": {
+      "route": "/assets",
+      "component": "PlaceholderPage"
+    }
+  }
+}

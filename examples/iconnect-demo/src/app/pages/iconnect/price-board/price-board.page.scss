@@ -1,0 +1,49 @@
+:host { display: flex; flex-direction: column; background: var(--card); }
+.page-header { gap: 8px; }
+.grow { flex: 1; }
+.select { background: var(--elev-2); color: var(--text); border: 0; border-radius: 4px; height: 28px; padding: 0 2px 0 8px; font-size: 14px; font-weight: 500; display: flex; align-items: center; }
+
+.scroller { flex: 1; overflow-y: auto; min-height: 0; background: var(--bg); }
+.tools { display: flex; gap: 8px; padding: 8px 16px; background: var(--bg); }
+.tool {
+  position: relative; flex: 1; height: 58px; border-radius: 4px; border: 0; background: var(--header); color: var(--text);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px;
+  .material-icons { font-size: 22px; color: var(--text-2); }
+  .new { position: absolute; top: 0; right: 0; width: 34px; height: 34px; overflow: hidden; font-style: normal; font-size: 8px; font-weight: 700; color: #262626;
+    background: linear-gradient(225deg, var(--yellow) 50%, transparent 50%); text-align: right; padding: 6px 4px 0 0; transform-origin: top right; border-top-right-radius: 4px; }
+}
+.filters { display: flex; gap: 8px; align-items: center; padding: 8px 16px; background: var(--card); }
+.f-select { height: 32px; border-radius: 4px; border: 0; background: var(--elev); color: var(--text); display: flex; align-items: center; padding: 0 4px 0 8px; font-size: 14px; gap: 8px; b { font-weight: 500; } }
+.f-select.market { flex: 1; .material-icons:first-child { color: var(--text-2); } b { flex: 1; text-align: left; } }
+.f-select.ls { color: var(--text-2); b { color: var(--text); } }
+.f-btn { width: 32px; height: 32px; border: 0; border-radius: 4px; background: var(--elev-2); color: var(--text); display: grid; place-items: center; }
+
+.thead, .row { display: flex; }
+.thead { background: var(--header); height: 33px; align-items: center; font-size: 12px; font-weight: 500; color: var(--text-2); }
+.c-code { flex: 0 0 56%; padding: 0 16px; min-width: 0; }
+.c-buy, .c-sell { flex: 1; padding: 0 16px 0 8px; display: flex; flex-direction: column; align-items: flex-end; }
+.thead .c-buy, .thead .c-sell { display: block; text-align: right; padding: 0 16px 0 0; }
+.thead .c-code { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.count { border: 1px solid var(--elev-2); border-radius: 4px; padding: 1px 8px; font-size: 12px; font-weight: 400; }
+.sort { font-size: 14px; margin-left: auto; color: var(--text-2); }
+
+.row { background: var(--card); border-bottom: 1px solid #1c1c1c; min-height: 80px; padding: 10px 0; }
+.row .c-code { border-right: 1px solid #1c1c1c; padding-right: 8px; }
+.code-line { display: flex; align-items: center; b { font-size: 14px; font-weight: 500; } .caret { color: var(--text-2); margin-left: -8px; } .kebab { margin-left: auto; color: var(--text-2); font-size: 20px; } }
+.meta { margin: 6px 0 0 8px; color: var(--text-2); font-size: 14px; line-height: 1.3; }
+.c-buy b, .c-sell b { font-size: 14px; font-weight: 500; }
+.v { color: var(--text-2); font-size: 14px; margin: 3px 0 7px; }
+
+.btn { height: 24px; padding: 0 9px; border-radius: 2px; font-size: 12px; font-weight: 500; border: 1px solid transparent; }
+.btn.sell { background: var(--red); color: #fff; }
+.btn.view { background: transparent; border-color: var(--red); color: var(--red); }
+.btn.buy { background: var(--yellow); color: #262626; }
+.btn.buy.all { background: var(--mint); }
+
+.legend {
+  flex: none; display: flex; align-items: center; gap: 6px; height: 43px; padding: 0 16px; background: var(--note); font-size: 12px;
+  .tag { font-size: 8px; font-weight: 500; color: #262626; padding: 0 4px; line-height: 12px; border-radius: 2px; &.all { background: var(--mint); } &.pro { background: var(--yellow); } }
+  .more { margin-left: auto; height: 28px; border-radius: 14px; border: 1px solid var(--elev-2); background: transparent; color: var(--text); display: flex; align-items: center; padding: 0 4px 0 12px; }
+  .vsep { width: 1px; height: 20px; background: var(--elev-2); margin: 0 4px; }
+  .x { background: transparent; border: 0; color: var(--text-2); display: grid; }
+}

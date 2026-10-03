@@ -1,0 +1,50 @@
+<div class="login">
+  <header class="hero">
+    <span class="logo">TCINVEST</span>
+    <div class="hero-actions">
+      <span class="flag" aria-label="Tiếng Việt">★</span>
+      <span class="material-icons">headset_mic</span>
+    </div>
+  </header>
+
+  <form class="form" (ngSubmit)="submit()">
+    <label class="field">
+      <span class="material-icons">person</span>
+      <input name="username" [(ngModel)]="username" placeholder="Email / Số tài khoản / Điện thoại" autocomplete="username" />
+    </label>
+    <label class="field">
+      <span class="material-icons">vpn_key</span>
+      <input name="password" [(ngModel)]="password" [type]="showPassword() ? 'text' : 'password'" placeholder="Mật khẩu" autocomplete="current-password" />
+      <button type="button" class="eye" (click)="showPassword.set(!showPassword())" aria-label="Hiện mật khẩu">
+        <span class="material-icons">{{ showPassword() ? 'visibility_off' : 'visibility' }}</span>
+      </button>
+    </label>
+
+    <div class="row">
+      <button class="submit" type="submit" [disabled]="busy()">ĐĂNG NHẬP</button>
+      <p class="hint">Thiết lập mật khẩu mới hoặc Mở khoá tài khoản <a>tại đây!</a></p>
+    </div>
+    @if (error()) {
+      <p class="error">{{ error() }}</p>
+    }
+    <p class="demo-note">Tài khoản demo đã điền sẵn. Đăng nhập qua IdP giả lập, nhận JWT để gọi trợ lý.</p>
+  </form>
+
+  <nav class="quick">
+    <div><span class="circle yellow material-icons">person_add</span><small>Mở tài khoản</small></div>
+    <div><span class="circle teal material-icons">shield</span><small>Tạm khoá tài khoản</small></div>
+    <div><span class="circle purple material-icons">settings</span><small>Tối ưu bộ nhớ</small></div>
+  </nav>
+
+  <section class="cards">
+    @for (card of cards; track card.title) {
+      <article class="card">
+        <span class="material-icons">{{ card.icon }}</span>
+        <h3>{{ card.title }}</h3>
+        <p>{{ card.text }}</p>
+      </article>
+    }
+  </section>
+
+  <footer>© Demo WealthCompass — giao diện mô phỏng</footer>
+</div>

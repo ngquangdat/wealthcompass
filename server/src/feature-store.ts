@@ -1,0 +1,166 @@
+import { readFileSync, statSync } from 'node:fs';
+import { featureMapSchema, type Feature, type FeatureMap, type Tour } from '@wealthcompass/contracts';
+import { normalizeVi, tokenize } from '@wealthcompass/core';
+import type { DomainPack } from './pack.js';
+
+interface IndexedFeature {
+  feature: Feature;
+  tokens: Map<string, number>; // token -> trọng số tf đã nhân hệ số trường
+  phrase: string; // văn bản chuẩn hóa để thưởng khi khớp cụm
+  length: number;
+}
+
+export interface SearchHit {
+  id: string;
+  title: string;
+  route: string;
+  description: string;
+  menuPath: string[];
+  score: number;
+  tours: Array<{ id: string; title: string; steps: string[] }>;
+}
+
+export interface SearchResult {
+  results: SearchHit[];
+  // Tính năng khớp nhất nhưng người dùng không đủ quyền (để agent giải thích thay vì im lặng)
+  restricted?: { id: string; title: string; requires: string[] };
+}
+
+// Từ hỏi chung không mang nghĩa tìm kiếm
+const STOPWORDS = new Set(
+  'o dau la nhu the nao cach lam sao de toi muon co the xem khong cho minh ban oi voi va cua tai trong tren di den thi hay gi nay kia can biet tim giup duoc'.split(' '),
+);
+
+// Không dùng STOPWORDS cho "ban" vì "ban trai phieu" là cụm quan trọng; xử lý bằng cụm từ ở dưới.
+STOPWORDS.delete('ban');
+
+export class FeatureStore {
+  private map!: FeatureMap;
+  private docs: IndexedFeature[] = [];
+  private idf = new Map<string, number>();
+  private avgLength = 1;
+  private mtime = 0;
+
+  constructor(
+    private readonly file: string,
+    private readonly pack: DomainPack,
+  ) {
+    this.load();
+  }
+
+  // Tự nạp lại khi scanner ghi file mới, để demo không cần restart server
+  private refresh(): void {
+    const mtime = statSync(this.file).mtimeMs;
+    if (mtime !== this.mtime) this.load();
+  }
+
+  private load(): void {
+    this.mtime = statSync(this.file).mtimeMs;
+    this.map = featureMapSchema.parse(JSON.parse(readFileSync(this.file, 'utf8')));
+    this.docs = this.map.features.map((feature) => this.index(feature));
+    const df = new Map<string, number>();
+    for (const d of this.docs) for (const t of d.tokens.keys()) df.set(t, (df.get(t) ?? 0) + 1);
+    this.idf = new Map([...df].map(([t, n]) => [t, Math.log(1 + (this.docs.length - n + 0.5) / (n + 0.5))]));
+    this.avgLength = this.docs.reduce((s, d) => s + d.length, 0) / Math.max(1, this.docs.length);
+  }
+
+  private index(feature: Feature): IndexedFeature {
+    const tokens = new Map<string, number>();
+    const add = (text: string, weight: number) => {
+      for (const t of tokenize(text)) if (!STOPWORDS.has(t)) tokens.set(t, (tokens.get(t) ?? 0) + weight);
+    };
+    add(feature.title, 4);
+    feature.keywords.forEach((k) => add(k, 3));
+    feature.sampleQuestions.forEach((q) => add(q, 3));
+    feature.menuPath.forEach((m) => add(m, 2));
+    Object.values(feature.facets).forEach((v) => add(v, 1));
+    add(feature.description, 1);
+    const phrase = normalizeVi(
+      [feature.title, ...feature.keywords, ...feature.sampleQuestions, ...feature.menuPath, feature.description].join(' | '),
+    );
+    return { feature, tokens, phrase, length: [...tokens.values()].reduce((a, b) => a + b, 0) };
+  }
+
+  get featureMap(): FeatureMap {
+    this.refresh();
+    return this.map;
+  }
+
+  getTour(id: string): Tour | undefined {
+    return this.featureMap.tours.find((t) => t.id === id);
+  }
+
+  getFeature(id: string): Feature | undefined {
+    return this.featureMap.features.find((f) => f.id === id);
+  }
+
+  // Mở rộng câu hỏi bằng từ điển đồng nghĩa của Domain Pack
+  private expand(query: string): string[] {
+    const normalized = normalizeVi(query);
+    const terms = new Set(tokenize(query).filter((t) => !STOPWORDS.has(t)));
+    for (const group of this.pack.glossary) {
+      if (group.some((phrase) => ` ${normalized} `.includes(` ${phrase} `))) {
+        for (const phrase of group) tokenize(phrase).forEach((t) => !STOPWORDS.has(t) && terms.add(t));
+      }
+    }
+    return [...terms];
+  }
+
+  search(query: string, capabilities: string[], limit = 3): SearchResult {
+    this.refresh();
+    const terms = this.expand(query);
+    const queryTokens = tokenize(query).filter((t) => !STOPWORDS.has(t) || t === 'ban');
+    const k1 = 1.4;
+    const b = 0.6;
+
+    const scored = this.docs
+      .map((d) => {
+        let score = 0;
+        for (const t of terms) {
+          const tf = d.tokens.get(t);
+          if (!tf) continue;
+          const norm = tf * (k1 + 1) / (tf + k1 * (1 - b + (b * d.length) / this.avgLength));
+          score += (this.idf.get(t) ?? 0) * norm;
+        }
+        // Thưởng khi các từ liền nhau của câu hỏi xuất hiện liền nhau trong tài liệu ("ban trai phieu")
+        for (let i = 0; i < queryTokens.length - 1; i++) {
+          if (d.phrase.includes(`${queryTokens[i]} ${queryTokens[i + 1]}`)) score += 2.5;
+        }
+        return { d, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b2) => b2.score - a.score);
+
+    const allowed = (f: Feature) => f.access.requires.every((r) => capabilities.includes(r));
+    const results = scored
+      .filter((x) => allowed(x.d.feature))
+      .slice(0, limit)
+      .map(({ d, score }) => this.hit(d.feature, score));
+
+    const topDenied = scored.find((x) => !allowed(x.d.feature));
+    const restricted =
+      topDenied && (!results.length || topDenied.score > results[0].score)
+        ? { id: topDenied.d.feature.id, title: topDenied.d.feature.title, requires: topDenied.d.feature.access.requires }
+        : undefined;
+
+    // Điểm quá thấp thì coi như không tìm thấy để agent hỏi lại thay vì đoán
+    const top = results[0]?.score ?? 0;
+    return { results: top < 1.2 ? [] : results, restricted };
+  }
+
+  private hit(f: Feature, score: number): SearchHit {
+    const tours = f.tourIds
+      .map((id) => this.map.tours.find((t) => t.id === id))
+      .filter((t): t is Tour => Boolean(t))
+      .map((t) => ({ id: t.id, title: t.title, steps: t.steps.map((s) => s.text) }));
+    return {
+      id: f.id,
+      title: f.title,
+      route: f.route.pattern,
+      description: f.description,
+      menuPath: f.menuPath,
+      score: Math.round(score * 100) / 100,
+      tours,
+    };
+  }
+}

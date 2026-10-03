@@ -1,0 +1,17 @@
+# Cấu hình WealthCompass cho web iConnect demo (đường dẫn tính từ thư mục chứa file này)
+domainPack: finance-vn
+locale: vi
+discovery:
+  entry: src/app/app.routes.ts
+  menu: src/app/shared/menu.config.ts
+  srcRoot: src
+  overrides: compass.overrides.yaml
+  out: feature-map.json
+access:
+  guards:
+    authGuard: { requires: [] }
+    bondAccountGuard: { requires: [bond_account] }
+safety:
+  userOnly:
+    - "[data-tour-role=user-only]"
+  blockedRoutes: []

@@ -1,0 +1,72 @@
+<header class="page-header">
+  <span class="title">Tài sản</span>
+  <span class="history"><span class="material-icons">schedule</span>Lịch sử</span>
+  <div class="pill">
+    <button type="button" aria-label="Thêm"><span class="material-icons">more_vert</span></button>
+    <i class="sep"></i>
+    <button type="button" aria-label="Đóng" (click)="close()"><span class="material-icons">close</span></button>
+  </div>
+</header>
+
+<div class="body">
+  <div class="summary">
+    <div class="line"><span class="label">Gốc đầu tư</span><span>1,600,000</span></div>
+    <div class="line"><span class="label">Tổng lãi khi đến hạn</span><span>627,420</span></div>
+    @if (expanded()) {
+      <div class="line"><span class="label">Lãi đã nhận</span><span>0</span></div>
+    }
+    <button type="button" class="expand" (click)="expanded.set(!expanded())" aria-label="Mở rộng">
+      <span class="material-icons">{{ expanded() ? 'expand_less' : 'expand_more' }}</span>
+    </button>
+  </div>
+
+  <div class="portfolio-head">
+    <span class="h">Danh mục</span>
+    @if (selectingSell()) {
+      <button type="button" class="btn-skip" (click)="selectingSell.set(false)">BỎ QUA</button>
+    } @else {
+      <button type="button" class="btn-select" tourId="assets-select-sell" tourLabel="Chọn bán" tourHint="Bật chế độ chọn trái phiếu để bán" (click)="selectingSell.set(true)">CHỌN BÁN</button>
+    }
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="first">Mã trái phiếu</th>
+        <th>Đáo hạn <span class="material-icons swap">unfold_more</span></th>
+        <th class="num">SL Tổng</th>
+        <th class="num">Gốc đầu tư (tr)</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (h of holdings; track h.code) {
+        <tr>
+          <td class="first">
+            <div class="code"><b>{{ h.code }}</b><span class="material-icons kebab">more_vert</span></div>
+            <div class="issuer">{{ h.issuer }}</div>
+          </td>
+          <td>{{ h.maturity }}</td>
+          <td class="num">{{ h.quantity }}</td>
+          <td class="num">
+            {{ h.principalMillion }}
+            @if (selectingSell()) {
+              <button type="button" class="btn-sell" tourId="assets-sell-button" tourRole="user-only" tourLabel="Bán" tourHint="Nút bán trái phiếu, người dùng tự bấm và tự xác nhận lệnh" (click)="ticket.set(h)">BÁN</button>
+            }
+          </td>
+        </tr>
+      }
+    </tbody>
+  </table>
+
+  <p class="note"><span class="material-icons">deployed_code</span><span>Giao dịch được sử dụng công nghệ <a>Blockchain</a>.</span></p>
+</div>
+
+@if (ticket(); as t) {
+  <div class="modal-backdrop" (click)="ticket.set(null)">
+    <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-label="Đặt lệnh bán">
+      <h3>Đặt lệnh bán {{ t.code }}</h3>
+      <p>Màn hình đặt lệnh nằm ngoài phạm vi demo. Trên hệ thống thật, người dùng tự nhập khối lượng, giá và xác nhận lệnh; trợ lý chỉ dẫn đường tới đây.</p>
+      <button type="button" (click)="ticket.set(null)">Đóng</button>
+    </div>
+  </div>
+}

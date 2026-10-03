@@ -16,4 +16,11 @@ WealthCompass là trợ lý AI tích hợp trực tiếp vào web đầu tư, ba
 
 ## Trạng thái
 
-Giai đoạn lên kế hoạch. Chưa có code.
+Đã có bản demo chạy local (xem [docs/demo.md](docs/demo.md)): web Angular mô phỏng TCInvest iConnect, scanner sinh Feature Map từ source, backend tự host (JWT/JWKS, tìm kiếm, agent, chế độ dự phòng), widget chat + tour Driver.js.
+
+```bash
+npm install
+npm run server   # cổng 8890
+npm run demo     # cổng 4200
+npm run check    # typecheck + test
+```

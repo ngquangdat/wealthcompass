@@ -1,0 +1,16 @@
+# Mỗi nhóm là các cách gọi khác nhau của cùng một khái niệm. Viết không dấu hay có dấu đều được,
+# server chuẩn hóa trước khi so khớp.
+groups:
+  - [trái phiếu, tp, bond, ibond, iconnect]
+  - [bán trái phiếu, bán lại trái phiếu, bán trước hạn, thanh khoản trái phiếu, chọn bán, sell bond]
+  - [mua trái phiếu, đầu tư trái phiếu, buy bond]
+  - [danh mục, tài sản, đang nắm giữ, đang giữ, portfolio]
+  - [nộp tiền, nạp tiền, chuyển tiền vào, deposit]
+  - [chuyển tiền, rút tiền, withdraw]
+  - [chứng chỉ quỹ, ccq, quỹ mở, quỹ]
+  - [lãi lỗ, lời lỗ, lợi nhuận, pnl]
+  - [sổ lệnh, lệnh đã đặt, lịch sử lệnh, hủy lệnh]
+  - [dòng tiền, lãi coupon, tiền lãi, đáo hạn]
+  - [bảng giá, giá trực tuyến, giá cổ phiếu]
+  - [iPower, nhàn lãi, lãi tiền nhàn rỗi]
+  - [ATC, ATO, LO, lệnh thị trường, lệnh giới hạn]

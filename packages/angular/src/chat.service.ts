@@ -76,7 +76,9 @@ export class ChatService {
   // Người dùng bấm nút "Dẫn tôi đi": lúc này tour mới bắt đầu
   async runAction(action: ChatAction): Promise<void> {
     if (action.kind === 'navigate' && action.route) {
-      await this.router.navigateByUrl(action.route);
+      const ok = await this.router.navigateByUrl(action.route);
+      if (ok) this.open.set(false); // thu khung chat để người dùng thấy màn hình vừa mở
+      else this.push({ role: 'assistant', text: 'Không mở được màn hình này, có thể tài khoản chưa có quyền truy cập.', actions: [], tone: 'error' });
       return;
     }
     if (action.kind === 'tour' && action.tourId) {

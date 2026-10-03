@@ -35,6 +35,8 @@ test('hỏi bán trái phiếu: LLM gọi offer_tour, server phát nút tour', a
   );
   const offer = events.find((e) => e.type === 'offer_tour');
   assert.deepEqual(offer, { type: 'offer_tour', tourId: 'sell-bond', label: 'Dẫn tôi đi: Bán trái phiếu trên iConnect' });
+  // Kèm nút mở thẳng màn hình đích
+  assert.deepEqual(events.find((e) => e.type === 'offer_navigate'), { type: 'offer_navigate', route: '/iconnect/assets', label: 'Mở thẳng: Tài sản trái phiếu iConnect' });
   assert.match(text(events), /CHỌN BÁN/);
   assert.equal(events.at(-1)?.type, 'done');
 });
@@ -79,6 +81,7 @@ test('LLM lỗi: chuyển sang trả lời dự phòng từ bản đồ tính n�
   for await (const e of runAgent(deps, { id: 't', name: 't', roles: ['bond_account'] }, request('bán trái phiếu ở đâu'), new AbortController().signal)) events.push(e);
   assert.match(text(events), /Tài sản trái phiếu/);
   assert.equal(events.some((e) => e.type === 'offer_tour'), true);
+  assert.equal(events.some((e) => e.type === 'offer_navigate'), true);
   assert.match(text(events), /dự phòng/);
 });
 

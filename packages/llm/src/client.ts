@@ -1,4 +1,4 @@
-import type { ServerConfig } from './config.js';
+import type { LlmConfig } from './config';
 
 // Client tối thiểu cho endpoint tương thích OpenAI (Gemini, DeepSeek, vLLM/Ollama on-prem đều dùng được).
 
@@ -32,7 +32,7 @@ export class LlmError extends Error {
 }
 
 export async function* streamChat(
-  config: ServerConfig['llm'],
+  config: LlmConfig,
   params: { messages: LlmMessage[]; tools: ToolSpec[]; signal?: AbortSignal },
 ): AsyncGenerator<LlmChunk> {
   if (!config.apiKey) throw new LlmError('Chưa cấu hình khóa LLM (COMPASS_LLM_API_KEY hoặc GOOGLE_API_KEY)');
@@ -98,4 +98,28 @@ export async function* streamChat(
   }
   const finished = calls.filter(Boolean);
   if (finished.length) yield { type: 'tool_calls', calls: finished };
+}
+
+// Gọi một lượt không stream, dùng cho công cụ dòng lệnh (soạn nháp tour...). jsonMode yêu cầu trả JSON thuần.
+export async function completeText(
+  config: LlmConfig,
+  params: { messages: LlmMessage[]; jsonMode?: boolean; signal?: AbortSignal },
+): Promise<string> {
+  if (!config.apiKey) throw new LlmError('Chưa cấu hình khóa LLM (COMPASS_LLM_API_KEY hoặc khóa theo preset)');
+  const response = await fetch(`${config.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
+    body: JSON.stringify({
+      model: config.model,
+      messages: params.messages,
+      temperature: 0.3,
+      stream: false,
+      ...(params.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+      ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+    }),
+    signal: params.signal,
+  });
+  if (!response.ok) throw new LlmError(`LLM trả lỗi ${response.status}`, response.status);
+  const body = (await response.json()) as { choices?: Array<{ message?: { content?: string | null } }> };
+  return body.choices?.[0]?.message?.content ?? '';
 }

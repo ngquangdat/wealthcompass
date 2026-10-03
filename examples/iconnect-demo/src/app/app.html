@@ -1,4 +1,7 @@
-<div class="phone"><router-outlet /></div>
-@if (auth.user()) {
-  <compass-chat-widget />
-}
+<div class="phone">
+  <router-outlet />
+  @if (auth.user()) {
+    <!-- Nằm trong khung điện thoại để đúng giao diện web thật -->
+    <compass-chat-widget />
+  }
+</div>

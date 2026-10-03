@@ -45,6 +45,10 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   flex-direction: column;
   box-shadow: 0 0 0 1px #1e1e1e;
+  /* Widget chat bám theo khung này thay vì cửa sổ */
+  --compass-position: absolute;
+  --compass-right: 12px;
+  --compass-bottom: 68px;
 }
 
 

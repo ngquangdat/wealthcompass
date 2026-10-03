@@ -4,7 +4,7 @@ import type { Principal } from './auth.js';
 import type { ServerConfig } from './config.js';
 import type { FeatureStore } from './feature-store.js';
 import { classifyInput } from './guardrails.js';
-import { LlmError, streamChat, type LlmMessage, type ToolSpec } from './llm.js';
+import { LlmError, streamChat, type LlmMessage, type ToolSpec } from '@wealthcompass/llm';
 import type { DomainPack } from './pack.js';
 
 const MAX_ROUNDS = 4;
@@ -75,6 +75,7 @@ function* fallbackReply(prefetch: ReturnType<FeatureStore['search']>, offered: S
   if (tour) {
     offered.add(tour.id);
     yield { type: 'offer_tour', tourId: tour.id, label: `Dẫn tôi đi: ${tour.title}` };
+    if (!top.route.includes(':')) yield { type: 'offer_navigate', route: top.route, label: `Mở thẳng: ${top.title}` };
   } else if (!top.route.includes(':')) {
     offered.add(top.id);
     yield { type: 'offer_navigate', route: top.route, label: `Mở: ${top.title}` };
@@ -125,7 +126,7 @@ export async function* runAgent(
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       let text = '';
-      let calls: Array<import('./llm.js').ToolCall> = [];
+      let calls: Array<import('@wealthcompass/llm').ToolCall> = [];
 
       for await (const chunk of streamChat(config.llm, { messages, tools: TOOLS, signal })) {
         if (chunk.type === 'text') {
@@ -165,7 +166,12 @@ export async function* runAgent(
             if (tour && permitted && !offered.has(tour.id)) {
               offered.add(tour.id);
               yield { type: 'offer_tour', tourId: tour.id, label: `Dẫn tôi đi: ${tour.title}` };
-              result = { ok: true, note: 'Đã hiện nút. Mời người dùng bấm nút để bắt đầu.' };
+              // Kèm nút mở thẳng màn hình đích cho người dùng tự thao tác, không cần đi theo tour
+              if (owner && !owner.route.pattern.includes(':') && !offered.has(owner.id)) {
+                offered.add(owner.id);
+                yield { type: 'offer_navigate', route: owner.route.pattern, label: `Mở thẳng: ${owner.title}` };
+              }
+              result = { ok: true, note: 'Đã hiện nút tour và nút mở thẳng màn hình. Mời người dùng bấm nút.' };
             } else {
               result = { ok: false, error: 'tour không tồn tại hoặc người dùng không có quyền' };
             }

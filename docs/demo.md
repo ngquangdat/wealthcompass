@@ -23,7 +23,7 @@ Tài khoản demo (IdP giả lập, không phải tài khoản thật): `demo` /
 
 1. Đăng nhập, vào **Trang chủ**.
 2. Bấm bong bóng chat ở góc phải, hỏi "Bán trái phiếu ở đâu?".
-3. Trợ lý trả lời bằng chữ (đường đi, các bước) kèm nút **Dẫn tôi đi: Bán trái phiếu trên iConnect**.
+3. Trợ lý trả lời bằng chữ (đường đi, các bước) kèm hai nút: **Dẫn tôi đi: Bán trái phiếu trên iConnect** (tour từng bước) và **Mở thẳng: Tài sản trái phiếu iConnect** (nhảy tới màn hình đích để tự thao tác; khung chat tự thu lại).
 4. Bấm nút: tour bắt đầu từ trang chủ, highlight **Giao dịch iConnect** → tab **Tài sản** → **CHỌN BÁN** → nút **BÁN**. Ba bước đầu chờ bạn tự bấm vào phần được tô sáng; bước cuối chỉ highlight nút BÁN (nhạy cảm, engine không chạm), bạn tự bấm và tự đặt lệnh.
 
 Các câu hỏi khác để thử: "nộp tiền vào tài khoản", "xem lãi lỗ trái phiếu", "hủy lệnh đã đặt" (có nút mở màn hình, không có tour); "có nên mua VHM12607 không" (bị từ chối trước khi gọi LLM); đăng nhập `nobond` rồi hỏi bán trái phiếu (giải thích thiếu quyền).
@@ -37,7 +37,7 @@ Xem `server/.env.example`. Mặc định server dùng **DeepSeek** (`deepseek-v4
 ## Kiểm thử
 
 ```bash
-npm run check   # tsc cho server và core, test scanner (7) và agent (10)
+npm run check   # tsc cho server và core, test scanner, template, soạn nháp tour, ghi YAML và agent (24 test, thêm 1 bài E2E Chrome chạy khi đặt `COMPASS_E2E_URL`)
 ```
 
 Test agent dùng LLM giả (`server/src/test/mock-llm.ts`) nên không tốn hạn mức và kiểm được: tool-calling, whitelist tourId, thiếu quyền, chặn tư vấn đầu tư, che PII, chế độ dự phòng.
@@ -50,3 +50,11 @@ Test agent dùng LLM giả (`server/src/test/mock-llm.ts`) nên không tốn h�
 - Rate limit và log nằm trong bộ nhớ/stdout; chưa có dashboard, eval hit@3 tự động và E2E Playwright cho tour.
 
 Để gắn vào một web khác, xem [integration-guide.md](integration-guide.md).
+
+## Ghi tour mới bằng `tour:record`
+
+```bash
+npm run tour:record -- --url http://localhost:4200 --id my-tour --dry-run
+```
+
+Mở Chrome, đăng nhập (tài khoản đã điền sẵn), gõ mô tả "đang ghi tour cho tính năng gì" vào ô trong khung ghi, bấm **● Bắt đầu ghi**, thao tác luồng muốn dẫn, bấm **■ Dừng & lưu**. LLM soạn chữ và câu hỏi mẫu; `--dry-run` chỉ in YAML, bỏ cờ này để ghi vào `compass.overrides.yaml`. Chi tiết và quy tắc an toàn ở mục 6.2a của [integration-guide.md](integration-guide.md).

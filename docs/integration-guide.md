@@ -151,8 +151,8 @@ provideCompass(() => {
     apiBaseUrl: 'https://web.congty.vn',           // gốc của backend; widget gọi {apiBaseUrl}/v1/chat, /v1/tours/...
     getToken: () => auth.accessToken(),            // trả JWT hiện tại, hoặc null khi chưa đăng nhập
     getCapabilities: () => auth.roles(),           // chỉ để hiển thị/gợi ý; backend dùng quyền trong JWT
-    title: 'Trợ lý hướng dẫn',
-    subtitle: 'Hỏi tôi tính năng nằm ở đâu',
+    title: 'WealthCompass',                        // tiêu đề khung chat
+    subtitle: 'Tìm đúng tính năng, đi đúng từng bước',
     suggestions: ['Bán trái phiếu ở đâu?', 'Cách nộp tiền vào tài khoản?'],
     // Tùy chọn: siết thêm an toàn phía client (quy tắc nền không tắt được)
     safety: { userOnly: ['button.confirm-order'], blockedRoutes: ['/settings/security'] },
@@ -174,7 +174,7 @@ imports: [RouterOutlet, ChatWidgetComponent],
 @if (auth.user()) { <compass-chat-widget /> }
 ```
 
-Bong bóng cố định ở góc phải dưới (`right: 16px; bottom: 76px`, `z-index: 9000`). Thanh điều hướng cố định ở đáy của web cao hơn 76px thì chỉnh `bottom` trong `chat-widget.component.ts`.
+Mặc định bong bóng bám góc phải dưới cửa sổ (`right: 16px; bottom: 76px`, `z-index: 9000`). Chỉnh bằng biến CSS: `--compass-right`, `--compass-bottom`. Nếu web là một khung nội dung hẹp căn giữa (như khung điện thoại của demo) và bong bóng phải nằm trong khung, đặt `--compass-position: absolute` ở phần tử cha có `position: relative` và đặt `<compass-chat-widget />` bên trong phần tử đó.
 
 **App còn dùng NgModule:** `provideCompass(...)` đặt vào `providers` của `AppModule`; `ChatWidgetComponent` và `TourIdDirective` là standalone nên thêm vào `imports` của module. Cách này **chưa được kiểm thử** (xem mục 9).
 
@@ -244,6 +244,39 @@ tours:
 - Route của từng bước tự suy ra từ template; tour chỉ điều hướng khi phần tử chưa hiện.
 - `text` hỗ trợ `**đậm**`.
 
+### 6.2a Ghi tour bằng `tour:record` (thay cho viết tay)
+
+Thay vì tự gõ YAML, người vận hành thao tác thật trên web, công cụ ghi lại và nhờ LLM soạn chữ.
+
+```bash
+npm run tour:record -- --url http://localhost:4200 --id sell-bond-2 [--title "Bán trái phiếu"] [--feature iconnect.assets] [--about "Hướng dẫn khách bán trái phiếu"] [--dry-run] [--force] [--no-llm]
+# hoặc: npx tsx packages/cli/src/main.ts tour:record --config <compass.config.yaml> --url ... --id ...
+```
+
+Cách dùng:
+
+1. Chạy `scan` trước để có `feature-map.json` (công cụ lấy nhãn và tính năng đích từ đó).
+2. Lệnh mở **Chrome đã cài trên máy** (không tải trình duyệt riêng; đặt `CHROME_PATH` nếu muốn bản khác) tới địa chỉ `--url`. Đăng nhập và đi tới màn hình xuất phát.
+3. Gõ vào ô **"Bạn đang ghi tour cho tính năng gì?"** ở khung nhỏ góc trái dưới (hoặc truyền sẵn bằng `--about`), rồi bấm **● Bắt đầu ghi**. Mô tả này là nguồn đáng tin nhất cho LLM: tiêu đề, mô tả và câu hỏi mẫu phải bám theo nó, và nó thắng khi mâu thuẫn với nhãn kỹ thuật. Bỏ trống thì LLM phải đoán mục đích từ tên nút (dễ lệch); bấm Dừng khi chưa mô tả sẽ bị nhắc một lần. Màn hình lúc này là `startRoute` của tour.
+4. Bấm lần lượt các phần tử theo đúng luồng muốn dẫn. Mỗi phần tử có `tourId` được ghi thành một bước. Nút **Tô sáng (không bấm)** để ghi một bước chỉ giải thích mà không để lần bấm chạy.
+5. Bấm **■ Dừng & lưu** khi đang đứng ở **màn hình đích**: tính năng đích của tour được xác định theo màn hình lúc dừng (không theo màn hình lúc bấm bước cuối, vì bước cuối thường là bấm tab để chuyển sang đích). Công cụ soạn nội dung, ghi vào `compass.overrides.yaml`, rồi tự chạy lại scanner để xác nhận tour hợp lệ.
+
+Quy tắc an toàn khi ghi:
+
+- Phần tử `user-only` (nút BÁN, xác nhận, ô mật khẩu/OTP...) khi bị bấm trong lúc ghi **không được chạy thật**: lần bấm bị chặn và ghi thành bước tô sáng (`next`). Nhờ vậy ghi tour không vô tình đặt lệnh trên môi trường đang ghi.
+- Chỉ ghi lần bấm. Chữ gõ vào ô nhập không được ghi.
+- Lần bấm vào phần tử chưa có `tourId` bị bỏ qua và in cảnh báo kèm màn hình/thẻ; thêm `tourId` vào template rồi ghi lại nếu muốn có bước đó.
+
+LLM chỉ **soạn nháp**:
+
+- Đầu vào gửi LLM là nhãn và gợi ý tĩnh lấy từ template (`tourLabel`, `tourHint`), tiêu đề màn hình, kiểu bước. Chữ hiển thị trên trang (có thể chứa số dư, tên khách) chỉ dùng khi template chưa có nhãn, và đã qua lọc PII.
+- Mô tả của người ghi cũng đi qua lọc PII, được lưu vào dòng chú thích `# Người ghi mô tả: ...` của tour để người duyệt biết LLM dựa vào đâu. Không có LLM thì dùng chính lời đó làm tiêu đề và mô tả.
+- Đầu ra: tiêu đề, mô tả, chữ từng bước, 4-6 câu hỏi mẫu. Kiểm tra bằng schema, đúng số bước; sai thì thử lại một lần rồi dùng mẫu dựng sẵn. Không có khóa LLM hoặc dùng `--no-llm` cũng ra được tour (chữ theo mẫu).
+- Ghi vào file bằng cách **giữ nguyên** chú thích và phần người viết tay. Tour mới có dòng `# DRAFT (LLM soạn ngày ...): cần người duyệt`. Tour trùng id không bị ghi đè nếu thiếu `--force`. Câu hỏi mẫu chỉ được thêm vào, không xóa, không trùng.
+- `--dry-run` in kết quả ra màn hình mà không ghi file.
+
+**Luôn đọc lại chữ trước khi commit.** Sau khi duyệt, xóa dòng `# DRAFT`.
+
 ### 6.3 Quét
 
 ```bash
@@ -291,6 +324,7 @@ Chưa hỗ trợ hoặc chưa kiểm thử:
 - **NgModule**: chưa kiểm thử. Component con khai trong `declarations` (không phải `imports`) không được lần theo, nên `tourId` trong đó không được quét; chỉ `tourId` nằm trong template của chính component được route tới là chắc chắn thấy.
 - Route theo **tham số** (`:id`): đưa vào Feature Map nhưng agent không tạo nút mở thẳng (thiếu giá trị tham số); `exampleParams` chưa dùng.
 - `tourId` sinh động, phần tử trong iframe khác origin hoặc shadow DOM đóng: không hỗ trợ.
+- `tour:record` chỉ ghi lần bấm (chưa ghi hover, kéo thả, nhập liệu) và cần Chrome cài trên máy; chưa lưu trạng thái tour khi tải lại trang.
 - Widget nạp từ source (chưa build thư viện ng-packagr, chưa có `ng add`); chưa có đóng gói npm.
 - Backend: Feature Map nạp từ file (chưa có API publish và index theo phiên bản); tìm kiếm là từ khóa + đồng nghĩa (chưa có embedding); rate limit và log trong bộ nhớ/stdout.
 

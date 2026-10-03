@@ -32,8 +32,8 @@ export function provideCompass(options: CompassOptions | (() => CompassOptions))
         return {
           getCapabilities: () => [],
           locale: 'vi',
-          title: 'Trợ lý hướng dẫn',
-          subtitle: 'Hỏi tôi tính năng nằm ở đâu',
+          title: 'WealthCompass',
+          subtitle: 'Tìm đúng tính năng, đi đúng từng bước',
           suggestions: [],
           ...o,
           safety: buildSafetyPolicy(o.safety),

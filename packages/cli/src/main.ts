@@ -1,5 +1,6 @@
 #!/usr/bin/env -S npx tsx
 import { scan } from './scan';
+import { recordTour } from './record/run';
 
 function arg(name: string, fallback?: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -25,7 +26,25 @@ if (command === 'scan' || command === 'doctor') {
   }
   const strict = process.argv.includes('--strict');
   if (strict && c.warnings.length) process.exit(1);
+} else if (command === 'tour:record') {
+  const url = arg('url');
+  const id = arg('id');
+  if (!url || !id) {
+    console.error('Cách dùng: compass tour:record --config <yaml> --url <địa chỉ web> --id <tour-id> [--title "..."] [--about "mô tả tính năng"] [--feature <id>] [--force] [--no-llm] [--dry-run]');
+    process.exit(1);
+  }
+  await recordTour({
+    config: arg('config', 'compass.config.yaml')!,
+    url,
+    id,
+    title: arg('title'),
+    feature: arg('feature'),
+    about: arg('about'),
+    force: process.argv.includes('--force'),
+    noLlm: process.argv.includes('--no-llm'),
+    dryRun: process.argv.includes('--dry-run'),
+  });
 } else {
-  console.log('Cách dùng: compass scan|doctor --config <compass.config.yaml> [--strict]');
+  console.log('Cách dùng: compass scan|doctor --config <compass.config.yaml> [--strict] | tour:record ...');
   process.exit(command ? 1 : 0);
 }

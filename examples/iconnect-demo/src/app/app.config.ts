@@ -15,8 +15,8 @@ export const appConfig: ApplicationConfig = {
         // Dùng đúng JWT của phiên đăng nhập hiện có; backend tự xác minh bằng JWKS
         getToken: () => auth.token(),
         getCapabilities: () => auth.user()?.roles ?? [],
-        title: 'Trợ lý hướng dẫn',
-        subtitle: 'Hỏi tôi tính năng nằm ở đâu',
+        title: 'WealthCompass',
+        subtitle: 'Tìm đúng tính năng, đi đúng từng bước',
         suggestions: ['Bán trái phiếu ở đâu?', 'Làm sao để nộp tiền vào tài khoản?', 'Xem lãi lỗ trái phiếu'],
       };
     }),

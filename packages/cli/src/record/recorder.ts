@@ -1,0 +1,122 @@
+import { chromium, type Browser, type Page } from 'playwright-core';
+import { PAGE_SCRIPT } from './page-script';
+
+// Một lần bấm của người vận hành, ghi lại từ trình duyệt
+export interface RecordedStep {
+  // null: phần tử người dùng bấm chưa có tourId trong template
+  tourId: string | null;
+  route: string;
+  // click: người dùng bấm thật và app chạy tiếp. next: chỉ tô sáng, lần bấm bị chặn không cho chạy
+  advanceOn: 'click' | 'next';
+  userOnly: boolean;
+  tag: string;
+  // Chữ trên phần tử (đã cắt ngắn); chỉ dùng khi template không có tourLabel
+  text: string;
+}
+
+export interface RecorderState {
+  recording: boolean;
+  highlight: boolean;
+  count: number;
+  last: string;
+  // Mô tả của người ghi: đang ghi tour cho tính năng gì
+  purpose: string;
+}
+
+type Command = 'start' | 'stop' | 'toggleHighlight';
+
+export class Recorder {
+  readonly steps: RecordedStep[] = [];
+  startRoute: string | null = null;
+  // Màn hình người dùng đang đứng lúc bấm Dừng = đích của tour (bước cuối thường là bấm để chuyển màn hình,
+  // nên route ghi lúc bấm là màn hình TRƯỚC khi chuyển, không phải đích)
+  endRoute: string | null = null;
+  // Mô tả do người ghi nhập ở khung công cụ (hoặc --about); là nguồn đáng tin nhất cho LLM soạn nội dung
+  purpose = '';
+  recording = false;
+  // Chế độ tô sáng: lần bấm kế tiếp bị chặn và ghi thành bước chỉ-tô-sáng
+  highlight = false;
+
+  private resolveDone!: () => void;
+  readonly done = new Promise<void>((resolve) => (this.resolveDone = resolve));
+
+  constructor(private readonly page: Page) {}
+
+  state(): RecorderState {
+    const last = this.steps.at(-1);
+    return { recording: this.recording, highlight: this.highlight, purpose: this.purpose, count: this.steps.length, last: last ? (last.tourId ?? `(chưa có tourId: ${last.tag})`) : '' };
+  }
+
+  // Đẩy trạng thái sang trang để bộ bắt click biết đang ghi hay không (trang không tự hỏi được đồng bộ)
+  async pushState(): Promise<void> {
+    await this.page
+      .evaluate(`window.__compassRecorderSet && window.__compassRecorderSet(${JSON.stringify(this.state())})`)
+      .catch(() => undefined);
+  }
+
+  async start(): Promise<void> {
+    if (this.recording) return;
+    this.recording = true;
+    this.steps.length = 0;
+    this.startRoute = new URL(this.page.url()).pathname;
+    await this.pushState();
+  }
+
+  async stop(): Promise<void> {
+    this.recording = false;
+    this.endRoute = new URL(this.page.url()).pathname;
+    await this.pushState();
+    this.resolveDone();
+  }
+
+  setPurpose(text: string): void {
+    this.purpose = text.slice(0, 600);
+  }
+
+  async toggleHighlight(): Promise<void> {
+    this.highlight = !this.highlight;
+    await this.pushState();
+  }
+
+  onEvent(step: RecordedStep): void {
+    if (!this.recording) return;
+    const prev = this.steps.at(-1);
+    // Bấm đúp vào cùng một phần tử chỉ tính một bước
+    if (prev && prev.tourId !== null && prev.tourId === step.tourId && prev.advanceOn === step.advanceOn) return;
+    this.steps.push(step);
+  }
+
+  async command(cmd: Command): Promise<void> {
+    if (cmd === 'start') await this.start();
+    else if (cmd === 'stop') await this.stop();
+    else await this.toggleHighlight();
+  }
+
+  // Cài hàm cầu nối và script chạy trong trang (thanh công cụ + bắt click)
+  async attach(): Promise<void> {
+    await this.page.exposeFunction('__compassRecorderEvent', (step: RecordedStep) => this.onEvent(step));
+    await this.page.exposeFunction('__compassRecorderState', () => this.state());
+    await this.page.exposeFunction('__compassRecorderSetPurpose', (text: string) => this.setPurpose(text));
+    await this.page.exposeFunction('__compassRecorderCommand', (cmd: Command) => this.command(cmd));
+    await this.page.addInitScript({ content: PAGE_SCRIPT });
+    // Trang đã mở sẵn thì chạy ngay, không đợi lần tải sau
+    await this.page.evaluate(PAGE_SCRIPT).catch(() => undefined);
+  }
+}
+
+export async function launchRecorderBrowser(): Promise<Browser> {
+  // Dùng Chrome đã cài trên máy, không tải trình duyệt riêng. CHROME_PATH để chỉ định bản khác.
+  const executablePath = process.env['CHROME_PATH'];
+  return chromium.launch({ headless: false, ...(executablePath ? { executablePath } : { channel: 'chrome' }) });
+}
+
+export async function recordSession(startUrl: string, about = ''): Promise<{ recorder: Recorder; browser: Browser }> {
+  const browser = await launchRecorderBrowser();
+  const context = await browser.newContext({ viewport: null });
+  const page = await context.newPage();
+  const recorder = new Recorder(page);
+  recorder.setPurpose(about);
+  await recorder.attach();
+  await page.goto(startUrl);
+  return { recorder, browser };
+}

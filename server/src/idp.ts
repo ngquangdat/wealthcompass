@@ -1,4 +1,6 @@
-import { SignJWT, exportJWK, generateKeyPair, type JWK } from 'jose';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { SignJWT, exportJWK, generateKeyPair, importJWK, type JWK, type CryptoKey, type KeyObject } from 'jose';
 import type { FastifyInstance } from 'fastify';
 import type { ServerConfig } from './config.js';
 
@@ -10,8 +12,23 @@ const USERS: Record<string, { password: string; name: string; roles: string[] }>
   nobond: { password: 'demo123', name: 'Trần Thị B', roles: ['stock_account'] },
 };
 
+// Giữ cặp khóa demo trong .wealthcompass/ (đã gitignore) để khởi động lại server không làm mọi phiên đăng nhập hết hiệu lực.
+// Chỉ dùng cho IdP giả lập; web thật dùng khóa của hệ thống đăng nhập thật.
+async function loadOrCreateKeys(repoRoot: string): Promise<{ publicKey: CryptoKey | KeyObject; privateKey: CryptoKey | KeyObject }> {
+  const dir = join(repoRoot, '.wealthcompass');
+  const file = join(dir, 'demo-idp-key.json');
+  if (existsSync(file)) {
+    const saved = JSON.parse(readFileSync(file, 'utf8')) as { publicJwk: JWK; privateJwk: JWK };
+    return { publicKey: (await importJWK(saved.publicJwk, 'RS256')) as CryptoKey, privateKey: (await importJWK(saved.privateJwk, 'RS256')) as CryptoKey };
+  }
+  const pair = await generateKeyPair('RS256', { extractable: true });
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(file, JSON.stringify({ publicJwk: await exportJWK(pair.publicKey), privateJwk: await exportJWK(pair.privateKey) }), { mode: 0o600 });
+  return pair;
+}
+
 export async function registerMockIdp(app: FastifyInstance, config: ServerConfig): Promise<void> {
-  const { publicKey, privateKey } = await generateKeyPair('RS256');
+  const { publicKey, privateKey } = await loadOrCreateKeys(config.repoRoot);
   const jwk: JWK = { ...(await exportJWK(publicKey)), kid: 'demo-key-1', alg: 'RS256', use: 'sig' };
 
   app.get('/idp/jwks.json', async () => ({ keys: [jwk] }));

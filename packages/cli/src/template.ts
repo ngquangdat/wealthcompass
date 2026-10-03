@@ -35,7 +35,7 @@ function staticValue(attrs: Array<{ name: string; value: string }>, name: string
 // Phân tích template bằng angular-html-parser (không gắn với phiên bản compiler của Angular).
 // Hiểu cả @if/@for (block) lẫn *ngIf vì chỉ đi theo `children` và `attrs`.
 export function analyzeTemplate(html: string): TemplateInfo {
-  const result = parse(html, { canSelfClosingTags: true });
+  const result = parse(html, { canSelfClose: true, tokenizeAngularBlocks: true, tokenizeAngularLetDeclaration: true, isTagNameCaseSensitive: true });
   const targets: TemplateTarget[] = [];
   const tags = new Set<string>();
 

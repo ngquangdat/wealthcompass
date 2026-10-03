@@ -12,7 +12,7 @@ import { TourService } from './tour.service';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (chat.open()) {
-      <section class="panel" role="dialog" aria-label="Trợ lý hướng dẫn">
+      <section class="panel" role="dialog" [attr.aria-label]="config.title">
         <header>
           <div class="avatar"><compass-icon name="explore" /></div>
           <div class="titles">
@@ -72,7 +72,15 @@ import { TourService } from './tour.service';
     </button>
   `,
   styles: `
-    :host { position: fixed; right: 16px; bottom: 76px; z-index: 9000; font-family: Roboto, sans-serif; }
+    /* Mặc định bám cửa sổ trình duyệt. Muốn nằm trong một khung (VD khung điện thoại) thì đặt
+       --compass-position: absolute ở phần tử cha có position: relative, và chỉnh --compass-right/--compass-bottom. */
+    :host {
+      position: var(--compass-position, fixed);
+      right: var(--compass-right, 16px);
+      bottom: var(--compass-bottom, 76px);
+      z-index: 9000;
+      font-family: Roboto, sans-serif;
+    }
     .bubble-btn {
       font-size: 28px; width: 56px; height: 56px; border-radius: 50%; border: 0; background: #ff3747; color: #fff;
       display: grid; place-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.5); margin-left: auto;

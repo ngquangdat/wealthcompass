@@ -1,0 +1,178 @@
+import { strict as assert } from 'node:assert';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { mkdtempSync, readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { test } from 'node:test';
+import { draftTour } from './draft';
+import { finishRecording, loadFeatureMap } from './run';
+import { mergeTourIntoOverrides } from './write';
+import type { RecordedStep } from './recorder';
+import type { LlmConfig } from '@wealthcompass/llm';
+
+const demoDir = resolve(import.meta.dirname, '../../../../examples/iconnect-demo');
+const featureMap = loadFeatureMap(join(demoDir, 'feature-map.json'));
+
+const steps: RecordedStep[] = [
+  { tourId: 'home-shortcut-iconnect', route: '/home', advanceOn: 'click', userOnly: false, tag: 'a', text: 'Giao dịch iConnect' },
+  { tourId: 'iconnect-tab-assets', route: '/iconnect/price-board', advanceOn: 'click', userOnly: false, tag: 'a', text: 'Tài sản' },
+  { tourId: 'assets-sell-button', route: '/iconnect/assets', advanceOn: 'next', userOnly: true, tag: 'button', text: 'BÁN 123456789012' },
+];
+
+// LLM giả trả JSON không stream
+async function fakeLlm(reply: (body: any) => unknown): Promise<{ config: LlmConfig; bodies: any[]; close: () => Promise<void> }> {
+  const bodies: any[] = [];
+  const server = createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      const body = JSON.parse(raw);
+      bodies.push(body);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content: typeof reply(body) === 'string' ? reply(body) : JSON.stringify(reply(body)) } }] }));
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const port = (server.address() as AddressInfo).port;
+  return { config: { provider: 'fake', baseUrl: `http://127.0.0.1:${port}`, apiKey: 'k', model: 'm' }, bodies, close: () => new Promise((r) => server.close(() => r())) };
+}
+
+test('soạn nháp bằng LLM: đúng số bước, không gửi chữ hiển thị chứa số tài khoản', async () => {
+  const llm = await fakeLlm(() => ({
+    title: 'Bán trái phiếu',
+    description: 'Dẫn tới nút BÁN.',
+    steps: [{ text: 'Bấm **Giao dịch iConnect**.' }, { text: 'Chuyển sang tab **Tài sản**.' }, { text: 'Đây là nút **Bán**; bạn tự xác nhận lệnh.' }],
+    sampleQuestions: ['bán trái phiếu ở đâu', 'ban trai phieu'],
+  }));
+  const draft = await draftTour({ id: 'sell-bond-2', steps, featureMap, featureId: 'iconnect.assets', llm: llm.config });
+  await llm.close();
+  assert.equal(draft.source, 'llm');
+  assert.equal(draft.steps.length, 3);
+  const sent = JSON.stringify(llm.bodies[0]);
+  assert.ok(sent.includes('Chọn bán') || sent.includes('Bán'), 'dùng nhãn tĩnh từ template');
+  assert.equal(sent.includes('123456789012'), false, 'chữ trên trang phải được lọc PII hoặc không dùng');
+  assert.equal(llm.bodies[0].response_format?.type, 'json_object');
+});
+
+test('mô tả của người ghi được đưa vào prompt như nguồn chính và đã lọc PII', async () => {
+  const llm = await fakeLlm(() => ({ title: 'Bán trái phiếu', steps: [{ text: 'Bước một đủ dài' }, { text: 'Bước hai đủ dài' }, { text: 'Bước ba đủ dài' }] }));
+  await draftTour({ id: 't', steps, featureMap, purpose: 'Hướng dẫn khách bán trái phiếu, hotline 0912345678', llm: llm.config });
+  await llm.close();
+  const [system, user] = llm.bodies[0].messages;
+  assert.match(system.content, /operatorDescription/);
+  const sent = JSON.parse(user.content);
+  assert.match(sent.operatorDescription, /bán trái phiếu/);
+  assert.equal(sent.operatorDescription.includes('0912345678'), false);
+});
+
+test('không có LLM: dùng lời người ghi làm tiêu đề và mô tả', async () => {
+  const draft = await draftTour({ id: 't', steps, featureMap, purpose: 'Bán trái phiếu đang nắm giữ', llm: null });
+  assert.equal(draft.title, 'Bán trái phiếu đang nắm giữ');
+  assert.equal(draft.description, 'Bán trái phiếu đang nắm giữ');
+});
+
+test('chú thích DRAFT ghi lại mô tả của người ghi', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'compass-'));
+  const file = join(dir, 'o.yaml');
+  const draft = { title: 'T tour', description: '', source: 'llm' as const, steps: [{ text: 'a' }, { text: 'b' }, { text: 'c' }], sampleQuestions: [] };
+  const out = mergeTourIntoOverrides(file, { id: 'x', draft, steps, startRoute: '/home', purpose: 'Bán trái phiếu đang nắm giữ', force: false });
+  assert.match(out.yaml, /# Người ghi mô tả: Bán trái phiếu đang nắm giữ/);
+});
+
+test('LLM trả sai số bước: thử lại rồi rơi về mẫu', async () => {
+  const llm = await fakeLlm(() => ({ title: 'x y z', steps: [{ text: 'chỉ một bước' }] }));
+  const draft = await draftTour({ id: 't', steps, featureMap, llm: llm.config });
+  await llm.close();
+  assert.equal(draft.source, 'template');
+  assert.equal(llm.bodies.length, 2, 'thử đúng 2 lần');
+  assert.equal(draft.steps.length, 3);
+  assert.match(draft.steps[2].text, /tự thao tác/);
+});
+
+test('không có khóa LLM: dùng mẫu, không gọi mạng', async () => {
+  const draft = await draftTour({ id: 't', steps, featureMap, llm: { provider: 'x', baseUrl: 'http://127.0.0.1:1', apiKey: null, model: 'm' } });
+  assert.equal(draft.source, 'template');
+});
+
+test('gộp vào overrides: giữ chú thích cũ, thêm câu hỏi không trùng, không ghi đè khi chưa --force', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'compass-'));
+  const file = join(dir, 'compass.overrides.yaml');
+  writeFileSync(file, '# Do nghiệp vụ duyệt tay\nfeatures:\n  iconnect.assets:\n    sampleQuestions:\n      - bán trái phiếu ở đâu   # giữ nguyên\ntours: {}\n');
+  const draft = { title: 'Bán trái phiếu', description: 'd', source: 'llm' as const, steps: [{ text: 'a' }, { text: 'b' }, { text: 'c' }], sampleQuestions: ['Bán trái phiếu ở đâu', 'cách bán lại'] };
+  const input = { id: 'sell-2', draft, steps, startRoute: '/home', featureId: 'iconnect.assets', force: false, today: '2026-10-03' };
+  const out = mergeTourIntoOverrides(file, input);
+  assert.match(out.yaml, /# Do nghiệp vụ duyệt tay/);
+  assert.match(out.yaml, /# giữ nguyên/);
+  assert.match(out.yaml, /DRAFT \(LLM soạn ngày 2026-10-03/);
+  assert.deepEqual(out.addedQuestions, ['cách bán lại'], 'câu trùng (khác hoa thường) không thêm lại');
+  assert.match(out.yaml, /advanceOn: click/);
+  writeFileSync(file, out.yaml);
+  assert.throws(() => mergeTourIntoOverrides(file, input), /--force/);
+  assert.equal(mergeTourIntoOverrides(file, { ...input, force: true }).replaced, true);
+});
+
+test('tính năng đích lấy theo màn hình lúc dừng, không theo route lúc bấm bước cuối', async () => {
+  // Bước cuối là bấm tab Sổ lệnh khi còn đứng ở bảng giá; đích thật là /iconnect/orders
+  const toOrders: RecordedStep[] = [
+    steps[0],
+    { tourId: 'iconnect-tab-orders', route: '/iconnect/price-board', advanceOn: 'click', userOnly: false, tag: 'a', text: 'Sổ lệnh' },
+  ];
+  const run = (endRoute?: string) =>
+    finishRecording(
+      { config: join(demoDir, 'compass.config.yaml'), url: '', id: 'to-orders', force: false, noLlm: true, dryRun: true },
+      { steps: toOrders, startRoute: '/home', endRoute },
+      () => undefined,
+    );
+  assert.match((await run('/iconnect/orders')).yaml, /feature: iconnect\.orders/);
+  // Thiếu endRoute thì rơi về route của bước cuối (hành vi cũ, kém chính xác hơn)
+  assert.match((await run()).yaml, /feature: iconnect\.price-board/);
+});
+
+// E2E với Chrome thật: bỏ qua nếu không đặt COMPASS_E2E_URL (cần dev server demo đang chạy)
+test('E2E: ghi tour trên web demo bằng Chrome thật, bước BÁN bị chặn không chạy thật', { skip: !process.env['COMPASS_E2E_URL'] }, async () => {
+  const { recordSession } = await import('./recorder');
+  const dir = mkdtempSync(join(tmpdir(), 'compass-e2e-'));
+  // Sao chép cấu hình demo vào thư mục tạm để không đụng file thật; scanner cần tsconfig và src nên trỏ về app demo
+  const config = join(demoDir, 'compass.config.yaml');
+  const overridesBackup = readFileSync(join(demoDir, 'compass.overrides.yaml'), 'utf8');
+  const { recorder, browser } = await recordSession(process.env['COMPASS_E2E_URL']!);
+  try {
+    const page = (browser.contexts()[0].pages())[0];
+    await page.click('button.submit'); // đăng nhập (đã điền sẵn tài khoản demo)
+    await page.waitForURL('**/home');
+    // Ô mô tả nằm trong shadow DOM của khung ghi; gõ vào đó phải chuyển về Node
+    await page.fill('#purpose', 'Hướng dẫn khách bán trái phiếu đang nắm giữ');
+    assert.equal(recorder.purpose, 'Hướng dẫn khách bán trái phiếu đang nắm giữ');
+    await recorder.start();
+    assert.equal(recorder.startRoute, '/home');
+    // Ghi xong bấm vào khung công cụ không được bị tính là một bước tour
+    await page.click('#purpose');
+    await page.click('[data-tour-id="home-shortcut-iconnect"]');
+    await page.waitForURL('**/iconnect/price-board');
+    await page.click('[data-tour-id="iconnect-tab-assets"]');
+    await page.waitForURL('**/iconnect/assets');
+    await page.click('[data-tour-id="assets-select-sell"]');
+    await page.click('[data-tour-id="assets-sell-button"]'); // user-only: phải bị chặn
+    const opened = await page.locator('.modal').count();
+    await recorder.stop();
+    assert.equal(recorder.endRoute, '/iconnect/assets');
+    assert.equal(opened, 0, 'lần bấm BÁN trong lúc ghi không được mở hộp thoại đặt lệnh');
+    assert.deepEqual(recorder.steps.map((s) => [s.tourId, s.advanceOn]), [
+      ['home-shortcut-iconnect', 'click'],
+      ['iconnect-tab-assets', 'click'],
+      ['assets-select-sell', 'click'],
+      ['assets-sell-button', 'next'],
+    ]);
+    const result = await finishRecording(
+      { config, url: '', id: 'sell-bond-e2e', feature: 'iconnect.assets', force: false, noLlm: true, dryRun: true },
+      { steps: recorder.steps, startRoute: recorder.startRoute, endRoute: recorder.endRoute, purpose: recorder.purpose },
+      () => undefined,
+    );
+    assert.match(result.yaml, /sell-bond-e2e:/);
+    assert.equal(readFileSync(join(demoDir, 'compass.overrides.yaml'), 'utf8'), overridesBackup, 'dry-run không được ghi file');
+  } finally {
+    await browser.close();
+    void dir; void copyFileSync; void mkdirSync;
+  }
+});

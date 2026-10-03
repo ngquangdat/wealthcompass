@@ -1,5 +1,7 @@
 # Hướng dẫn tích hợp WealthCompass vào một web Angular
 
+> **Cách nhanh:** `npm run setup -- --app <web>` làm tự động gần hết các bước dưới đây và xuất một patch để duyệt; xem [quickstart.md](quickstart.md). Tài liệu này mô tả từng bước làm tay, dùng khi cần hiểu hoặc khi `setup` báo phải làm tay.
+
 Tài liệu cho người đưa trợ lý vào một web Angular có sẵn. Mọi bước dưới đây đã chạy thật trên app demo ([demo.md](demo.md)); chỗ nào chưa hiện thực hoặc chưa kiểm thử thì ghi rõ ở mục "Giới hạn hiện tại".
 
 ## 0. Điều kiện
@@ -106,7 +108,7 @@ Guard chưa ánh xạ sẽ báo cảnh báo và ghi vào `unknownGuards`.
 
 ### 4.1 Lấy gói
 
-Các gói `@wealthcompass/*` **chưa publish lên npm** và chưa có schematic `ng add`. Có hai cách dùng:
+Cách khuyến nghị: `npm run pack` trong repo WealthCompass để có file `.tgz` trong `dist/tarballs/`, rồi cài như gói thường (`setup` tự thêm vào `package.json`). Các gói chưa publish lên registry. Hai cách khác khi phát triển:
 
 - **Cùng monorepo/workspace:** đặt `packages/contracts`, `packages/core`, `packages/angular` cạnh web và khai báo npm workspaces (như repo này).
 - **Copy và dùng tsconfig paths** (cách demo đang dùng), trong `tsconfig.json` của web:

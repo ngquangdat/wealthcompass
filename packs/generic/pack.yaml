@@ -1,0 +1,5 @@
+name: generic
+version: 0.1.0
+locale: vi
+description: Domain Pack chung cho web bất kỳ (không gắn ngành). Chỉ có quy tắc an toàn nền.
+contracts: "2"

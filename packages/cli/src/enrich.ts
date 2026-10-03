@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { Document, YAMLMap, YAMLSeq, isMap, isScalar, isSeq, parseDocument } from 'yaml';
 import { z } from 'zod';
 import { parse as parseYaml } from 'yaml';
 import { redactPii } from '@wealthcompass/core';
-import { completeText, type LlmConfig } from '@wealthcompass/llm';
+import { completeText, resolvePackDir, type LlmConfig } from '@wealthcompass/llm';
 import type { Feature } from '@wealthcompass/contracts';
 import { loadConfig, scan, type FeatureContext } from './scan';
 
@@ -50,22 +50,15 @@ export function findGaps(feature: Feature): Field[] {
 
 // Tìm thư mục Domain Pack (packs/<tên>) để lấy từ điển thuật ngữ làm gợi ý; không có thì bỏ qua
 function loadGlossary(configDir: string, pack: string): string[][] {
-  let dir = configDir;
-  for (let i = 0; i < 6; i++) {
-    const file = join(dir, 'packs', pack, 'glossary.yaml');
-    if (existsSync(file)) {
-      try {
-        const parsed = parseYaml(readFileSync(file, 'utf8')) as { groups?: string[][] };
-        return (parsed.groups ?? []).slice(0, 20);
-      } catch {
-        return [];
-      }
-    }
-    const up = dirname(dir);
-    if (up === dir) break;
-    dir = up;
+  const dir = resolvePackDir(pack, configDir);
+  const file = dir ? join(dir, 'glossary.yaml') : null;
+  if (!file || !existsSync(file)) return [];
+  try {
+    const parsed = parseYaml(readFileSync(file, 'utf8')) as { groups?: string[][] };
+    return (parsed.groups ?? []).slice(0, 20);
+  } catch {
+    return [];
   }
-  return [];
 }
 
 const SYSTEM = `Bạn viết dữ liệu tìm kiếm cho các màn hình của một web giao dịch chứng khoán, bằng tiếng Việt, để trợ lý hướng dẫn tìm đúng màn hình khi người dùng hỏi.

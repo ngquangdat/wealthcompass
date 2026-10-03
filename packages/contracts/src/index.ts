@@ -149,6 +149,8 @@ export type ToolResultStatus =
 export const compassConfigSchema = z.object({
   domainPack: z.string().default('finance-vn'),
   locale: z.string().default('vi'),
+  // Địa chỉ backend để `doctor` kiểm tra kết nối (widget dùng apiBaseUrl trong provideCompass)
+  backend: z.object({ url: z.string() }).optional(),
   discovery: z.object({
     entry: z.string(),
     menu: z.string().optional(),

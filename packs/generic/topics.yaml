@@ -1,0 +1,7 @@
+# Chủ đề bị chặn trước khi gọi LLM (văn bản ĐÃ BỎ DẤU). Pack chung chỉ chặn nhờ làm hộ và nhập bí mật.
+topics:
+  - id: act_on_behalf
+    refusal: act_on_behalf
+    patterns:
+      - '\b(lam|gui|xoa|duyet|thanh toan|chuyen) (giup|ho|dum)\b'
+      - '\b(nhap|dien) (giup|ho) (otp|mat khau|pin)\b'

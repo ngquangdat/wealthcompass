@@ -1,0 +1,11 @@
+# Từ đồng nghĩa chung, ngành nào cũng dùng. Thêm từ của ngành vào pack riêng.
+groups:
+  - [đăng nhập, login, sign in]
+  - [đăng xuất, logout, thoát]
+  - [mật khẩu, password, mat khau]
+  - [hồ sơ, thông tin cá nhân, tài khoản của tôi, profile]
+  - [cài đặt, thiết lập, settings, tùy chỉnh]
+  - [thông báo, notifications]
+  - [lịch sử, nhật ký, history]
+  - [báo cáo, thống kê, report]
+  - [hướng dẫn, trợ giúp, help, hỗ trợ]

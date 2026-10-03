@@ -1,0 +1,17 @@
+<section class="page">
+  <h2>Tạo đơn nghỉ phép</h2>
+  <form (ngSubmit)="send()">
+    <label>Loại nghỉ
+      <select name="type" [(ngModel)]="type">
+        <option value="annual">Nghỉ phép năm</option>
+        <option value="sick">Nghỉ ốm</option>
+        <option value="unpaid">Nghỉ không lương</option>
+      </select>
+    </label>
+    <label>Từ ngày <input type="date" name="from" [(ngModel)]="from" /></label>
+    <label>Đến ngày <input type="date" name="to" [(ngModel)]="to" /></label>
+    <label>Lý do <textarea name="reason" placeholder="Lý do nghỉ" [(ngModel)]="reason"></textarea></label>
+    <button type="submit">Gửi đơn</button>
+  </form>
+  @if (sent()) { <p class="ok">Đã gửi đơn, chờ quản lý duyệt.</p> }
+</section>

@@ -58,3 +58,5 @@ npm run tour:record -- --url http://localhost:4200 --id my-tour --dry-run
 ```
 
 Mở Chrome, đăng nhập (tài khoản đã điền sẵn), gõ mô tả "đang ghi tour cho tính năng gì" vào ô trong khung ghi, bấm **● Bắt đầu ghi**, thao tác luồng muốn dẫn, bấm **■ Dừng & lưu**. LLM soạn chữ và câu hỏi mẫu; `--dry-run` chỉ in YAML, bỏ cờ này để ghi vào `compass.overrides.yaml`. Hướng dẫn đầy đủ: [tour-record.md](tour-record.md).
+
+Web mẫu thứ hai, khác ngành: `examples/hr-portal` (cổng nhân sự, tạo mới từ `ng new`, chưa gắn WealthCompass). Dùng để thử quy trình tích hợp tự động: `npm run e2e:setup` (xem [quickstart.md](quickstart.md)).

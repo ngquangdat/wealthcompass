@@ -10,12 +10,13 @@ const USERS: Record<string, { password: string; name: string; roles: string[] }>
   demo: { password: 'demo123', name: 'Nguyễn Văn A', roles: ['stock_account', 'bond_account', 'fund_account'] },
   // Tài khoản không có quyền trái phiếu, để thử nhánh thiếu quyền
   nobond: { password: 'demo123', name: 'Trần Thị B', roles: ['stock_account'] },
+  // Cho web mẫu HR (examples/hr-portal)
+  hr: { password: 'demo123', name: 'Phạm Minh E', roles: ['employee', 'manager', 'payroll_viewer'] },
 };
 
 // Giữ cặp khóa demo trong .wealthcompass/ (đã gitignore) để khởi động lại server không làm mọi phiên đăng nhập hết hiệu lực.
 // Chỉ dùng cho IdP giả lập; web thật dùng khóa của hệ thống đăng nhập thật.
-async function loadOrCreateKeys(repoRoot: string): Promise<{ publicKey: CryptoKey | KeyObject; privateKey: CryptoKey | KeyObject }> {
-  const dir = join(repoRoot, '.wealthcompass');
+async function loadOrCreateKeys(dir: string): Promise<{ publicKey: CryptoKey | KeyObject; privateKey: CryptoKey | KeyObject }> {
   const file = join(dir, 'demo-idp-key.json');
   if (existsSync(file)) {
     const saved = JSON.parse(readFileSync(file, 'utf8')) as { publicJwk: JWK; privateJwk: JWK };
@@ -28,7 +29,7 @@ async function loadOrCreateKeys(repoRoot: string): Promise<{ publicKey: CryptoKe
 }
 
 export async function registerMockIdp(app: FastifyInstance, config: ServerConfig): Promise<void> {
-  const { publicKey, privateKey } = await loadOrCreateKeys(config.repoRoot);
+  const { publicKey, privateKey } = await loadOrCreateKeys(config.dataDir);
   const jwk: JWK = { ...(await exportJWK(publicKey)), kid: 'demo-key-1', alg: 'RS256', use: 'sig' };
 
   app.get('/idp/jwks.json', async () => ({ keys: [jwk] }));

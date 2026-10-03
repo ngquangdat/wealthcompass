@@ -1,9 +1,8 @@
-import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { parse } from 'angular-html-parser';
-import { createTwoFilesPatch } from 'diff';
-import { ClassDeclaration, Node, SourceFile } from 'ts-morph';
+import { ClassDeclaration, Node } from 'ts-morph';
+import { addEdit, addToDecoratorArray, buildGitPatch, decoratorArg, importEdit, type EditSet } from './codemod';
 import { normalizeVi } from '@wealthcompass/core';
 import { loadConfig, scan } from './scan';
 
@@ -55,6 +54,8 @@ export interface AnnotateResult {
   patchFile: string | null;
   patchFileCount: number;
   applyHint: string | null;
+  // Các chỗ sửa (chưa áp) để setup gộp chung vào một patch
+  edits: EditSet;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,11 +251,6 @@ interface TemplateSource {
   why?: string;
 }
 
-function decoratorArg(cls: ClassDeclaration) {
-  const arg = cls.getDecorator('Component')?.getArguments()[0];
-  return arg && Node.isObjectLiteralExpression(arg) ? arg : undefined;
-}
-
 function templateSource(cls: ClassDeclaration): TemplateSource | undefined {
   const arg = decoratorArg(cls);
   if (!arg) return undefined;
@@ -286,72 +282,18 @@ function templateSource(cls: ClassDeclaration): TemplateSource | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Chỉnh component: import TourIdDirective
+// Chỉnh component: import TourIdDirective (dùng codemod chung)
 // ---------------------------------------------------------------------------
 
-interface Edit {
-  pos: number;
-  text: string;
-}
-
 function isStandalone(cls: ClassDeclaration): boolean {
-  const arg = decoratorArg(cls);
-  const prop = arg?.getProperty('standalone');
+  const prop = decoratorArg(cls)?.getProperty('standalone');
   return !(prop && Node.isPropertyAssignment(prop) && prop.getInitializer()?.getText() === 'false');
-}
-
-function hasDirectiveInImports(cls: ClassDeclaration): boolean {
-  const prop = decoratorArg(cls)?.getProperty('imports');
-  return Boolean(prop && Node.isPropertyAssignment(prop) && /\bTourIdDirective\b/.test(prop.getInitializer()?.getText() ?? ''));
-}
-
-// Thêm TourIdDirective vào imports của @Component. Trả null kèm lý do nếu không tự thêm được.
-function directiveEdits(cls: ClassDeclaration): { edits: Edit[]; problem?: string } {
-  const arg = decoratorArg(cls);
-  if (!arg) return { edits: [], problem: 'không tìm thấy @Component' };
-  if (hasDirectiveInImports(cls)) return { edits: [] };
-  const prop = arg.getProperty('imports');
-  if (prop && Node.isPropertyAssignment(prop)) {
-    const init = prop.getInitializer();
-    if (!init || !Node.isArrayLiteralExpression(init)) return { edits: [], problem: 'imports không phải mảng literal, hãy thêm TourIdDirective bằng tay' };
-    const els = init.getElements();
-    return els.length
-      ? { edits: [{ pos: els[els.length - 1].getEnd(), text: ', TourIdDirective' }] }
-      : { edits: [{ pos: init.getStart() + 1, text: 'TourIdDirective' }] };
-  }
-  return { edits: [{ pos: arg.getStart() + 1, text: '\n  imports: [TourIdDirective],' }] };
-}
-
-function importEdit(file: SourceFile, moduleName: string): Edit | null {
-  const imports = file.getImportDeclarations();
-  const same = imports.find((i) => i.getModuleSpecifierValue() === moduleName);
-  if (same) {
-    const named = same.getNamedImports();
-    if (named.some((n) => n.getName() === 'TourIdDirective')) return null;
-    if (named.length) return { pos: named[named.length - 1].getEnd(), text: ', TourIdDirective' };
-  }
-  const line = `import { TourIdDirective } from '${moduleName}';`;
-  if (imports.length) return { pos: imports[imports.length - 1].getEnd(), text: `\n${line}` };
-  return { pos: 0, text: `${line}\n` };
-}
-
-function applyEdits(text: string, edits: Edit[]): string {
-  // Từ cuối về đầu để vị trí các chỗ sửa trước không bị lệch
-  return [...edits].sort((a, b) => b.pos - a.pos).reduce((acc, e) => acc.slice(0, e.pos) + e.text + acc.slice(e.pos), text);
 }
 
 const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
 function lineOf(text: string, offset: number): number {
   return text.slice(0, offset).split('\n').length;
-}
-
-function gitTopLevel(dir: string): string | null {
-  try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-  } catch {
-    return null;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -381,7 +323,6 @@ export function annotate(opts: AnnotateOptions): AnnotateResult {
   const candidates: Candidate[] = [];
   const skipped: SkippedComponent[] = [];
   const touchedClasses = new Map<string, ClassDeclaration>(); // key: file#class
-  const templateEdits = new Map<string, Edit[]>();
 
   for (const unit of units.sort((a, b) => a.path.localeCompare(b.path))) {
     for (const cls of unit.classes) {
@@ -399,7 +340,7 @@ export function annotate(opts: AnnotateOptions): AnnotateResult {
         skipped.push({ component: className, file: src.file, reason: 'component không standalone (khai trong NgModule): thêm TourIdDirective vào module rồi chạy lại', count: raws.length });
         continue;
       }
-      const dir = directiveEdits(cls);
+      const dir = addToDecoratorArray(cls, 'imports', 'TourIdDirective');
       if (dir.problem) {
         skipped.push({ component: className, file: src.file, reason: dir.problem, count: raws.length });
         continue;
@@ -440,44 +381,8 @@ export function annotate(opts: AnnotateOptions): AnnotateResult {
     }
   }
 
-  // Dựng chỗ sửa theo file
-  const edits = new Map<string, Edit[]>();
-  const push = (file: string, e: Edit) => edits.set(file, [...(edits.get(file) ?? []), e]);
-  for (const c of candidates) {
-    const attrs = [`tourId="${c.tourId}"`];
-    if (c.label) attrs.push(`tourLabel="${escapeAttr(c.label)}"`);
-    if (c.sensitive) attrs.push('tourRole="user-only"');
-    push(c.file, { pos: c.offset, text: ' ' + attrs.join(' ') });
-  }
-  const importedIn = new Set<string>();
-  for (const cls of touchedClasses.values()) {
-    const file = cls.getSourceFile();
-    const path = file.getFilePath();
-    for (const e of directiveEdits(cls).edits) push(path, e);
-    if (!importedIn.has(path)) {
-      importedIn.add(path);
-      const ie = importEdit(file, directiveModule);
-      if (ie) push(path, ie);
-    }
-  }
-  void templateEdits;
-  void project;
-
-  // Patch dạng git: đường dẫn tính từ gốc repo git nếu có, để `git apply` chạy từ gốc repo
-  // realpath cả hai phía: git trả đường dẫn thật (macOS: /private/var/...) còn ts-morph có thể trả qua symlink (/var/...)
-  const top = gitTopLevel(root);
-  const base = realpathSync(top ?? root);
-  let patch = '';
-  for (const [file, list] of [...edits.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    const before = readFileSync(file, 'utf8');
-    const after = applyEdits(before, list);
-    const rel = relative(base, realpathSync(file)).split('\\').join('/');
-    const body = createTwoFilesPatch(`a/${rel}`, `b/${rel}`, before, after, '', '', { context: 3 })
-      .split('\n')
-      .filter((l) => !l.startsWith('====') && !l.startsWith('Index:'))
-      .join('\n');
-    patch += `diff --git a/${rel} b/${rel}\n${body}`;
-  }
+  const edits = annotationEdits(candidates, touchedClasses, directiveModule);
+  const { patch, base, files } = buildGitPatch(edits, root);
 
   let patchFile: string | null = null;
   if (patch && opts.out !== null) {
@@ -485,7 +390,30 @@ export function annotate(opts: AnnotateOptions): AnnotateResult {
     writeFileSync(patchFile, patch);
   }
   const applyHint = patchFile ? `cd ${base} && git apply --check ${relative(base, patchFile) || patchFile} && git apply ${relative(base, patchFile) || patchFile}` : null;
-  return { candidates, skipped, patch, patchFile, patchFileCount: edits.size, applyHint };
+  return { candidates, skipped, patch, patchFile, patchFileCount: files, applyHint, edits };
+}
+
+// Dựng chỗ sửa: thuộc tính tourId trên phần tử + TourIdDirective trong component
+export function annotationEdits(candidates: Candidate[], classes: Map<string, ClassDeclaration>, directiveModule: string): EditSet {
+  const edits: EditSet = new Map();
+  for (const c of candidates) {
+    const attrs = [`tourId="${c.tourId}"`];
+    if (c.label) attrs.push(`tourLabel="${escapeAttr(c.label)}"`);
+    if (c.sensitive) attrs.push('tourRole="user-only"');
+    addEdit(edits, c.file, { pos: c.offset, text: ' ' + attrs.join(' ') });
+  }
+  const importedIn = new Set<string>();
+  for (const cls of classes.values()) {
+    const file = cls.getSourceFile();
+    const path = file.getFilePath();
+    for (const e of addToDecoratorArray(cls, 'imports', 'TourIdDirective').edits) addEdit(edits, path, e);
+    if (!importedIn.has(path)) {
+      importedIn.add(path);
+      const ie = importEdit(file, directiveModule, 'TourIdDirective');
+      if (ie) addEdit(edits, path, ie);
+    }
+  }
+  return edits;
 }
 
 export function formatReport(result: AnnotateResult, base: string): string {

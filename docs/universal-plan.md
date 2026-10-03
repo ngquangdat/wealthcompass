@@ -418,15 +418,15 @@ Bản demo local đã hiện thực lát cắt dọc đầu tiên của kiến t
 | 4.3 LLM làm giàu | Có | Lệnh `enrich`: LLM soạn nháp `description`/`keywords`/`sampleQuestions` cho màn hình còn trống (từ chữ tĩnh trong template, theo lô, chỉ điền chỗ trống, khóa `llmDraft` buộc phải duyệt, `scan --strict` đỏ tới khi duyệt). `title` còn thiếu thì lấy từ nhãn menu. Thêm `tour:record` soạn nháp tour. Chưa làm: enrich dùng dữ liệu runtime, sinh `title` bằng LLM |
 | 4.4 `annotate` | Có | Quét template, gợi ý `tourId` (tên `màn-hình-phần-tử`), tự đánh dấu `user-only` (chắc chắn / cần xem lại), thêm `TourIdDirective` vào component, xuất patch git; không tự sửa code. Test áp patch thật bằng `git apply` rồi `scan` thấy đúng id, chạy lại không còn gợi ý |
 | 4.6 đối chiếu runtime | Chưa | |
-| 5.1 `core`, `angular`, 5.3 `ng add` | Một phần | `core` + `angular` có; `provideCompass()`, widget, `[tourId]`, `TourService`. Chưa có schematic `ng add` và build ng-packagr (demo nạp thẳng source qua tsconfig paths) |
+| 5.1 Chia gói, 5.3 cài vào app | Có | `npm run pack` ra 5 gói `.tgz` (angular qua ng-packagr partial compilation; cli/server một file bin). Thay `ng add` bằng `wealthcompass setup`: dò dự án, sinh config, AI soạn nháp, xuất một patch (gói, style, provider nối vào service đăng nhập, widget), báo cáo việc cần duyệt, và `doctor` kiểm tra kết nối. Đã chạy thật trên web HR tạo mới từ `ng new` (khác ngành): patch áp sạch, build được, chat chạy |
 | 5.3 `TargetResolver`, 5.4 tour engine, 5.5 an toàn client | Một phần | Có `data-tour-id`/testid/id/aria-label, chờ bằng MutationObserver, bước `advanceOn: click`, tour qua nhiều route, `user-only`. Có `tour:record` (mục 8, chặn lần bấm vào phần tử user-only khi ghi). Chưa lưu trạng thái tour khi reload |
-| 6.1 Triển khai tự host | Một phần | Chạy bằng npm; chưa có `docker compose`/Helm (đã hoãn) |
+| 6.1 Triển khai tự host | Một phần | Backend là gói `@wealthcompass/server` (`npx wealthcompass-server --env-file wealthcompass.env`); chưa có `docker compose`/Helm (đã hoãn) |
 | 6.2 Xác thực JWT/JWKS | Có | Xác minh RS256 qua JWKS, kiểm issuer/audience; IdP giả lập chỉ để demo. Đã thử token `alg:none` giả mạo (bị từ chối) |
 | 6.3 Dữ liệu, index theo phiên bản | Chưa | Feature Map nạp từ file và tự nạp lại khi đổi; chưa có Postgres/pgvector, version `active` |
 | 6.4 LLM | Một phần | Client tương thích OpenAI, stream, tool-calling; preset DeepSeek (mặc định) và Gemini; chế độ dự phòng khi LLM lỗi. Đã chạy thật với DeepSeek V4 Flash (~2,7 giây/câu). Chưa có hai bậc mô hình, cache ngữ nghĩa, hạn mức token |
 | 6.6 Tìm kiếm | Một phần | BM25 + từ điển đồng nghĩa + thưởng cụm từ + lọc quyền + ngưỡng điểm; chưa có embedding/rerank |
-| 7. Domain Pack | Một phần | `packs/finance-vn` (glossary, topics chặn, mẫu từ chối, system prompt); chưa có `pack-generic`, chưa có seed eval |
-| 9. Kiểm thử | Một phần | 44 test + 1 E2E Chrome tùy chọn (scanner, template, enrich, annotate, soạn nháp tour, gộp YAML, agent với LLM giả). Chưa có ma trận fixture nhiều phiên bản Angular, hit@3, Playwright |
+| 7. Domain Pack | Một phần | `finance-vn` và `generic` (đóng kèm gói cli/server); chưa có seed eval |
+| 9. Kiểm thử | Một phần | 53 test + 1 E2E Chrome tùy chọn (scanner, template, enrich, annotate, setup cả standalone lẫn NgModule và đường --ai-code với LLM giả, soạn nháp tour, gộp YAML, agent với LLM giả) và `npm run e2e:setup` chạy trọn quy trình tích hợp trên web HR. Chưa có ma trận fixture nhiều phiên bản Angular, hit@3, Playwright |
 
 **Phát hiện khi hiện thực**
 
@@ -436,6 +436,9 @@ Bản demo local đã hiện thực lát cắt dọc đầu tiên của kiến t
 - Hạn mức LLM là rủi ro vận hành thật (khóa Gemini dùng thử đã hết tiền trả trước khi demo): chế độ dự phòng không chỉ là tính năng phụ mà cần có từ MVP.
 - Tên model phải nằm trong cấu hình, không nằm trong code: `gemini-2.5-flash` đã không còn cho tài khoản mới (404). Mô hình suy luận (DeepSeek V4) có `reasoning_content` riêng nên client chỉ lấy `content`; có thể hạ `reasoning_effort` để nhanh hơn.
 - Widget phải tự đóng gói tài nguyên: bản đầu phụ thuộc font Material Icons và CSS popover nằm trong app chủ; đã chuyển sang icon SVG nội bộ và `compass-theme.scss` để gắn vào web khác chỉ cần thêm hai dòng `styles`.
+- Tích hợp vào web thứ hai (HR, tạo mới) lộ ra những thứ web demo không có: menu dùng khóa `title/link/items`; service đăng nhập dùng `getAccessToken()` và `roles` là `computed()`; guard kiểm quyền bằng `startsWith('payroll')` nên không đọc được chuỗi quyền chính xác. Bản đoán từ tên (`payroll`) sai so với quyền thật (`payroll_viewer`) và làm trợ lý nói sai "không có quyền": bằng chứng cho việc mọi thứ đoán được phải ghi DRAFT ngay tại chỗ và qua người duyệt.
+- Gửi mã nguồn cho LLM là quyết định tuân thủ, nên `--ai-code` tắt mặc định; phân tích tĩnh (tên thành viên, chuỗi trong `hasRole(...)`) đủ cho cả hai web đã thử.
+- Đóng gói lộ ra lỗi chỉ thấy khi cài thật: hai dòng shebang trong bin, manifest gói Angular còn trỏ về source, npm dùng bản cache khi đóng gói lại cùng phiên bản.
 - `annotate` phải tự thêm `TourIdDirective` vào `imports` của component: gắn `tourId` mà thiếu directive thì Angular không báo lỗi (chỉ thành thuộc tính HTML thường) nên tour hỏng âm thầm. Đây là lý do patch sửa cả template lẫn file `.ts`. Đường dẫn trong patch phải dùng đường dẫn thật (macOS: `/private/var` khác `/var`), nếu không `git apply` từ chối.
 - Heuristic nhạy cảm cần cụm từ thay vì từ đơn ("toan" trong "toàn thị trường" bị nhầm là thanh toán) và chỉ lấy tên hàm được gọi trong `(click)` (tên biến `selectingSell` không nói nút làm gì). Chạy thử trên web demo giảm cảnh báo giả từ 5 xuống 1.
 - Gói `@wealthcompass/llm` dùng chung cho server và CLI (preset, tìm khóa an toàn, stream và không stream). Typecheck cho CLI lộ ra lỗi thật: scanner truyền sai tên tùy chọn của `angular-html-parser` v10 (`canSelfClose`, không phải `canSelfClosingTags`) nên thẻ component tự đóng `<app-x />` có thể nuốt phần tử sau nó; đã sửa và có test.

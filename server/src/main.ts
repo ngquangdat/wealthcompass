@@ -9,6 +9,10 @@ import { FeatureStore } from './feature-store.js';
 import { registerMockIdp } from './idp.js';
 import { loadPack } from './pack.js';
 
+// --env-file <file>: nạp cấu hình do `wealthcompass setup` sinh ra (file của chính dự án, không phải .env chứa bí mật khác)
+const envFlag = process.argv.indexOf('--env-file');
+if (envFlag !== -1 && process.argv[envFlag + 1]) process.loadEnvFile(process.argv[envFlag + 1]);
+
 const config = loadConfig();
 const pack = loadPack(config.packDir);
 const store = new FeatureStore(config.featureMapPath, pack);

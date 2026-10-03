@@ -55,7 +55,7 @@ import { TourService } from './tour.service';
         </div>
 
         <form class="composer" (ngSubmit)="submit()">
-          <input name="q" [(ngModel)]="draft" placeholder="Nhập câu hỏi, ví dụ: bán trái phiếu ở đâu?" autocomplete="off" [disabled]="chat.busy()" />
+          <input name="q" [(ngModel)]="draft" [placeholder]="placeholder" autocomplete="off" [disabled]="chat.busy()" />
           <button type="submit" [disabled]="chat.busy() || !draft().trim()" aria-label="Gửi">
             <compass-icon name="send" />
           </button>
@@ -144,6 +144,8 @@ export class ChatWidgetComponent {
   protected readonly config = inject(COMPASS_CONFIG);
 
   protected readonly draft = signal('');
+  // Ví dụ trong ô nhập lấy từ câu gợi ý của chính web, không ghi cứng theo ngành
+  protected readonly placeholder = this.config.suggestions[0] ? `Nhập câu hỏi, ví dụ: ${this.config.suggestions[0]}` : 'Nhập câu hỏi của bạn';
   private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
 
   constructor() {

@@ -1,9 +1,13 @@
-#!/usr/bin/env -S npx tsx
 import { scan } from './scan';
 import { recordTour } from './record/run';
 import { enrich, resolveOnly } from './enrich';
 import { annotate, formatReport } from './annotate';
-import { dirname, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { setup } from './setup/setup';
+import { doctor, formatChecks } from './setup/doctor';
+import { VERSION } from './version';
 import { resolveLlmConfig } from '@wealthcompass/llm';
 
 function arg(name: string, fallback?: string): string | undefined {
@@ -13,7 +17,47 @@ function arg(name: string, fallback?: string): string | undefined {
 
 const command = process.argv[2];
 
-if (command === 'scan' || command === 'doctor') {
+if (command === 'doctor' && arg('app')) {
+  // Kiểm tra web đã gắn WealthCompass đúng chưa
+  const checks = await doctor(resolve(arg('app')!), arg('project'));
+  console.log(formatChecks(checks));
+  const failed = checks.filter((c) => c.status === 'fail').length;
+  console.log(failed ? `\n${failed} mục cần sửa.` : '\nMọi thứ đã nối đúng.');
+  process.exit(failed ? 1 : 0);
+} else if (command === 'setup') {
+  const app = arg('app');
+  if (!app) {
+    console.error('Cách dùng: wealthcompass setup --app <thư mục web Angular> [--pack generic|finance-vn] [--backend-url http://localhost:8890] [--tarballs <thư mục .tgz> | --registry] [--annotate all|màn-hình,...] [--ai-code] [--no-llm] [--force] [--project <tên>]');
+    process.exit(1);
+  }
+  // Gói .tgz: --tarballs, biến COMPASS_TARBALLS, hoặc dist/tarballs của repo (khi chạy từ source)
+  const repoTarballs = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'dist', 'tarballs');
+  const tarballs = process.argv.includes('--registry')
+    ? null
+    : resolve(arg('tarballs') ?? process.env['COMPASS_TARBALLS'] ?? repoTarballs);
+  if (tarballs && !existsSync(join(tarballs, `wealthcompass-angular-${VERSION}.tgz`))) {
+    console.error(`Không thấy gói ${VERSION} trong ${tarballs}. Chạy \`npm run pack\` trong repo WealthCompass trước, chỉ đúng --tarballs, hoặc dùng --registry.`);
+    process.exit(1);
+  }
+  const annotateArg = arg('annotate');
+  const result = await setup({
+    app,
+    project: arg('project'),
+    pack: arg('pack', 'generic')!,
+    backendUrl: arg('backend-url', 'http://localhost:8890')!,
+    tarballs,
+    version: VERSION,
+    llm: process.argv.includes('--no-llm') ? null : resolveLlmConfig(),
+    aiCode: process.argv.includes('--ai-code'),
+    annotate: annotateArg ? (annotateArg === 'all' ? 'all' : resolveOnly(annotateArg)!) : null,
+    force: process.argv.includes('--force'),
+  });
+  console.log(`\nXong. Code của web chưa bị sửa.`);
+  if (result.patchFile) console.log(`  Patch:    ${result.patchFile} (${result.stats.patchFiles} file)`);
+  console.log(`  Báo cáo:  ${result.reportFile}`);
+  console.log(`  Backend:  ${result.envFile}`);
+  if (result.todo.length) console.log(`\nCần xem (${result.todo.length} mục, chi tiết trong báo cáo):\n` + result.todo.map((t) => '  - ' + t).join('\n'));
+} else if (command === 'scan' || command === 'doctor') {
   const config = arg('config', 'compass.config.yaml')!;
   const { featureMap, outFile } = scan(config);
   const c = featureMap.coverage;
@@ -74,6 +118,6 @@ if (command === 'scan' || command === 'doctor') {
     dryRun: process.argv.includes('--dry-run'),
   });
 } else {
-  console.log('Cách dùng: compass scan|doctor --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--dry-run] | annotate --config <yaml> [--only ...] [--out file] [--print] | tour:record ...');
+  console.log('Cách dùng: wealthcompass setup --app <dir> | doctor --app <dir> | scan --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--dry-run] | annotate --config <yaml> [--only ...] [--out file] [--print] | tour:record ...');
   process.exit(command ? 1 : 0);
 }

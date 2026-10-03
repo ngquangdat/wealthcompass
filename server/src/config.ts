@@ -1,13 +1,18 @@
-import { resolveLlmConfig, type LlmConfig } from '@wealthcompass/llm';
+import { existsSync } from 'node:fs';
+import { resolveLlmConfig, resolvePackDir, type LlmConfig } from '@wealthcompass/llm';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+// Đang chạy từ source trong repo (có web demo) hay từ gói đã build
+const inRepo = existsSync(resolve(repoRoot, 'examples', 'iconnect-demo'));
 
 export interface ServerConfig {
   port: number;
   host: string;
   repoRoot: string;
+  // Nơi lưu dữ liệu chạy (khóa IdP giả lập...); gitignore
+  dataDir: string;
   featureMapPath: string;
   packDir: string;
   allowedOrigins: string[];
@@ -24,8 +29,9 @@ export function loadConfig(): ServerConfig {
     port,
     host: process.env['HOST'] ?? '127.0.0.1',
     repoRoot,
-    featureMapPath: resolve(repoRoot, process.env['COMPASS_FEATURE_MAP'] ?? 'examples/iconnect-demo/feature-map.json'),
-    packDir: resolve(repoRoot, process.env['COMPASS_PACK'] ?? 'packs/finance-vn'),
+    dataDir: process.env['COMPASS_DATA_DIR'] ?? resolve(inRepo ? repoRoot : process.cwd(), '.wealthcompass'),
+    featureMapPath: featureMapPath(),
+    packDir: packDir(),
     allowedOrigins: (process.env['COMPASS_ORIGINS'] ?? 'http://localhost:4200,http://127.0.0.1:4200').split(','),
     mockIdp: process.env['COMPASS_MOCK_IDP'] !== '0',
     jwt: {
@@ -37,4 +43,18 @@ export function loadConfig(): ServerConfig {
     capabilitiesClaim: process.env['COMPASS_CAPABILITIES_CLAIM'] ?? 'roles',
     rateLimit: { max: Number(process.env['COMPASS_RATE_MAX'] ?? 30), windowMs: 10 * 60_000 },
   };
+}
+
+function featureMapPath(): string {
+  const value = process.env['COMPASS_FEATURE_MAP'];
+  if (value) return resolve(value);
+  if (inRepo) return resolve(repoRoot, 'examples/iconnect-demo/feature-map.json');
+  throw new Error('Thiếu COMPASS_FEATURE_MAP: đường dẫn tới feature-map.json của web (do `wealthcompass setup` hoặc `scan` sinh ra).');
+}
+
+function packDir(): string {
+  const value = process.env['COMPASS_PACK'] ?? 'finance-vn';
+  const dir = resolvePackDir(value, inRepo ? repoRoot : process.cwd());
+  if (!dir) throw new Error(`Không tìm thấy Domain Pack "${value}". Đặt COMPASS_PACK là tên pack có sẵn (finance-vn, generic) hoặc đường dẫn thư mục pack.`);
+  return dir;
 }

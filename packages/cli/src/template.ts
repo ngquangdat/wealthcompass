@@ -10,11 +10,14 @@ export interface TemplateTarget {
 
 export interface TemplateInfo {
   targets: TemplateTarget[];
+  // Chữ tĩnh người dùng nhìn thấy (tiêu đề, nhãn, nút, placeholder...); dùng làm ngữ cảnh cho LLM soạn mô tả
+  texts: string[];
   // Tên thẻ trong template (để lần theo component con qua selector)
   tags: Set<string>;
 }
 
 interface LooseNode {
+  value?: string;
   name?: string;
   attrs?: Array<{ name: string; value: string }>;
   children?: LooseNode[];
@@ -32,16 +35,35 @@ function staticValue(attrs: Array<{ name: string; value: string }>, name: string
   return undefined;
 }
 
+// Thuộc tính mang chữ cho người dùng; tourLabel/tourHint do dev viết nên cũng là nguồn nghĩa tốt
+const TEXT_ATTRS = ['placeholder', 'aria-label', 'title', 'alt', 'tourLabel', 'tourHint'];
+const SKIP_TEXT_IN = new Set(['style', 'script', 'svg']);
+
+// Giữ phần chữ cố định, bỏ phần nội suy {{ ... }}; bỏ chuỗi không có chữ cái
+function cleanText(raw: string): string | null {
+  const text = raw.replace(/\{\{[\s\S]*?\}\}/g, ' ').replace(/\s+/g, ' ').trim();
+  return text.length >= 2 && /\p{L}/u.test(text) ? text.slice(0, 80) : null;
+}
+
 // Phân tích template bằng angular-html-parser (không gắn với phiên bản compiler của Angular).
 // Hiểu cả @if/@for (block) lẫn *ngIf vì chỉ đi theo `children` và `attrs`.
 export function analyzeTemplate(html: string): TemplateInfo {
   const result = parse(html, { canSelfClose: true, tokenizeAngularBlocks: true, tokenizeAngularLetDeclaration: true, isTagNameCaseSensitive: true });
   const targets: TemplateTarget[] = [];
   const tags = new Set<string>();
+  const texts: string[] = [];
+  const addText = (raw: string | undefined) => {
+    const t = raw ? cleanText(raw) : null;
+    if (t && !texts.includes(t)) texts.push(t);
+  };
 
   const visit = (node: LooseNode) => {
+    // Nút chữ: có value và không có tên thẻ
+    if (typeof node.value === 'string' && !node.name) addText(node.value);
     if (typeof node.name === 'string' && node.name && Array.isArray(node.attrs)) {
+      if (SKIP_TEXT_IN.has(node.name)) return;
       tags.add(node.name);
+      for (const attr of TEXT_ATTRS) addText(staticValue(node.attrs, attr));
       const tourId = staticValue(node.attrs, 'tourId') ?? staticValue(node.attrs, 'data-tour-id');
       if (tourId) {
         const role = staticValue(node.attrs, 'tourRole');
@@ -56,5 +78,5 @@ export function analyzeTemplate(html: string): TemplateInfo {
     (node.children ?? []).forEach(visit);
   };
   (result.rootNodes as unknown as LooseNode[]).forEach(visit);
-  return { targets, tags };
+  return { targets, texts, tags };
 }

@@ -415,8 +415,9 @@ Bản demo local đã hiện thực lát cắt dọc đầu tiên của kiến t
 | --- | --- | --- |
 | 3. Hợp đồng (`@wealthcompass/contracts`) | Có | Schema zod: Feature Map v2, ngữ cảnh, sự kiện SSE, cấu hình. Chưa sinh JSON Schema ra file |
 | 4.1 Phân tích tĩnh, 4.2 overrides, 4.5 khóa ổn định, 4.6 báo cáo | Có | `ts-morph` + `angular-html-parser`; hiểu `loadComponent`/`loadChildren`, route con, guard kế thừa, `templateUrl`, component con qua `imports`, `@if/@for`. `compass.lock.json` giữ id khi đổi tên route |
-| 4.3 LLM làm giàu | Một phần | Có ở dạng `tour:record`: LLM soạn nháp tour và câu hỏi mẫu vào overrides (có dòng DRAFT, người duyệt); chưa làm enrich mô tả cho mọi màn hình |
-| 4.4 `annotate`, 4.6 đối chiếu runtime | Chưa | Mô tả/từ khóa hiện lấy từ `route.data` và overrides |
+| 4.3 LLM làm giàu | Có | Lệnh `enrich`: LLM soạn nháp `description`/`keywords`/`sampleQuestions` cho màn hình còn trống (từ chữ tĩnh trong template, theo lô, chỉ điền chỗ trống, khóa `llmDraft` buộc phải duyệt, `scan --strict` đỏ tới khi duyệt). `title` còn thiếu thì lấy từ nhãn menu. Thêm `tour:record` soạn nháp tour. Chưa làm: enrich dùng dữ liệu runtime, sinh `title` bằng LLM |
+| 4.4 `annotate` | Có | Quét template, gợi ý `tourId` (tên `màn-hình-phần-tử`), tự đánh dấu `user-only` (chắc chắn / cần xem lại), thêm `TourIdDirective` vào component, xuất patch git; không tự sửa code. Test áp patch thật bằng `git apply` rồi `scan` thấy đúng id, chạy lại không còn gợi ý |
+| 4.6 đối chiếu runtime | Chưa | |
 | 5.1 `core`, `angular`, 5.3 `ng add` | Một phần | `core` + `angular` có; `provideCompass()`, widget, `[tourId]`, `TourService`. Chưa có schematic `ng add` và build ng-packagr (demo nạp thẳng source qua tsconfig paths) |
 | 5.3 `TargetResolver`, 5.4 tour engine, 5.5 an toàn client | Một phần | Có `data-tour-id`/testid/id/aria-label, chờ bằng MutationObserver, bước `advanceOn: click`, tour qua nhiều route, `user-only`. Có `tour:record` (mục 8, chặn lần bấm vào phần tử user-only khi ghi). Chưa lưu trạng thái tour khi reload |
 | 6.1 Triển khai tự host | Một phần | Chạy bằng npm; chưa có `docker compose`/Helm (đã hoãn) |
@@ -425,7 +426,7 @@ Bản demo local đã hiện thực lát cắt dọc đầu tiên của kiến t
 | 6.4 LLM | Một phần | Client tương thích OpenAI, stream, tool-calling; preset DeepSeek (mặc định) và Gemini; chế độ dự phòng khi LLM lỗi. Đã chạy thật với DeepSeek V4 Flash (~2,7 giây/câu). Chưa có hai bậc mô hình, cache ngữ nghĩa, hạn mức token |
 | 6.6 Tìm kiếm | Một phần | BM25 + từ điển đồng nghĩa + thưởng cụm từ + lọc quyền + ngưỡng điểm; chưa có embedding/rerank |
 | 7. Domain Pack | Một phần | `packs/finance-vn` (glossary, topics chặn, mẫu từ chối, system prompt); chưa có `pack-generic`, chưa có seed eval |
-| 9. Kiểm thử | Một phần | 24 test + 1 E2E Chrome tùy chọn (scanner, template, soạn nháp tour, gộp YAML, agent với LLM giả). Chưa có ma trận fixture nhiều phiên bản Angular, hit@3, Playwright |
+| 9. Kiểm thử | Một phần | 44 test + 1 E2E Chrome tùy chọn (scanner, template, enrich, annotate, soạn nháp tour, gộp YAML, agent với LLM giả). Chưa có ma trận fixture nhiều phiên bản Angular, hit@3, Playwright |
 
 **Phát hiện khi hiện thực**
 
@@ -435,6 +436,8 @@ Bản demo local đã hiện thực lát cắt dọc đầu tiên của kiến t
 - Hạn mức LLM là rủi ro vận hành thật (khóa Gemini dùng thử đã hết tiền trả trước khi demo): chế độ dự phòng không chỉ là tính năng phụ mà cần có từ MVP.
 - Tên model phải nằm trong cấu hình, không nằm trong code: `gemini-2.5-flash` đã không còn cho tài khoản mới (404). Mô hình suy luận (DeepSeek V4) có `reasoning_content` riêng nên client chỉ lấy `content`; có thể hạ `reasoning_effort` để nhanh hơn.
 - Widget phải tự đóng gói tài nguyên: bản đầu phụ thuộc font Material Icons và CSS popover nằm trong app chủ; đã chuyển sang icon SVG nội bộ và `compass-theme.scss` để gắn vào web khác chỉ cần thêm hai dòng `styles`.
+- `annotate` phải tự thêm `TourIdDirective` vào `imports` của component: gắn `tourId` mà thiếu directive thì Angular không báo lỗi (chỉ thành thuộc tính HTML thường) nên tour hỏng âm thầm. Đây là lý do patch sửa cả template lẫn file `.ts`. Đường dẫn trong patch phải dùng đường dẫn thật (macOS: `/private/var` khác `/var`), nếu không `git apply` từ chối.
+- Heuristic nhạy cảm cần cụm từ thay vì từ đơn ("toan" trong "toàn thị trường" bị nhầm là thanh toán) và chỉ lấy tên hàm được gọi trong `(click)` (tên biến `selectingSell` không nói nút làm gì). Chạy thử trên web demo giảm cảnh báo giả từ 5 xuống 1.
 - Gói `@wealthcompass/llm` dùng chung cho server và CLI (preset, tìm khóa an toàn, stream và không stream). Typecheck cho CLI lộ ra lỗi thật: scanner truyền sai tên tùy chọn của `angular-html-parser` v10 (`canSelfClose`, không phải `canSelfClosingTags`) nên thẻ component tự đóng `<app-x />` có thể nuốt phần tử sau nó; đã sửa và có test.
 - Script chạy trong trình duyệt của `tour:record` phải là chuỗi JS thuần, và phải tự chờ `<html>` xuất hiện vì init script chạy trước khi có tài liệu; bản đầu bỏ qua im lặng nên không ghi được bước nào, chỉ lộ ra khi chạy với Chrome thật.
 - Đẩy trạng thái "đang ghi" từ Node xuống trang thay vì để trang tự hỏi, vì bộ bắt click cần quyết định đồng bộ có chặn lần bấm nhạy cảm hay không.

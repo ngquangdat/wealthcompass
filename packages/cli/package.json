@@ -19,6 +19,7 @@
     "@wealthcompass/llm": "*",
     "playwright-core": "^1.63.0",
     "zod": "^4.0.0",
-    "@wealthcompass/core": "*"
+    "@wealthcompass/core": "*",
+    "diff": "^9.0.0"
   }
 }

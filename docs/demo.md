@@ -57,4 +57,4 @@ Test agent dùng LLM giả (`server/src/test/mock-llm.ts`) nên không tốn h�
 npm run tour:record -- --url http://localhost:4200 --id my-tour --dry-run
 ```
 
-Mở Chrome, đăng nhập (tài khoản đã điền sẵn), gõ mô tả "đang ghi tour cho tính năng gì" vào ô trong khung ghi, bấm **● Bắt đầu ghi**, thao tác luồng muốn dẫn, bấm **■ Dừng & lưu**. LLM soạn chữ và câu hỏi mẫu; `--dry-run` chỉ in YAML, bỏ cờ này để ghi vào `compass.overrides.yaml`. Chi tiết và quy tắc an toàn ở mục 6.2a của [integration-guide.md](integration-guide.md).
+Mở Chrome, đăng nhập (tài khoản đã điền sẵn), gõ mô tả "đang ghi tour cho tính năng gì" vào ô trong khung ghi, bấm **● Bắt đầu ghi**, thao tác luồng muốn dẫn, bấm **■ Dừng & lưu**. LLM soạn chữ và câu hỏi mẫu; `--dry-run` chỉ in YAML, bỏ cờ này để ghi vào `compass.overrides.yaml`. Hướng dẫn đầy đủ: [tour-record.md](tour-record.md).

@@ -13,6 +13,8 @@ WealthCompass là trợ lý AI tích hợp trực tiếp vào web đầu tư, ba
 
 - [Plan kỹ thuật v1](docs/technical-plan.md): bản cho một web đầu tư cụ thể
 - [Hướng dẫn tích hợp vào một web Angular](docs/integration-guide.md)
+- Gắn `tourId` hàng loạt bằng `annotate` (mục 5.1) và soạn mô tả màn hình bằng `enrich` (mục 6.2b) trong hướng dẫn tích hợp
+- [Ghi tour bằng `tour:record`](docs/tour-record.md): ghi thao tác thật, LLM soạn nháp tour vào overrides
 - [Demo iConnect](docs/demo.md)
 - [Plan kỹ thuật tổng quát](docs/universal-plan.md): áp vào bất kỳ web Angular 20+ nào, tự host, mức A có source (hợp đồng, scanner, backend tự host, Domain Pack, lộ trình)
 

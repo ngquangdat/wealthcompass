@@ -12,11 +12,18 @@ import {
   type Target,
   type Tour,
 } from '@wealthcompass/contracts';
-import { scanRoutes, type ScannedRoute } from './routes';
+import { scanRoutes, type ScannedLayout, type ScannedRoute } from './routes';
 import { scanMenu } from './menu';
 
 interface Overrides {
-  features?: Record<string, Partial<Pick<Feature, 'title' | 'description' | 'keywords' | 'sampleQuestions' | 'facets'>> & { hidden?: boolean }>;
+  features?: Record<
+    string,
+    Partial<Pick<Feature, 'title' | 'description' | 'keywords' | 'sampleQuestions' | 'facets'>> & {
+      hidden?: boolean;
+      // Các trường do LLM soạn (lệnh enrich) và chưa được người duyệt; xóa khóa này sau khi đọc lại
+      llmDraft?: string[];
+    }
+  >;
   tours?: Record<string, { title: string; description?: string; feature?: string; startRoute: string; steps: Array<{ target: string; text: string; advanceOn?: 'next' | 'click' }> }>;
 }
 
@@ -24,9 +31,23 @@ interface Lock {
   features: Record<string, { route: string; component?: string }>;
 }
 
+// Ngữ cảnh của từng màn hình mà scanner thu được; lệnh enrich dùng để nhờ LLM soạn mô tả
+export interface FeatureContext {
+  id: string;
+  path: string;
+  componentName?: string;
+  uiText: string[];
+  classes: import('ts-morph').ClassDeclaration[];
+}
+
 export interface ScanResult {
   featureMap: FeatureMap;
   outFile: string;
+  contexts: Record<string, FeatureContext>;
+  // Project ts-morph đã nạp; annotate dùng lại để tính chỗ sửa mà không phải nạp lần nữa
+  project: Project;
+  root: string;
+  layouts: ScannedLayout[];
 }
 
 function slug(path: string): string {
@@ -50,7 +71,7 @@ export function scan(configPath: string): ScanResult {
   const warnings: string[] = [];
 
   const project = new Project({ tsConfigFilePath: join(root, 'tsconfig.app.json'), skipAddingFilesFromTsConfig: false });
-  const routes = scanRoutes(project, config.discovery.entry, root, warnings);
+  const { routes, layouts } = scanRoutes(project, config.discovery.entry, root, warnings);
   const menu = scanMenu(project, config.discovery.menu, root, warnings);
   const overrides = readYaml<Overrides>(join(root, config.discovery.overrides)) ?? {};
 
@@ -77,6 +98,7 @@ export function scan(configPath: string): ScanResult {
   };
 
   const features: Feature[] = [];
+  const contexts: Record<string, FeatureContext> = {};
   const targetRoute = new Map<string, Target>(); // tourId -> target (route đầu tiên chứa nó)
   let routesWithTitle = 0;
   let menuMatched = 0;
@@ -88,15 +110,22 @@ export function scan(configPath: string): ScanResult {
     const ov = overrides.features?.[id] ?? {};
     if (ov.hidden) continue;
 
-    const title = ov.title ?? r.title;
-    if (title) routesWithTitle++;
-    else warnings.push(`${r.sourceRef}: route ${r.path} thiếu title (data.title hoặc overrides)`);
-    const description = ov.description ?? (r.data['description'] as string | undefined) ?? '';
-    if (!description) warnings.push(`${r.sourceRef}: route ${r.path} thiếu description`);
-
     const menuPath = menu.get(r.path) ?? [];
     if (menuPath.length) menuMatched++;
     else warnings.push(`${r.sourceRef}: route ${r.path} không có trong menu (agent sẽ không trả lời được "ở đâu trong menu")`);
+
+    // Thứ tự: overrides > title của route > nhãn menu (cuối đường dẫn menu). Dùng nhãn menu thay vì đường dẫn thô
+    // vì người dùng nhìn thấy đúng chữ đó khi tìm trong menu.
+    const title = ov.title ?? r.title ?? menuPath.at(-1);
+    if (title) routesWithTitle++;
+    else warnings.push(`${r.sourceRef}: route ${r.path} thiếu title (data.title, nhãn menu hoặc overrides)`);
+    const description = ov.description ?? (r.data['description'] as string | undefined) ?? '';
+    if (!description) warnings.push(`${r.sourceRef}: route ${r.path} thiếu description (chạy \`enrich\` để LLM soạn nháp)`);
+
+    const drafted = Array.isArray(ov.llmDraft) ? ov.llmDraft : [];
+    if (drafted.length) {
+      warnings.push(`Feature "${id}": ${drafted.join(', ')} do LLM soạn, chưa duyệt (đọc lại rồi xóa khóa llmDraft trong overrides)`);
+    }
 
     // Guard -> quyền theo bảng trong config; guard lạ ghi unknownGuards
     const requires = new Set<string>();
@@ -131,11 +160,16 @@ export function scan(configPath: string): ScanResult {
       sampleQuestions: ov.sampleQuestions ?? [],
       tourIds: [],
       provenance: {
-        source: ov.title || ov.description || ov.keywords || ov.sampleQuestions ? ['static', 'manual'] : ['static'],
-        reviewed: Boolean(ov.title || ov.description),
+        source: [
+          'static',
+          ...(ov.title || ov.description || ov.keywords || ov.sampleQuestions ? (['manual'] as const) : []),
+          ...(drafted.length ? (['llm'] as const) : []),
+        ],
+        reviewed: Boolean(ov.title || ov.description) && !drafted.length,
         sourceRef: r.sourceRef,
       },
     });
+    contexts[id] = { id, path: r.path, componentName: r.componentName, uiText: r.uiText, classes: r.classes };
 
     lock.features[id] = { route: r.path, component: r.componentName };
   }
@@ -189,5 +223,5 @@ export function scan(configPath: string): ScanResult {
   const outFile = resolve(root, config.discovery.out);
   writeFileSync(outFile, JSON.stringify(featureMap, null, 2) + '\n');
   writeFileSync(lockFile, JSON.stringify(lock, null, 2) + '\n');
-  return { featureMap, outFile };
+  return { featureMap, outFile, contexts, project, root, layouts };
 }

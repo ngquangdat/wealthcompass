@@ -1,0 +1,9 @@
+domainPack: finance-vn
+locale: vi
+discovery:
+  entry: src/app/app.routes.ts
+  menu: src/app/menu.config.ts
+  overrides: compass.overrides.yaml
+  out: feature-map.json
+access:
+  guards: {}

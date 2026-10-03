@@ -72,15 +72,15 @@ location /v1/ {
 
 Scanner đọc source nên chất lượng câu trả lời phụ thuộc vào mức đủ của dữ liệu này.
 
-**Route.** Mỗi màn hình nên có `data` (hoặc khai báo thay thế ở `compass.overrides.yaml`):
+**Route.** Mỗi màn hình nên có `data` (hoặc khai báo thay thế ở `compass.overrides.yaml`). Nếu để trống, scanner lấy `title` từ **nhãn menu**, còn `description`, `keywords`, `sampleQuestions` có thể nhờ LLM soạn nháp bằng lệnh `enrich` (mục 6.2b):
 
 ```ts
 {
   path: 'assets',
   loadComponent: () => import('./assets.page').then((m) => m.AssetsPage),
   data: {
-    title: 'Tài sản trái phiếu iConnect',                 // bắt buộc
-    description: 'Danh mục trái phiếu đang nắm giữ...',   // bắt buộc; mô tả nghiệp vụ, không mô tả kỹ thuật
+    title: 'Tài sản trái phiếu iConnect',                 // nên có; thiếu thì lấy nhãn menu
+    description: 'Danh mục trái phiếu đang nắm giữ...',   // nên có; mô tả nghiệp vụ, không mô tả kỹ thuật (thiếu thì chạy enrich)
     keywords: ['ban trai phieu', 'danh muc'],            // cách người dùng hay gọi, có thể không dấu
     facets: { product: 'bond' },                          // tùy chọn, do Domain Pack định nghĩa
     // compassId: 'bond.assets',                          // tùy chọn: cố định id, không đổi khi đổi route
@@ -200,6 +200,44 @@ Quy tắc:
 5. Phần tử lặp trong danh sách có thể dùng chung một `tourId`; tour trỏ vào phần tử hiển thị đầu tiên.
 6. Phần tử nằm trong khung chung (thanh tab dưới, header) nên gắn ở component khung; scanner tự gán nó cho mọi route con.
 
+### 5.1 Gợi ý `tourId` hàng loạt bằng `annotate`
+
+Gắn tay từng phần tử thì chậm, nên `annotate` quét template, gợi ý `tourId` cho phần tử tương tác còn thiếu và **xuất patch**. Nó **không bao giờ tự sửa code**.
+
+```bash
+cd ~/wealthcompass
+npm run annotate                                   # toàn bộ màn hình; ghi compass-annotate.patch cạnh compass.config.yaml
+npm run annotate -- --only /iconnect/assets,/home  # chỉ một vài màn hình (id tính năng hoặc tiền tố route)
+npm run annotate -- --print                        # in patch ra màn hình, không ghi file
+npm run annotate -- --out /tmp/x.patch --directive-import @cong-ty/compass
+# web khác: npx tsx packages/cli/src/main.ts annotate --config duong/dan/compass.config.yaml
+```
+
+Nó làm gì:
+
+1. **Liệt kê** nút, link, tab, ô nhập (và phần tử có `(click)`) chưa có `tourId`. Bỏ qua phần tử đã có `tourId`, phần tử ẩn (`hidden`), `input type="hidden"`, và khung bao ngoài chỉ để bắt click.
+2. **Đặt tên** `<màn-hình>-<phần-tử>`: màn hình lấy từ đoạn cuối của route, phần tử lấy từ chữ trên nó (ưu tiên `aria-label`, rồi chữ bên trong không kể icon, rồi `placeholder`, `title`), bỏ dấu và viết thường: nút "Hủy lệnh" ở `/orders` thành `orders-huy-lenh`; ô nhập thêm hậu tố `-input`, tab thêm `-tab`. Trùng thì thêm `-2`, `-3`, và không bao giờ trùng với `tourId` đã có trong dự án. Thêm `tourLabel` từ chữ trên nút.
+3. **Đánh dấu `tourRole="user-only"`** cho phần tử có vẻ nhạy cảm:
+   - ⛔ *chắc chắn*: ô mật khẩu, ô OTP/PIN/CVV, ô thẻ, `type="submit"`, nút có chữ đúng là BÁN, MUA, Đặt lệnh, Xác nhận, Đồng ý, Thanh toán, Chuyển tiền, Rút tiền, Nộp tiền, Hủy lệnh, Xóa...
+   - ⚠ *cần xem lại*: có từ liên quan trong chữ, tên hàm trong `(click)` hoặc class (ví dụ "Lệnh nhanh", `placeOrder()`, `class="btn-sell"`).
+   - Link chuyển trang (`routerLink`, `href`) và ô nhập thông thường không bị đánh dấu.
+4. **Thêm `TourIdDirective`** vào `imports` của component và câu `import` tương ứng (nếu không, thuộc tính `tourId` chỉ là thuộc tính HTML thường, không gắn `data-tour-id` và tour sẽ hỏng âm thầm). Component khai trong NgModule (`standalone: false`) hoặc có `imports` không phải mảng literal sẽ **bị bỏ qua kèm lý do**, bạn thêm tay.
+
+Quy trình duyệt:
+
+```bash
+cd ~/wealthcompass                       # gốc repo git
+git apply --check compass-annotate.patch # thử, chưa sửa gì
+# mở patch (hoặc IDE) xem; xóa những hunk không cần; sửa tên nếu muốn
+git apply compass-annotate.patch
+npm run scan                             # xác nhận scanner thấy các tourId mới
+```
+
+- **Đọc kỹ cột user-only.** Gắn thừa thì tour không bấm thay được nút đó (chỉ tô sáng); thiếu ở nút giao dịch thì nguy hiểm hơn, nên heuristic nghiêng về gắn thừa. Nút "chọn bán" kiểu bật/tắt chế độ thường bị ⚠ nhưng có thể bỏ `tourRole` đi nếu muốn tour tự chờ người dùng bấm vào nó.
+- **Chỉ giữ `tourId` của phần tử tour thật sự cần.** Danh sách gợi ý thường nhiều hơn mức cần (một web demo 13 màn hình ra khoảng 35 gợi ý); đặt tên và gắn thừa đều là việc phải duy trì về sau. Dùng `--only` theo luồng đang làm.
+- Chạy lại `annotate` sau khi áp patch sẽ không còn gợi ý nào (đã có `tourId`).
+- Template nằm trong `.ts` chỉ sửa được khi là chuỗi không có ký tự thoát (`\`) hay `${}`; trường hợp khác bị bỏ qua kèm lý do.
+
 ## 6. Bước 5: Quét và viết tour
 
 ### 6.1 Cấu hình quét
@@ -246,6 +284,8 @@ tours:
 
 ### 6.2a Ghi tour bằng `tour:record` (thay cho viết tay)
 
+> Hướng dẫn đầy đủ (cờ, quy trình, checklist duyệt, xử lý sự cố): [tour-record.md](tour-record.md). Dưới đây là bản tóm tắt.
+
 Thay vì tự gõ YAML, người vận hành thao tác thật trên web, công cụ ghi lại và nhờ LLM soạn chữ.
 
 ```bash
@@ -276,6 +316,40 @@ LLM chỉ **soạn nháp**:
 - `--dry-run` in kết quả ra màn hình mà không ghi file.
 
 **Luôn đọc lại chữ trước khi commit.** Sau khi duyệt, xóa dòng `# DRAFT`.
+
+### 6.2b Soạn mô tả màn hình bằng `enrich` (cho dự án có nhiều route)
+
+`description`, `keywords` và `sampleQuestions` là thứ tìm kiếm dựa vào nhiều nhất. Dự án có hàng chục route thì gõ tay rất lâu, nên `enrich` nhờ LLM soạn **nháp** cho những màn hình còn trống.
+
+```bash
+cd ~/wealthcompass
+npm run enrich -- --dry-run                 # xem LLM định viết gì, chưa ghi file
+npm run enrich                              # ghi vào compass.overrides.yaml
+npm run enrich -- --only iconnect.assets,money.deposit
+# web khác: npx tsx packages/cli/src/main.ts enrich --config duong/dan/compass.config.yaml
+```
+
+Cách hoạt động:
+
+1. Chạy `scan`, tìm các màn hình thiếu `description`, `keywords` hoặc `sampleQuestions`. Chỉ **điền chỗ trống**, không bao giờ đè thứ đã viết (trong `route.data` hay overrides).
+2. Với mỗi màn hình, gửi LLM: tiêu đề, đường dẫn menu, nhóm sản phẩm, **chữ tĩnh trong template** (tiêu đề, nhãn, tên nút, placeholder; bỏ phần nội suy `{{ }}`), phần đã có, danh sách trường cần soạn, và từ điển thuật ngữ của Domain Pack nếu có. Không gửi dữ liệu hiển thị trên màn hình khi chạy; mọi chuỗi qua lọc PII cả chiều gửi và chiều nhận.
+3. Gửi theo lô 6 màn hình mỗi lần. Kết quả được kiểm bằng schema; sai định dạng thì thử lại một lần rồi bỏ qua lô đó.
+4. LLM được dặn: chỉ dùng thông tin trong đầu vào, không bịa tính năng; **nếu đầu vào quá ít thì trả mô tả rỗng**. Màn hình như vậy được báo "không đủ thông tin để soạn" và bỏ qua thay vì đoán.
+5. Ghi vào `compass.overrides.yaml` (giữ nguyên chú thích và phần viết tay), kèm khóa `llmDraft` liệt kê các trường do LLM soạn:
+
+```yaml
+features:
+  cards:
+    # DRAFT (LLM soạn ngày 2026-10-03, bằng enrich): cần người duyệt, xóa khóa llmDraft sau khi đọc lại.
+    description: Xem thông tin thẻ tín dụng, khóa/mở thẻ và xem sao kê thẻ.
+    keywords: [thẻ tín dụng, khóa thẻ, khoa the, the tin dung]
+    sampleQuestions: [khóa thẻ ở đâu, khoa the tin dung o dau]
+    llmDraft: [description, keywords, sampleQuestions]
+```
+
+**Duyệt bắt buộc:** chừng nào còn khóa `llmDraft`, `scan` báo cảnh báo *"... do LLM soạn, chưa duyệt"* và `scan --strict` (CI) sẽ đỏ; Feature Map ghi `provenance.reviewed: false` và nguồn có `llm`. Đọc lại nội dung, sửa chỗ sai, rồi **xóa khóa `llmDraft` của màn hình đó** là xong.
+
+Hạn chế: LLM chỉ thấy chữ trong template nên có thể hiểu lệch nghiệp vụ (ví dụ tab "Tài sản" là toàn tài khoản hay chỉ trái phiếu); component tải nội dung từ API hay dùng chữ sinh động sẽ ít thông tin hơn. Màn hình chỉ có nhãn ngắn thường cho mô tả nông; bổ sung tay những màn hình quan trọng.
 
 ### 6.3 Quét
 
@@ -336,7 +410,10 @@ Chưa hỗ trợ hoặc chưa kiểm thử:
 | Lỗi CORS trong console | Origin của web chưa có trong `COMPASS_ORIGINS` | Thêm đúng origin (gồm cổng) |
 | Chữ hiện một cục sau vài giây | Reverse proxy buffer SSE | `proxy_buffering off` (mục 2) |
 | Luôn trả lời "chế độ dự phòng" | LLM lỗi: hết hạn mức (402), sai khóa (401), sai tên model (404) | Xem log server (`chat_error` có mã lỗi); đổi khóa/model |
-| Hỏi bán trái phiếu mà bị chỉ tới màn hình khác | Thiếu `keywords`/`description`/`sampleQuestions` cho màn hình đúng | Bổ sung ở `route.data` hoặc overrides, quét lại |
+| Hỏi bán trái phiếu mà bị chỉ tới màn hình khác | Thiếu `keywords`/`description`/`sampleQuestions` cho màn hình đúng | Bổ sung ở `route.data` hoặc overrides, hoặc chạy `enrich` rồi duyệt; quét lại |
+| `scan --strict` đỏ: "do LLM soạn, chưa duyệt" | Có khóa `llmDraft` trong overrides sau khi chạy `enrich` | Đọc lại nội dung rồi xóa khóa `llmDraft` của màn hình đó |
+| `enrich`: "LLM không đủ thông tin để soạn" | Màn hình hầu như không có chữ tĩnh để dựa vào | Viết tay `description` trong `route.data` hoặc overrides |
+| Gắn `tourId` mà tour vẫn không tìm thấy phần tử, DOM không có `data-tour-id` | Component chưa import `TourIdDirective` (thuộc tính thành HTML thường). `annotate` tự thêm; gắn tay thì phải thêm vào `imports` |
 | Tour báo "không tìm thấy phần tử" | `tourId` bị xóa/đổi, hoặc phần tử chỉ hiện sau một thao tác | Thêm bước `advanceOn: click` trước đó; chạy `scan --strict` trong CI để bắt sớm |
 | Tour bị loại khỏi Feature Map | Bước tham chiếu `tourId` không có trong template (hoặc là chuỗi động) | Xem cảnh báo "Tour ... bị loại" khi quét |
 | Câu hỏi "ở đâu" bị từ chối như tư vấn | Mẫu trong `topics.yaml` quá rộng | Thu hẹp regex, thêm test |

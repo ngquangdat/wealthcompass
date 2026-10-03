@@ -21,12 +21,24 @@ export interface ScannedRoute {
   sourceRef: string;
   // Target nằm trên màn hình này, gồm cả component con và component layout của route cha
   targets: TemplateTarget[];
+  // Chữ tĩnh của chính màn hình (component của route và component con), KHÔNG gồm layout cha
+  // vì chữ của layout (thanh tab...) chung cho mọi màn hình và làm loãng ngữ cảnh
+  uiText: string[];
+  // Các component có template thuộc màn hình này (component của route và component con); annotate dùng để sửa template
+  classes: ClassDeclaration[];
+}
+
+export interface ScannedLayout {
+  // Route khung (có children) và các component của nó; annotate cần để gắn tourId cho thanh tab, header chung...
+  path: string;
+  classes: ClassDeclaration[];
 }
 
 interface Context {
   project: Project;
   warnings: string[];
   root: string;
+  layouts: ScannedLayout[];
 }
 
 function ref(node: Node, root: string): string {
@@ -111,7 +123,7 @@ function findClass(file: SourceFile, name?: string): ClassDeclaration | undefine
   return file.getClasses().find((c) => c.isDefaultExport()) ?? file.getClasses()[0];
 }
 
-function templateOf(cls: ClassDeclaration): string | undefined {
+export function templateOf(cls: ClassDeclaration): string | undefined {
   const decorator = cls.getDecorator('Component');
   const arg = decorator?.getArguments()[0];
   if (!arg || !Node.isObjectLiteralExpression(arg)) return undefined;
@@ -145,21 +157,38 @@ function importedClasses(cls: ClassDeclaration): ClassDeclaration[] {
   return out;
 }
 
-// Gom target của một component và mọi component con được dùng trong template của nó
-export function collectComponentTargets(cls: ClassDeclaration, seen = new Set<string>()): TemplateTarget[] {
+export interface ComponentInfo {
+  targets: TemplateTarget[];
+  uiText: string[];
+  classes: ClassDeclaration[];
+}
+
+// Gom target và chữ tĩnh của một component và mọi component con được dùng trong template của nó
+export function collectComponent(cls: ClassDeclaration, seen = new Set<string>()): ComponentInfo {
   const key = cls.getSourceFile().getFilePath() + '#' + cls.getName();
-  if (seen.has(key)) return [];
+  if (seen.has(key)) return { targets: [], uiText: [], classes: [] };
   seen.add(key);
 
   const html = templateOf(cls);
-  if (!html) return [];
+  if (!html) return { targets: [], uiText: [], classes: [] };
   const info = analyzeTemplate(html);
   const targets = [...info.targets];
+  const uiText = [...info.texts];
+  const classes = [cls];
   for (const child of importedClasses(cls)) {
     const selector = selectorOf(child);
-    if (selector && info.tags.has(selector)) targets.push(...collectComponentTargets(child, seen));
+    if (selector && info.tags.has(selector)) {
+      const inner = collectComponent(child, seen);
+      targets.push(...inner.targets);
+      for (const t of inner.uiText) if (!uiText.includes(t)) uiText.push(t);
+      classes.push(...inner.classes);
+    }
   }
-  return targets;
+  return { targets, uiText, classes };
+}
+
+export function collectComponentTargets(cls: ClassDeclaration): TemplateTarget[] {
+  return collectComponent(cls).targets;
 }
 
 function readRoutes(
@@ -199,7 +228,8 @@ function readRoutes(
       if (!cls) ctx.warnings.push(`${ref(el, ctx.root)}: không resolve được loadComponent của ${normalized}`);
     }
 
-    const own = cls ? collectComponentTargets(cls) : [];
+    const ownInfo = cls ? collectComponent(cls) : { targets: [], uiText: [], classes: [] };
+    const own = ownInfo.targets;
     const data = (evalLiteral(prop(el, 'data')) as Record<string, unknown> | undefined) ?? {};
     const titleRaw = evalLiteral(prop(el, 'title'));
     const guardsNode = prop(el, 'canActivate');
@@ -210,6 +240,7 @@ function readRoutes(
     // Route có children là layout (khung chứa router-outlet), không phải màn hình riêng
     const hasChildren = prop(el, 'children') || prop(el, 'loadChildren');
     const allGuards = [...inheritedGuards, ...guards];
+    if (cls && hasChildren) ctx.layouts.push({ path: normalized, classes: ownInfo.classes });
     if (cls && !hasChildren) {
       out.push({
         path: normalized,
@@ -219,6 +250,8 @@ function readRoutes(
         guards: allGuards,
         sourceRef: ref(el, ctx.root),
         targets: [...inheritedTargets, ...own],
+        uiText: ownInfo.uiText,
+        classes: ownInfo.classes,
       });
     }
 
@@ -244,8 +277,13 @@ function readRoutes(
   }
 }
 
-export function scanRoutes(project: Project, entryFile: string, root: string, warnings: string[]): ScannedRoute[] {
-  const ctx: Context = { project, warnings, root };
+export function scanRoutes(
+  project: Project,
+  entryFile: string,
+  root: string,
+  warnings: string[],
+): { routes: ScannedRoute[]; layouts: ScannedLayout[] } {
+  const ctx: Context = { project, warnings, root, layouts: [] };
   const file = project.getSourceFile(resolve(root, entryFile));
   if (!file) throw new Error(`Không tìm thấy file route: ${entryFile}`);
 
@@ -258,5 +296,5 @@ export function scanRoutes(project: Project, entryFile: string, root: string, wa
 
   const out: ScannedRoute[] = [];
   readRoutes(array, '', [], [], ctx, out);
-  return out;
+  return { routes: out, layouts: ctx.layouts };
 }

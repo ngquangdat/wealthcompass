@@ -1,0 +1,12 @@
+<h2>Sổ lệnh</h2>
+<button type="button" class="x">Hủy lệnh</button>
+<a routerLink="/orders/history">Lịch sử lệnh</a>
+<input name="symbol" placeholder="Mã chứng khoán">
+<button type="submit">Đặt lệnh</button>
+<button tourId="orders-existing">Có sẵn</button>
+<button (click)="toggleMode()">Chọn bán</button>
+<button (click)="refresh()"><mat-icon>refresh</mat-icon> Làm mới</button>
+<a href="https://example.com">Link ngoài</a>
+<div role="tab">Tab một</div>
+@for (r of rows; track r) { <button (click)="pick(r)">Chọn</button> }
+<button hidden>Ẩn</button>

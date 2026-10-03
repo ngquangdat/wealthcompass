@@ -108,7 +108,8 @@ function parseJson(text: string): unknown {
 
 export async function draftTour(input: DraftInput): Promise<TourDraft> {
   const ctx = stepContexts(input);
-  if (!input.llm?.apiKey) return templateDraft(input, ctx, 'Không có khóa LLM, dùng mẫu.');
+  if (!input.llm) return templateDraft(input, ctx, 'Đã tắt LLM (--no-llm), dùng mẫu.');
+  if (!input.llm.apiKey) return templateDraft(input, ctx, 'Không tìm thấy khóa LLM, dùng mẫu.');
 
   const feature = input.featureMap?.features.find((f) => f.id === input.featureId);
   const user = JSON.stringify({

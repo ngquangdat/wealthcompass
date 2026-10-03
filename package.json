@@ -11,14 +11,15 @@
     "scan": "tsx packages/cli/src/main.ts scan --config examples/iconnect-demo/compass.config.yaml",
     "server": "npm run start -w server",
     "demo": "npm run start -w iconnect-demo -- --port 4200 --host 127.0.0.1",
-    "test": "tsx --test packages/llm/src/config.test.ts server/src/agent.test.ts packages/cli/src/scan.test.ts packages/cli/src/template.test.ts packages/cli/src/enrich.test.ts packages/cli/src/annotate.test.ts packages/cli/src/setup/setup.test.ts packages/cli/src/record/record.test.ts",
+    "test": "tsx --test packages/llm/src/config.test.ts server/src/agent.test.ts packages/cli/src/scan.test.ts packages/cli/src/template.test.ts packages/cli/src/enrich.test.ts packages/cli/src/annotate.test.ts packages/cli/src/setup/setup.test.ts packages/cli/src/studio/studio.test.ts packages/cli/src/record/record.test.ts",
     "check": "tsc --noEmit -p server && tsc --noEmit -p packages/cli && npm run test",
     "tour:record": "tsx packages/cli/src/main.ts tour:record --config examples/iconnect-demo/compass.config.yaml",
     "enrich": "tsx packages/cli/src/main.ts enrich --config examples/iconnect-demo/compass.config.yaml",
     "annotate": "tsx packages/cli/src/main.ts annotate --config examples/iconnect-demo/compass.config.yaml",
     "pack": "node scripts/pack.mjs",
     "setup": "tsx packages/cli/src/main.ts setup",
-    "e2e:setup": "bash scripts/e2e-setup.sh"
+    "e2e:setup": "bash scripts/e2e-setup.sh",
+    "studio": "tsx packages/cli/src/main.ts studio"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { setup } from './setup/setup';
 import { doctor, formatChecks } from './setup/doctor';
 import { VERSION } from './version';
+import { startStudio } from './studio/server';
 import { resolveLlmConfig } from '@wealthcompass/llm';
 
 function arg(name: string, fallback?: string): string | undefined {
@@ -24,6 +25,21 @@ if (command === 'doctor' && arg('app')) {
   const failed = checks.filter((c) => c.status === 'fail').length;
   console.log(failed ? `\n${failed} mục cần sửa.` : '\nMọi thứ đã nối đúng.');
   process.exit(failed ? 1 : 0);
+} else if (command === 'studio') {
+  // Giao diện web trên máy dev, thay cho việc gõ từng lệnh
+  const repoTarballs = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'dist', 'tarballs');
+  const tgz = process.env['COMPASS_TARBALLS'] ?? repoTarballs;
+  const { url } = await startStudio({
+    port: Number(arg('port', '5310')),
+    open: arg('app'),
+    tarballs: existsSync(join(tgz, `wealthcompass-angular-${VERSION}.tgz`)) ? tgz : null,
+  });
+  console.log(`WealthCompass Studio: ${url}\n(chỉ mở trên máy này; Ctrl+C để tắt, các tiến trình Studio mở sẽ dừng theo)`);
+  if (!process.argv.includes('--no-open')) {
+    const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+    (await import('node:child_process')).spawn(opener, [url], { stdio: 'ignore', detached: true, shell: process.platform === 'win32' }).unref();
+  }
+  process.on('SIGINT', () => process.exit(0));
 } else if (command === 'setup') {
   const app = arg('app');
   if (!app) {
@@ -118,6 +134,6 @@ if (command === 'doctor' && arg('app')) {
     dryRun: process.argv.includes('--dry-run'),
   });
 } else {
-  console.log('Cách dùng: wealthcompass setup --app <dir> | doctor --app <dir> | scan --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--dry-run] | annotate --config <yaml> [--only ...] [--out file] [--print] | tour:record ...');
+  console.log('Cách dùng: wealthcompass studio [--app <dir>] | setup --app <dir> | doctor --app <dir> | scan --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--dry-run] | annotate --config <yaml> [--only ...] [--out file] [--print] | tour:record ...');
   process.exit(command ? 1 : 0);
 }

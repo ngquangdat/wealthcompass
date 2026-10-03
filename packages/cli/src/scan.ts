@@ -40,10 +40,19 @@ export interface FeatureContext {
   classes: import('ts-morph').ClassDeclaration[];
 }
 
+// Màn hình bị ẩn khỏi trợ lý (overrides `hidden: true`): không vào Feature Map, nhưng Studio vẫn cần thấy để bỏ ẩn
+export interface HiddenScreen {
+  id: string;
+  path: string;
+  title: string;
+  sourceRef: string;
+}
+
 export interface ScanResult {
   featureMap: FeatureMap;
   outFile: string;
   contexts: Record<string, FeatureContext>;
+  hidden: HiddenScreen[];
   // Project ts-morph đã nạp; annotate dùng lại để tính chỗ sửa mà không phải nạp lần nữa
   project: Project;
   root: string;
@@ -99,6 +108,7 @@ export function scan(configPath: string): ScanResult {
 
   const features: Feature[] = [];
   const contexts: Record<string, FeatureContext> = {};
+  const hidden: HiddenScreen[] = [];
   const targetRoute = new Map<string, Target>(); // tourId -> target (route đầu tiên chứa nó)
   let routesWithTitle = 0;
   let menuMatched = 0;
@@ -108,7 +118,10 @@ export function scan(configPath: string): ScanResult {
     const id = idFor(r);
     claimed.add(id);
     const ov = overrides.features?.[id] ?? {};
-    if (ov.hidden) continue;
+    if (ov.hidden) {
+      hidden.push({ id, path: r.path, title: ov.title ?? r.title ?? menu.get(r.path)?.at(-1) ?? r.path, sourceRef: r.sourceRef });
+      continue;
+    }
 
     const menuPath = menu.get(r.path) ?? [];
     if (menuPath.length) menuMatched++;
@@ -223,5 +236,5 @@ export function scan(configPath: string): ScanResult {
   const outFile = resolve(root, config.discovery.out);
   writeFileSync(outFile, JSON.stringify(featureMap, null, 2) + '\n');
   writeFileSync(lockFile, JSON.stringify(lock, null, 2) + '\n');
-  return { featureMap, outFile, contexts, project, root, layouts };
+  return { featureMap, outFile, contexts, hidden, project, root, layouts };
 }

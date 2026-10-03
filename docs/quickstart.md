@@ -1,4 +1,28 @@
-# Gắn WealthCompass vào một web Angular trong 3 bước
+# Gắn WealthCompass vào một web Angular
+
+## Cách dễ nhất: WealthCompass Studio (giao diện web)
+
+```bash
+cd ~/wealthcompass && npm install && npm run pack   # một lần
+npm run studio                                      # mở Studio trên trình duyệt
+```
+
+Web đã cài gói `@wealthcompass/cli` thì mở bằng `npx wealthcompass studio` ngay trong thư mục web.
+
+Studio chạy trên máy của bạn (chỉ nghe `127.0.0.1`, đường link có token riêng mỗi lần mở) và làm mọi bước bằng chuột:
+
+| Trang | Làm gì |
+| --- | --- |
+| **Mở dự án** | Duyệt thư mục, thư mục là web Angular được đánh dấu; danh sách dự án mở gần đây |
+| **Tổng quan** | Số màn hình, số nội dung AI chờ duyệt, checklist tích hợp xanh/vàng/đỏ kèm nút tới chỗ sửa, cảnh báo của trình quét |
+| **Tích hợp** | 3 bước: tạo thay đổi (chọn lĩnh vực, AI soạn nháp) → xem diff từng file, bỏ chọn được từng đoạn → áp và cài gói (log chạy trực tiếp). Nút **Cập nhật gói** khi có bản WealthCompass mới |
+| **Màn hình** | Bảng mọi màn hình, lọc *chờ duyệt / thiếu mô tả / đã ẩn*; bấm một dòng để sửa tiêu đề, mô tả, từ khóa, câu hỏi mẫu, ẩn khỏi trợ lý; **Duyệt** nội dung AI; **AI soạn** phần còn trống |
+| **Chạy thử** | Bật/tắt backend WealthCompass và web của dự án, xem log, mở web; sửa cấu hình backend (`wealthcompass.env`) bằng form |
+| **Cài đặt AI** | Nhà cung cấp, model, đang dùng khóa từ đâu, nhập khóa cho riêng phiên Studio, thử kết nối, công tắc cho AI đọc mã nguồn |
+
+Nguyên tắc vẫn như dòng lệnh: code của web chỉ đổi khi bạn xem diff rồi bấm **Áp**; khóa AI không bao giờ ghi vào file. Các trang Quyền, Gắn tourId, Tour, Domain Pack, Thử trợ lý, Kiểm thử, Nhật ký sẽ có ở đợt sau.
+
+## Cách dòng lệnh (3 bước)
 
 Điều kiện: web Angular **20 trở lên**, có source và sửa được, đăng nhập bằng **JWT**. Đã chạy thật trên hai web khác ngành: web đầu tư mô phỏng TCInvest (`examples/iconnect-demo`) và cổng nhân sự tạo mới từ `ng new` (`examples/hr-portal`).
 

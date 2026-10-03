@@ -9,13 +9,14 @@ WealthCompass là trợ lý AI tích hợp trực tiếp vào web đầu tư, ba
 1. **Lúc build (CI):** script `ts-morph` đọc source Angular (routes, menu, template) và sinh `feature-map.json`. Indexer embedding feature map vào PostgreSQL + pgvector.
 2. **Lúc chạy:** widget chat trên web gửi câu hỏi kèm ngữ cảnh cho agent backend. Agent tìm trong index, gọi LLM, rồi trả về câu trả lời cùng lệnh điều hướng/tour để frontend thực thi bằng Driver.js.
 
-## Gắn vào một web Angular (3 bước)
+## Gắn vào một web Angular
 
 ```bash
-cd ~/wealthcompass && npm install && npm run pack        # 1. đóng gói (một lần)
-npm run setup -- --app ~/du-an/my-web                    # 2. dò dự án + AI soạn nháp, xuất một patch
-cd ~/du-an/my-web && git apply wealthcompass-setup.patch && npm install   # 3. duyệt rồi áp
+cd ~/wealthcompass && npm install && npm run pack        # đóng gói (một lần)
+npm run studio                                           # mở WealthCompass Studio: làm mọi bước trên giao diện web
 ```
+
+Thích dòng lệnh: `npm run setup -- --app ~/du-an/my-web`, duyệt rồi `git apply wealthcompass-setup.patch`.
 
 Chi tiết: [docs/quickstart.md](docs/quickstart.md). Thử toàn bộ quy trình trên web mẫu: `npm run e2e:setup`.
 

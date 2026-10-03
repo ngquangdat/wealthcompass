@@ -420,13 +420,14 @@ Bản demo local đã hiện thực lát cắt dọc đầu tiên của kiến t
 | 4.6 đối chiếu runtime | Chưa | |
 | 5.1 Chia gói, 5.3 cài vào app | Có | `npm run pack` ra 5 gói `.tgz` (angular qua ng-packagr partial compilation; cli/server một file bin). Thay `ng add` bằng `wealthcompass setup`: dò dự án, sinh config, AI soạn nháp, xuất một patch (gói, style, provider nối vào service đăng nhập, widget), báo cáo việc cần duyệt, và `doctor` kiểm tra kết nối. Đã chạy thật trên web HR tạo mới từ `ng new` (khác ngành): patch áp sạch, build được, chat chạy |
 | 5.3 `TargetResolver`, 5.4 tour engine, 5.5 an toàn client | Một phần | Có `data-tour-id`/testid/id/aria-label, chờ bằng MutationObserver, bước `advanceOn: click`, tour qua nhiều route, `user-only`. Có `tour:record` (mục 8, chặn lần bấm vào phần tử user-only khi ghi). Chưa lưu trạng thái tour khi reload |
+| Studio (giao diện tích hợp) | Đợt 1 có | `wealthcompass studio`: web chạy trên máy dev (127.0.0.1 + token, kiểm Host) bọc các lệnh sẵn có. Có: mở dự án, tổng quan, tích hợp có xem diff và chọn từng đoạn, sửa và duyệt dữ liệu màn hình, chạy backend/web kèm log, cài đặt AI. Đợt 2-3: quyền, tourId, tour, Domain Pack, thử trợ lý, kiểm thử hit@3, nhật ký |
 | 6.1 Triển khai tự host | Một phần | Backend là gói `@wealthcompass/server` (`npx wealthcompass-server --env-file wealthcompass.env`); chưa có `docker compose`/Helm (đã hoãn) |
 | 6.2 Xác thực JWT/JWKS | Có | Xác minh RS256 qua JWKS, kiểm issuer/audience; IdP giả lập chỉ để demo. Đã thử token `alg:none` giả mạo (bị từ chối) |
 | 6.3 Dữ liệu, index theo phiên bản | Chưa | Feature Map nạp từ file và tự nạp lại khi đổi; chưa có Postgres/pgvector, version `active` |
 | 6.4 LLM | Một phần | Client tương thích OpenAI, stream, tool-calling; preset DeepSeek (mặc định) và Gemini; chế độ dự phòng khi LLM lỗi. Đã chạy thật với DeepSeek V4 Flash (~2,7 giây/câu). Chưa có hai bậc mô hình, cache ngữ nghĩa, hạn mức token |
 | 6.6 Tìm kiếm | Một phần | BM25 + từ điển đồng nghĩa + thưởng cụm từ + lọc quyền + ngưỡng điểm; chưa có embedding/rerank |
 | 7. Domain Pack | Một phần | `finance-vn` và `generic` (đóng kèm gói cli/server); chưa có seed eval |
-| 9. Kiểm thử | Một phần | 53 test + 1 E2E Chrome tùy chọn (scanner, template, enrich, annotate, setup cả standalone lẫn NgModule và đường --ai-code với LLM giả, soạn nháp tour, gộp YAML, agent với LLM giả) và `npm run e2e:setup` chạy trọn quy trình tích hợp trên web HR. Chưa có ma trận fixture nhiều phiên bản Angular, hit@3, Playwright |
+| 9. Kiểm thử | Một phần | 61 test + 1 E2E Chrome tùy chọn (scanner, template, enrich, annotate, setup cả standalone lẫn NgModule và đường --ai-code với LLM giả, soạn nháp tour, gộp YAML, agent với LLM giả) và `npm run e2e:setup` chạy trọn quy trình tích hợp trên web HR. Chưa có ma trận fixture nhiều phiên bản Angular, hit@3, Playwright |
 
 **Phát hiện khi hiện thực**
 

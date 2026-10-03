@@ -107,13 +107,18 @@ async function buildBin(dir, { name, entry, bin }) {
     logLevel: 'warning',
   });
   cpSync(join(root, 'packs'), join(dest, 'packs'), { recursive: true });
+  // CLI kèm giao diện Studio đã build (phục vụ bởi lệnh `wealthcompass studio`)
+  if (name === 'cli') {
+    run('npm', ['run', 'build', '-w', 'studio-ui', '--silent']);
+    cpSync(join(root, 'packages', 'studio-ui', 'dist', 'studio-ui', 'browser'), join(dest, 'studio-ui'), { recursive: true });
+  }
   const deps = Object.fromEntries(Object.entries(pkg.dependencies ?? {}).filter(([k]) => !k.startsWith('@wealthcompass/')));
   writeJson(join(dest, 'package.json'), {
     name: `@wealthcompass/${name}`,
     version: VERSION,
     type: 'module',
     bin: { [bin]: `./bin/${bin}.mjs` },
-    files: ['bin', 'packs'],
+    files: name === 'cli' ? ['bin', 'packs', 'studio-ui'] : ['bin', 'packs'],
     engines: { node: '>=20' },
     dependencies: deps,
   });

@@ -4,6 +4,8 @@
 
 Cập nhật: 2026-10-02
 
+> Đây là plan v1 cho một web đầu tư cụ thể. Bản áp dụng cho bất kỳ web Angular nào xem [universal-plan.md](universal-plan.md); phần đặc thù ngành ở đây sẽ chuyển thành Domain Pack `finance-vn`.
+
 ## Tổng quan
 
 WealthCompass là trợ lý AI nhúng vào web đầu tư (Angular), giúp người dùng tìm đúng tính năng bằng câu hỏi tự nhiên rồi dẫn tour từng bước ngay trên giao diện. Hệ thống gồm hai lớp: **tri thức** (feature map sinh từ source code, được embedding) và **hành động** (agent trả lời, điều hướng, highlight, chạy tour).

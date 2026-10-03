@@ -11,7 +11,8 @@ WealthCompass là trợ lý AI tích hợp trực tiếp vào web đầu tư, ba
 
 ## Tài liệu
 
-- [Plan kỹ thuật](docs/technical-plan.md)
+- [Plan kỹ thuật v1](docs/technical-plan.md): bản cho một web đầu tư cụ thể
+- [Plan kỹ thuật tổng quát](docs/universal-plan.md): áp vào bất kỳ web Angular nào (hợp đồng, discovery 4 tầng, đa tenant, Domain Pack, lộ trình)
 
 ## Trạng thái
 

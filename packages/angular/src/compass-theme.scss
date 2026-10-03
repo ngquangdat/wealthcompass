@@ -1,0 +1,39 @@
+/* Giao diện tối của popover tour. Thêm cùng driver.js/dist/driver.css vào mảng styles của web chủ.
+   Đổi màu bằng cách ghi đè biến --compass-* ở :root. */
+:root {
+  --compass-surface: #2e2e2e;
+  --compass-text: #f5f5f5;
+  --compass-text-muted: #bebebe;
+  --compass-accent: #ff3747;
+  --compass-accent-muted: #434343;
+}
+
+.driver-popover.compass-popover {
+  background: var(--compass-surface);
+  color: var(--compass-text);
+  border-radius: 8px;
+  padding: 14px 16px;
+  max-width: 300px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
+  font-family: Roboto, sans-serif;
+
+  .driver-popover-title { font-size: 15px; font-weight: 500; color: var(--compass-text); }
+  .driver-popover-description { font-size: 13.5px; line-height: 1.5; color: var(--compass-text-muted); margin-top: 6px; }
+  .driver-popover-progress-text { color: var(--compass-text-muted); font-size: 12px; }
+  .driver-popover-footer button {
+    background: var(--compass-accent);
+    color: #fff;
+    border: 0;
+    text-shadow: none;
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .driver-popover-footer button.driver-popover-prev-btn { background: var(--compass-accent-muted); }
+  .driver-popover-close-btn { color: var(--compass-text-muted); }
+  .driver-popover-arrow-side-top.driver-popover-arrow { border-bottom-color: var(--compass-surface); }
+  .driver-popover-arrow-side-bottom.driver-popover-arrow { border-top-color: var(--compass-surface); }
+  .driver-popover-arrow-side-left.driver-popover-arrow { border-right-color: var(--compass-surface); }
+  .driver-popover-arrow-side-right.driver-popover-arrow { border-left-color: var(--compass-surface); }
+}

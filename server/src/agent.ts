@@ -137,6 +137,9 @@ export async function* runAgent(
         }
       }
       if (!calls.length) break;
+      // Đã viết câu trả lời cùng lượt với các lệnh chỉ hiện nút: không gọi thêm lượt nữa, tránh lặp câu
+      const onlyOffers = calls.every((c) => ['offer_tour', 'offer_navigate', 'handoff_support'].includes(c.function.name));
+      const finishAfterTools = onlyOffers && text.trim().length > 0;
 
       messages.push({ role: 'assistant', content: text || null, tool_calls: calls });
       for (const call of calls) {
@@ -192,6 +195,7 @@ export async function* runAgent(
         }
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
       }
+      if (finishAfterTools) break;
     }
 
     if (!anyText) {

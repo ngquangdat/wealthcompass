@@ -19,7 +19,7 @@ const request = (message: string): ChatRequest => ({
 
 async function run(script: MockTurn[], message: string, roles = ['bond_account']) {
   const llm = await startMockLlm(script);
-  const deps: AgentDeps = { config: { ...base, llm: { baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store, pack, log: () => undefined };
+  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store, pack, log: () => undefined };
   const events: ChatEvent[] = [];
   for await (const e of runAgent(deps, { id: 't', name: 't', roles }, request(message), new AbortController().signal)) events.push(e);
   await llm.close();
@@ -74,7 +74,7 @@ test('PII bị che trước khi gửi LLM', async () => {
 });
 
 test('LLM lỗi: chuyển sang trả lời dự phòng từ bản đồ tính năng, vẫn có nút tour', async () => {
-  const deps: AgentDeps = { config: { ...base, llm: { baseUrl: 'http://127.0.0.1:1', apiKey: 'x', model: 'm' } }, store, pack, log: () => undefined };
+  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: 'http://127.0.0.1:1', apiKey: 'x', model: 'm' } }, store, pack, log: () => undefined };
   const events: ChatEvent[] = [];
   for await (const e of runAgent(deps, { id: 't', name: 't', roles: ['bond_account'] }, request('bán trái phiếu ở đâu'), new AbortController().signal)) events.push(e);
   assert.match(text(events), /Tài sản trái phiếu/);
@@ -83,9 +83,19 @@ test('LLM lỗi: chuyển sang trả lời dự phòng từ bản đồ tính n�
 });
 
 test('dự phòng: tài khoản thiếu quyền trái phiếu được giải thích, không bị dẫn sang màn hình khác', async () => {
-  const deps: AgentDeps = { config: { ...base, llm: { baseUrl: 'http://127.0.0.1:1', apiKey: 'x', model: 'm' } }, store, pack, log: () => undefined };
+  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: 'http://127.0.0.1:1', apiKey: 'x', model: 'm' } }, store, pack, log: () => undefined };
   const events: ChatEvent[] = [];
   for await (const e of runAgent(deps, { id: 't', name: 't', roles: ['stock_account'] }, request('bán trái phiếu ở đâu'), new AbortController().signal)) events.push(e);
   assert.match(text(events), /cần quyền bond_account/);
   assert.equal(events.some((e) => e.type === 'offer_tour' || e.type === 'offer_navigate'), false);
+});
+
+test('LLM viết câu trả lời cùng lượt với offer_tour: không gọi thêm lượt, không lặp câu', async () => {
+  const { events, llm } = await run(
+    [{ text: 'Vào tab **Tài sản**. Bấm nút bên dưới nhé.', toolCalls: [{ name: 'offer_tour', args: { tour_id: 'sell-bond' } }] }, { text: 'LẶP LẠI' }],
+    'Bán trái phiếu ở đâu?',
+  );
+  assert.equal(llm.requests.length, 1);
+  assert.equal(text(events).includes('LẶP LẠI'), false);
+  assert.equal(events.some((e) => e.type === 'offer_tour'), true);
 });

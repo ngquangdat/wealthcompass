@@ -421,10 +421,10 @@ Bản demo local đã hiện thực lát cắt dọc đầu tiên của kiến t
 | 6.1 Triển khai tự host | Một phần | Chạy bằng npm; chưa có `docker compose`/Helm (đã hoãn) |
 | 6.2 Xác thực JWT/JWKS | Có | Xác minh RS256 qua JWKS, kiểm issuer/audience; IdP giả lập chỉ để demo. Đã thử token `alg:none` giả mạo (bị từ chối) |
 | 6.3 Dữ liệu, index theo phiên bản | Chưa | Feature Map nạp từ file và tự nạp lại khi đổi; chưa có Postgres/pgvector, version `active` |
-| 6.4 LLM | Một phần | Client tương thích OpenAI, stream, tool-calling; chế độ dự phòng khi LLM lỗi. Chưa có hai bậc mô hình, cache ngữ nghĩa, hạn mức token |
+| 6.4 LLM | Một phần | Client tương thích OpenAI, stream, tool-calling; preset DeepSeek (mặc định) và Gemini; chế độ dự phòng khi LLM lỗi. Đã chạy thật với DeepSeek V4 Flash (~2,7 giây/câu). Chưa có hai bậc mô hình, cache ngữ nghĩa, hạn mức token |
 | 6.6 Tìm kiếm | Một phần | BM25 + từ điển đồng nghĩa + thưởng cụm từ + lọc quyền + ngưỡng điểm; chưa có embedding/rerank |
 | 7. Domain Pack | Một phần | `packs/finance-vn` (glossary, topics chặn, mẫu từ chối, system prompt); chưa có `pack-generic`, chưa có seed eval |
-| 9. Kiểm thử | Một phần | 16 test (scanner 7, agent 9 với LLM giả). Chưa có ma trận fixture nhiều phiên bản Angular, hit@3, Playwright |
+| 9. Kiểm thử | Một phần | 17 test (scanner 7, agent 10 với LLM giả). Chưa có ma trận fixture nhiều phiên bản Angular, hit@3, Playwright |
 
 **Phát hiện khi hiện thực**
 
@@ -432,7 +432,9 @@ Bản demo local đã hiện thực lát cắt dọc đầu tiên của kiến t
 - Câu hỏi "ở đâu/cách làm" chứa động từ như "đặt lệnh bán ở đâu" suýt bị chặn nhầm là "nhờ đặt hộ"; mẫu chặn phải yêu cầu từ "giúp/hộ" đi kèm. Đã có test.
 - Route cha chỉ làm khung (có `children`) không phải là màn hình; target của khung (thanh tab dưới) được gán cho mọi route con, và route của bước tour lấy route đầu tiên chứa target đó. Engine chỉ điều hướng khi phần tử chưa hiện.
 - Hạn mức LLM là rủi ro vận hành thật (khóa Gemini dùng thử đã hết tiền trả trước khi demo): chế độ dự phòng không chỉ là tính năng phụ mà cần có từ MVP.
-- Model mặc định đã phải đổi: `gemini-2.5-flash` không còn cho tài khoản mới (404), dùng `gemini-3.5-flash`. Tên model nên luôn nằm trong cấu hình, không nằm trong code.
+- Tên model phải nằm trong cấu hình, không nằm trong code: `gemini-2.5-flash` đã không còn cho tài khoản mới (404). Mô hình suy luận (DeepSeek V4) có `reasoning_content` riêng nên client chỉ lấy `content`; có thể hạ `reasoning_effort` để nhanh hơn.
+- Widget phải tự đóng gói tài nguyên: bản đầu phụ thuộc font Material Icons và CSS popover nằm trong app chủ; đã chuyển sang icon SVG nội bộ và `compass-theme.scss` để gắn vào web khác chỉ cần thêm hai dòng `styles`.
+- Model hay viết câu kết thúc hai lần (một lần trước, một lần sau khi gọi `offer_tour`); agent dừng ngay sau lượt đã có chữ kèm lệnh chỉ hiện nút.
 
 ## 14. Câu hỏi mở
 

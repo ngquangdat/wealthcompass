@@ -16,6 +16,13 @@ declare module 'fastify' {
   }
 }
 
+// Claim quyền có thể là mảng hoặc chuỗi cách nhau bằng dấu cách (kiểu scope của OAuth)
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string');
+  if (typeof value === 'string') return value.split(/[\s,]+/).filter(Boolean);
+  return [];
+}
+
 export function createAuthHook(config: ServerConfig) {
   const jwks = createRemoteJWKSet(new URL(config.jwt.jwksUrl));
 
@@ -28,7 +35,7 @@ export function createAuthHook(config: ServerConfig) {
       request.principal = {
         id: createHash('sha256').update(String(payload.sub)).digest('hex').slice(0, 12),
         name: typeof payload['name'] === 'string' ? payload['name'] : '',
-        roles: Array.isArray(payload['roles']) ? (payload['roles'] as string[]) : [],
+        roles: toStringArray(payload[config.capabilitiesClaim]),
       };
     } catch {
       return void reply.code(401).send({ error: 'invalid_token' });

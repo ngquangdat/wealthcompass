@@ -1,0 +1,309 @@
+# Hướng dẫn tích hợp WealthCompass vào một web Angular
+
+Tài liệu cho người đưa trợ lý vào một web Angular có sẵn. Mọi bước dưới đây đã chạy thật trên app demo ([demo.md](demo.md)); chỗ nào chưa hiện thực hoặc chưa kiểm thử thì ghi rõ ở mục "Giới hạn hiện tại".
+
+## 0. Điều kiện
+
+| Cần có | Chi tiết |
+| --- | --- |
+| Web Angular **20 trở lên** | Có source, sửa được (mức A). Đã kiểm thử trên Angular 22 standalone |
+| Đăng nhập bằng **JWT** | Có JWKS URL công khai (RS256/ES256...), token có `iss`, `aud`, và claim chứa quyền (mặc định `roles`) |
+| Một máy chạy backend | Node 22+; mạng ra được tới nhà cung cấp LLM (hoặc LLM on-prem tương thích OpenAI) |
+| Trình duyệt người dùng gọi được backend | Cùng domain qua reverse proxy, hoặc CORS cho origin của web |
+
+## 1. Tổng quan: ba mảnh phải nối với nhau
+
+```
+Source Angular ──scan──▶ feature-map.json ──nạp──▶ Backend (agent, tìm kiếm, JWT) ◀──SSE── Widget trong web
+   (route, menu, tourId)   (+ compass.overrides.yaml)         ▲                          (bong bóng chat + tour)
+                                                              └── xác minh token bằng JWKS của hệ thống đăng nhập
+```
+
+Thứ tự làm: (1) dựng backend, (2) chuẩn bị route/menu để scanner đọc, (3) gắn widget vào web, (4) gắn `tourId`, (5) quét và viết tour, (6) kiểm tra.
+
+## 2. Bước 1: Chạy backend
+
+Backend nằm ở `server/`. Cấu hình hoàn toàn bằng biến môi trường (mẫu: `server/.env.example`).
+
+```bash
+npm install
+PORT=8890 \
+COMPASS_MOCK_IDP=0 \
+COMPASS_JWKS_URL=https://sso.congty.vn/.well-known/jwks.json \
+COMPASS_JWT_ISSUER=https://sso.congty.vn \
+COMPASS_JWT_AUDIENCE=web-dau-tu \
+COMPASS_CAPABILITIES_CLAIM=roles \
+COMPASS_ORIGINS=https://web.congty.vn \
+COMPASS_FEATURE_MAP=/duong/dan/feature-map.json \
+COMPASS_PACK=packs/finance-vn \
+COMPASS_LLM_PROVIDER=deepseek COMPASS_LLM_API_KEY=... \
+npm run server
+```
+
+| Biến | Ý nghĩa | Mặc định |
+| --- | --- | --- |
+| `COMPASS_MOCK_IDP` | `0` để tắt IdP giả lập (**bắt buộc tắt ngoài demo**) | `1` |
+| `COMPASS_JWKS_URL`, `COMPASS_JWT_ISSUER`, `COMPASS_JWT_AUDIENCE` | Xác minh chữ ký, nhà phát hành, đối tượng của JWT | trỏ IdP giả lập |
+| `COMPASS_CAPABILITIES_CLAIM` | Tên claim chứa quyền; chấp nhận mảng hoặc chuỗi cách nhau bằng dấu cách/phẩy | `roles` |
+| `COMPASS_ORIGINS` | Origin được gọi (CORS), phân tách bằng dấu phẩy | `localhost:4200` |
+| `COMPASS_FEATURE_MAP` | File Feature Map; tự nạp lại khi file đổi | file của demo |
+| `COMPASS_PACK` | Thư mục Domain Pack | `packs/finance-vn` |
+| `COMPASS_LLM_PROVIDER` | `deepseek` hoặc `gemini` (preset base URL + model + tên biến khóa) | `deepseek` |
+| `COMPASS_LLM_BASE_URL`, `COMPASS_LLM_MODEL`, `COMPASS_LLM_API_KEY` | Ghi đè preset, dùng cho endpoint tương thích OpenAI bất kỳ (vLLM, Ollama on-prem...) | theo preset |
+| `COMPASS_LLM_REASONING_EFFORT` | `low`/`high`/`max` cho mô hình suy luận, `low` nhanh hơn | không đặt |
+| `COMPASS_RATE_MAX` | Số câu hỏi tối đa mỗi người trong 10 phút | `30` |
+
+Khóa LLM tìm theo thứ tự: `COMPASS_LLM_API_KEY` → biến môi trường của preset (`DEEPSEEK_API_KEY`/`GOOGLE_API_KEY`) → đúng biến đó trong `COMPASS_ENV_FILE` (mặc định `~/tcbs-agent/.env`, chỉ đọc một biến, không nạp cả file). **Môi trường thật nên đặt `COMPASS_LLM_API_KEY` bằng secret của hệ thống, không dựa vào file `.env` của dự án khác.**
+
+Kiểm tra: `GET /v1/health` trả `llmConfigured: true`, số `features` và `tours` đúng kỳ vọng.
+
+**Đặt sau reverse proxy** (nginx/ingress): chat dùng SSE nên phải tắt buffering và nới timeout, nếu không chữ không hiện dần.
+
+```nginx
+location /v1/ {
+  proxy_pass http://127.0.0.1:8890;
+  proxy_http_version 1.1;
+  proxy_buffering off;
+  proxy_read_timeout 120s;
+}
+```
+
+## 3. Bước 2: Chuẩn bị route, menu, guard để scanner đọc được
+
+Scanner đọc source nên chất lượng câu trả lời phụ thuộc vào mức đủ của dữ liệu này.
+
+**Route.** Mỗi màn hình nên có `data` (hoặc khai báo thay thế ở `compass.overrides.yaml`):
+
+```ts
+{
+  path: 'assets',
+  loadComponent: () => import('./assets.page').then((m) => m.AssetsPage),
+  data: {
+    title: 'Tài sản trái phiếu iConnect',                 // bắt buộc
+    description: 'Danh mục trái phiếu đang nắm giữ...',   // bắt buộc; mô tả nghiệp vụ, không mô tả kỹ thuật
+    keywords: ['ban trai phieu', 'danh muc'],            // cách người dùng hay gọi, có thể không dấu
+    facets: { product: 'bond' },                          // tùy chọn, do Domain Pack định nghĩa
+    // compassId: 'bond.assets',                          // tùy chọn: cố định id, không đổi khi đổi route
+    // hidden: true,                                      // bỏ khỏi trợ lý (trang đăng nhập, trang lỗi...)
+  },
+}
+```
+
+**Menu.** Một mảng literal được export, mỗi phần tử có `label`, `route`, `children`. Scanner dùng nó để trả lời "nằm ở đâu trong menu" (`menuPath`). Nếu menu của web sinh động từ API thì khai báo tĩnh một bản cho scanner hoặc ghi `menuPath` qua overrides.
+
+**Guard → quyền.** Scanner không hiểu guard làm gì, nên khai báo ánh xạ trong `compass.config.yaml`:
+
+```yaml
+access:
+  guards:
+    authGuard: { requires: [] }
+    bondAccountGuard: { requires: [bond_account] }   # tên quyền phải trùng giá trị trong claim của JWT
+```
+
+Guard chưa ánh xạ sẽ báo cảnh báo và ghi vào `unknownGuards`.
+
+## 4. Bước 3: Gắn widget vào web
+
+### 4.1 Lấy gói
+
+Các gói `@wealthcompass/*` **chưa publish lên npm** và chưa có schematic `ng add`. Có hai cách dùng:
+
+- **Cùng monorepo/workspace:** đặt `packages/contracts`, `packages/core`, `packages/angular` cạnh web và khai báo npm workspaces (như repo này).
+- **Copy và dùng tsconfig paths** (cách demo đang dùng), trong `tsconfig.json` của web:
+
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@wealthcompass/angular": ["../wealthcompass/packages/angular/src/index.ts"],
+      "@wealthcompass/core": ["../wealthcompass/packages/core/src/index.ts"],
+      "@wealthcompass/contracts": ["../wealthcompass/packages/contracts/src/index.ts"]
+    }
+  }
+}
+```
+
+Cài thêm `driver.js` (`npm i driver.js`). Không có font hay icon phụ thuộc: widget dùng SVG nội bộ.
+
+### 4.2 Style
+
+Thêm vào mảng `styles` của project trong `angular.json`:
+
+```json
+"styles": [
+  "driver.js/dist/driver.css",
+  "../wealthcompass/packages/angular/src/compass-theme.scss",
+  "src/styles.scss"
+]
+```
+
+Đổi màu popover tour bằng cách ghi đè biến ở `:root`: `--compass-surface`, `--compass-text`, `--compass-text-muted`, `--compass-accent`, `--compass-accent-muted`.
+
+### 4.3 Cấu hình provider (`app.config.ts`)
+
+```ts
+import { inject } from '@angular/core';
+import { provideCompass } from '@wealthcompass/angular';
+
+provideCompass(() => {
+  const auth = inject(AuthService);            // service đăng nhập sẵn có của web
+  return {
+    apiBaseUrl: 'https://web.congty.vn',           // gốc của backend; widget gọi {apiBaseUrl}/v1/chat, /v1/tours/...
+    getToken: () => auth.accessToken(),            // trả JWT hiện tại, hoặc null khi chưa đăng nhập
+    getCapabilities: () => auth.roles(),           // chỉ để hiển thị/gợi ý; backend dùng quyền trong JWT
+    title: 'Trợ lý hướng dẫn',
+    subtitle: 'Hỏi tôi tính năng nằm ở đâu',
+    suggestions: ['Bán trái phiếu ở đâu?', 'Cách nộp tiền vào tài khoản?'],
+    // Tùy chọn: siết thêm an toàn phía client (quy tắc nền không tắt được)
+    safety: { userOnly: ['button.confirm-order'], blockedRoutes: ['/settings/security'] },
+  };
+}),
+```
+
+`getToken()` được gọi mỗi request, nên token làm mới tự động được dùng ngay. Backend **không tin** `getCapabilities`; quyền thật lấy từ JWT đã xác minh.
+
+### 4.4 Đặt widget
+
+Trong component gốc, chỉ hiện khi đã đăng nhập:
+
+```ts
+imports: [RouterOutlet, ChatWidgetComponent],
+```
+```html
+<router-outlet />
+@if (auth.user()) { <compass-chat-widget /> }
+```
+
+Bong bóng cố định ở góc phải dưới (`right: 16px; bottom: 76px`, `z-index: 9000`). Thanh điều hướng cố định ở đáy của web cao hơn 76px thì chỉnh `bottom` trong `chat-widget.component.ts`.
+
+**App còn dùng NgModule:** `provideCompass(...)` đặt vào `providers` của `AppModule`; `ChatWidgetComponent` và `TourIdDirective` là standalone nên thêm vào `imports` của module. Cách này **chưa được kiểm thử** (xem mục 9).
+
+## 5. Bước 4: Gắn `tourId` vào template
+
+`tourId` đánh dấu phần tử mà tour có thể trỏ tới. Chỉ cần gắn cho phần tử then chốt của luồng cần hướng dẫn (lối vào, tab, nút hành động chính).
+
+```html
+<a routerLink="/iconnect/price-board"
+   tourId="home-shortcut-iconnect"
+   tourLabel="Giao dịch iConnect"
+   tourHint="Lối vào bảng giá và giao dịch trái phiếu">…</a>
+
+<button tourId="assets-sell-button" tourRole="user-only" (click)="openTicket(h)">BÁN</button>
+```
+
+Quy tắc:
+
+1. Import `TourIdDirective` vào component standalone chứa phần tử.
+2. Viết **chuỗi tĩnh** (`tourId="x"` hoặc `[tourId]="'x'"`). Scanner chỉ đọc được literal; id sinh động (`[tourId]="item.id"`) không được quét và tour sẽ bị loại.
+3. Id ổn định, dạng `màn-hình-phần-tử` (`assets-select-sell`). Đổi id là phá tour, nên coi như API công khai.
+4. Nút **giao dịch, xác nhận, nhập mật khẩu/OTP** luôn gắn `tourRole="user-only"`: tour chỉ tô sáng và giải thích, không bao giờ click hay điền. Thêm vào đó engine còn tự coi `input[type=password]`, ô OTP, ô thẻ, `[data-sensitive]` là user-only.
+5. Phần tử lặp trong danh sách có thể dùng chung một `tourId`; tour trỏ vào phần tử hiển thị đầu tiên.
+6. Phần tử nằm trong khung chung (thanh tab dưới, header) nên gắn ở component khung; scanner tự gán nó cho mọi route con.
+
+## 6. Bước 5: Quét và viết tour
+
+### 6.1 Cấu hình quét
+
+`compass.config.yaml` đặt cùng thư mục với `tsconfig.app.json` của web:
+
+```yaml
+domainPack: finance-vn
+locale: vi
+discovery:
+  entry: src/app/app.routes.ts                 # file khai báo mảng Routes gốc
+  menu: src/app/shared/menu.config.ts          # tùy chọn
+  overrides: compass.overrides.yaml
+  out: feature-map.json
+access:
+  guards:
+    authGuard: { requires: [] }
+```
+
+An toàn phía client (selector `user-only` bổ sung, route tour không bao giờ được dẫn tới) khai trong `provideCompass({ safety: {...} })` ở bước 4.3, vì engine chạy trong trình duyệt. Mục `safety` trong file yaml của bản demo hiện chưa được dùng.
+
+### 6.2 Viết tour và câu hỏi mẫu (`compass.overrides.yaml`)
+
+```yaml
+features:
+  iconnect.assets:
+    sampleQuestions: [bán trái phiếu ở đâu, cách bán lại trái phiếu trước hạn]
+tours:
+  sell-bond:
+    title: Bán trái phiếu trên iConnect
+    feature: iconnect.assets              # tính năng mà tour dẫn tới (id của Feature Map)
+    startRoute: /home
+    steps:
+      - target: home-shortcut-iconnect    # tourId
+        advanceOn: click                  # chờ người dùng tự bấm vào phần được tô sáng
+        text: "Bấm **Giao dịch iConnect** để vào bảng giá."
+      - target: assets-sell-button        # bước cuối: chỉ tô sáng, người dùng tự thao tác
+        text: "Bấm **BÁN** ở dòng muốn bán. Bạn tự nhập và xác nhận lệnh."
+```
+
+- `advanceOn: click` (người dùng bấm vào phần tử được tô sáng) hoặc `next` (bấm nút "Tiếp" của popover). Phần tử `user-only` luôn dùng `next`.
+- Route của từng bước tự suy ra từ template; tour chỉ điều hướng khi phần tử chưa hiện.
+- `text` hỗ trợ `**đậm**`.
+
+### 6.3 Quét
+
+```bash
+npm run scan -- --config duong/dan/compass.config.yaml      # trong repo này: npm run scan
+npx tsx packages/cli/src/main.ts scan --config ... --strict # trả mã lỗi 1 nếu còn cảnh báo (dùng trong CI)
+```
+
+Đọc báo cáo: số màn hình, % có tiêu đề, % có trên menu, số `tourId`, số tour hợp lệ, danh sách cảnh báo (thiếu `title`/`description`, route không có trên menu, guard chưa ánh xạ, tour tham chiếu `tourId` không tồn tại, route đổi tên). **Mục tiêu trước khi chạy thật: 100% có tiêu đề, 100% có trên menu, 0 cảnh báo.**
+
+Kết quả là `feature-map.json` và `compass.lock.json` (giữ `id` ổn định khi đổi tên route). Commit cả hai. Backend tự nạp lại `feature-map.json` khi file đổi, nên đưa file lên máy chạy backend là đủ. **Đưa vào CI:** chạy `scan --strict` mỗi build, có thay đổi thì triển khai file mới cùng bản web.
+
+## 7. Domain Pack (nội dung theo ngành)
+
+`COMPASS_PACK` trỏ tới một thư mục:
+
+| File | Nội dung |
+| --- | --- |
+| `pack.yaml` | Tên, phiên bản, locale |
+| `glossary.yaml` | Nhóm từ đồng nghĩa (CCQ = chứng chỉ quỹ...), dùng mở rộng câu hỏi khi tìm |
+| `topics.yaml` | Mẫu regex (trên văn bản không dấu) cho chủ đề bị chặn **trước khi gọi LLM** |
+| `refusals.vi.md` | Câu từ chối cho từng chủ đề bị chặn, do pháp chế duyệt |
+| `prompt.vi.md` | System prompt của agent |
+
+Web ngành khác: sao chép `packs/finance-vn`, sửa từ điển, chủ đề chặn, mẫu từ chối và prompt. Sau khi sửa luôn chạy lại `npm run test` và thử tay vài câu hỏi để chắc mẫu chặn không chặn nhầm câu hỏi "ở đâu/làm sao" bình thường.
+
+## 8. Kiểm tra sau khi tích hợp
+
+- [ ] `GET /v1/health` đúng provider/model, `llmConfigured: true`, số `features`/`tours` đúng.
+- [ ] Đăng nhập bằng token thật: gọi `POST /v1/chat` không token trả 401; token sai chữ ký hoặc sai `aud` trả 401.
+- [ ] Hỏi 5 câu thật về tính năng: trả lời đúng đường đi, không bịa tên menu.
+- [ ] Bấm nút "Dẫn tôi đi": tour chạy hết các bước, bước cuối chỉ tô sáng nút nhạy cảm.
+- [ ] Tài khoản thiếu quyền: hỏi tính năng bị khóa nhận câu giải thích thiếu quyền; `GET /v1/tours/<id>` trả 403.
+- [ ] "Có nên mua mã X không?" bị từ chối bằng mẫu đã duyệt, log không có lượt gọi LLM.
+- [ ] Gửi câu chứa số điện thoại/số tài khoản: log chỉ thấy bản đã che (`[sdt]`, `[so-tai-khoan]`).
+- [ ] Tắt LLM (sai khóa): vẫn trả lời ở chế độ dự phòng, có ghi chú rõ.
+- [ ] Mở trên điện thoại và máy tính; widget không che nút quan trọng của web.
+
+## 9. Giới hạn hiện tại của scanner và widget
+
+Đã kiểm thử: standalone, `provideRouter`, `loadComponent`, `loadChildren` (file route export mảng), `children`, guard kế thừa từ route cha, `templateUrl` và `template`, component con khai trong `imports` của component cha, `@if/@for`.
+
+Chưa hỗ trợ hoặc chưa kiểm thử:
+
+- Route khai bằng **spread** (`...adminRoutes`) hoặc sinh từ hàm: scanner ghi cảnh báo và bỏ qua phần đó. Đường dẫn không phải chuỗi literal (hằng số `ROUTE_PATHS.x`) cũng bị bỏ qua kèm cảnh báo.
+- **NgModule**: chưa kiểm thử. Component con khai trong `declarations` (không phải `imports`) không được lần theo, nên `tourId` trong đó không được quét; chỉ `tourId` nằm trong template của chính component được route tới là chắc chắn thấy.
+- Route theo **tham số** (`:id`): đưa vào Feature Map nhưng agent không tạo nút mở thẳng (thiếu giá trị tham số); `exampleParams` chưa dùng.
+- `tourId` sinh động, phần tử trong iframe khác origin hoặc shadow DOM đóng: không hỗ trợ.
+- Widget nạp từ source (chưa build thư viện ng-packagr, chưa có `ng add`); chưa có đóng gói npm.
+- Backend: Feature Map nạp từ file (chưa có API publish và index theo phiên bản); tìm kiếm là từ khóa + đồng nghĩa (chưa có embedding); rate limit và log trong bộ nhớ/stdout.
+
+## 10. Xử lý sự cố
+
+| Triệu chứng | Nguyên nhân thường gặp | Cách xử lý |
+| --- | --- | --- |
+| Chat báo "Phiên đăng nhập hết hạn" ngay | JWT sai `iss`/`aud`, hết hạn, hoặc JWKS URL backend không truy cập được | Giải mã JWT kiểm `iss`/`aud`; `curl` thử JWKS URL từ máy backend |
+| Lỗi CORS trong console | Origin của web chưa có trong `COMPASS_ORIGINS` | Thêm đúng origin (gồm cổng) |
+| Chữ hiện một cục sau vài giây | Reverse proxy buffer SSE | `proxy_buffering off` (mục 2) |
+| Luôn trả lời "chế độ dự phòng" | LLM lỗi: hết hạn mức (402), sai khóa (401), sai tên model (404) | Xem log server (`chat_error` có mã lỗi); đổi khóa/model |
+| Hỏi bán trái phiếu mà bị chỉ tới màn hình khác | Thiếu `keywords`/`description`/`sampleQuestions` cho màn hình đúng | Bổ sung ở `route.data` hoặc overrides, quét lại |
+| Tour báo "không tìm thấy phần tử" | `tourId` bị xóa/đổi, hoặc phần tử chỉ hiện sau một thao tác | Thêm bước `advanceOn: click` trước đó; chạy `scan --strict` trong CI để bắt sớm |
+| Tour bị loại khỏi Feature Map | Bước tham chiếu `tourId` không có trong template (hoặc là chuỗi động) | Xem cảnh báo "Tour ... bị loại" khi quét |
+| Câu hỏi "ở đâu" bị từ chối như tư vấn | Mẫu trong `topics.yaml` quá rộng | Thu hẹp regex, thêm test |
+| Popover tour không có màu/kiểu | Chưa thêm `driver.css` hoặc `compass-theme.scss` vào `styles` | Mục 4.2 |

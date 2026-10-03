@@ -1,28 +1,29 @@
 import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { COMPASS_CONFIG } from './compass.config';
+import { CompassIconComponent } from './compass-icon.component';
 import { ChatAction, ChatService } from './chat.service';
 import { renderLiteMarkdown } from '@wealthcompass/core';
 import { TourService } from './tour.service';
 
 @Component({
   selector: 'compass-chat-widget',
-  imports: [FormsModule],
+  imports: [FormsModule, CompassIconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (chat.open()) {
       <section class="panel" role="dialog" aria-label="Trợ lý hướng dẫn">
         <header>
-          <div class="avatar"><span class="material-icons">explore</span></div>
+          <div class="avatar"><compass-icon name="explore" /></div>
           <div class="titles">
             <strong>{{ config.title }}</strong>
             <small>{{ config.subtitle }}</small>
           </div>
           <button class="icon" type="button" (click)="chat.clear()" title="Cuộc trò chuyện mới" aria-label="Cuộc trò chuyện mới">
-            <span class="material-icons">refresh</span>
+            <compass-icon name="refresh" />
           </button>
           <button class="icon" type="button" (click)="chat.toggle()" aria-label="Thu nhỏ">
-            <span class="material-icons">close</span>
+            <compass-icon name="close" />
           </button>
         </header>
 
@@ -45,7 +46,7 @@ import { TourService } from './tour.service';
               }
               @for (a of m.actions; track $index) {
                 <button type="button" class="action" [class.tour]="a.kind === 'tour'" (click)="run(a)">
-                  <span class="material-icons">{{ a.kind === 'tour' ? 'directions' : 'open_in_new' }}</span>
+                  <compass-icon [name]="a.kind === 'tour' ? 'directions' : 'open'" />
                   {{ a.label }}
                 </button>
               }
@@ -56,7 +57,7 @@ import { TourService } from './tour.service';
         <form class="composer" (ngSubmit)="submit()">
           <input name="q" [(ngModel)]="draft" placeholder="Nhập câu hỏi, ví dụ: bán trái phiếu ở đâu?" autocomplete="off" [disabled]="chat.busy()" />
           <button type="submit" [disabled]="chat.busy() || !draft().trim()" aria-label="Gửi">
-            <span class="material-icons">send</span>
+            <compass-icon name="send" />
           </button>
         </form>
       </section>
@@ -67,15 +68,14 @@ import { TourService } from './tour.service';
     }
 
     <button class="bubble-btn" type="button" (click)="chat.toggle()" [attr.aria-label]="chat.open() ? 'Đóng trợ lý' : 'Mở trợ lý'">
-      <span class="material-icons">{{ chat.open() ? 'keyboard_arrow_down' : 'chat' }}</span>
+      <compass-icon [name]="chat.open() ? 'down' : 'chat'" />
     </button>
   `,
   styles: `
     :host { position: fixed; right: 16px; bottom: 76px; z-index: 9000; font-family: Roboto, sans-serif; }
     .bubble-btn {
-      width: 56px; height: 56px; border-radius: 50%; border: 0; background: #ff3747; color: #fff;
+      font-size: 28px; width: 56px; height: 56px; border-radius: 50%; border: 0; background: #ff3747; color: #fff;
       display: grid; place-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.5); margin-left: auto;
-      .material-icons { font-size: 28px; }
     }
     .panel {
       position: absolute; right: 0; bottom: 68px; width: 372px; max-width: calc(100vw - 32px);
@@ -85,13 +85,13 @@ import { TourService } from './tour.service';
     }
     header { display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 12px; background: #2e2e2e; }
     .avatar { width: 34px; height: 34px; border-radius: 50%; background: #ff3747; display: grid; place-items: center; }
-    .avatar .material-icons { font-size: 20px; }
+    .avatar { font-size: 20px; }
     .titles { flex: 1; display: flex; flex-direction: column; line-height: 1.25; }
     .titles strong { font-size: 14px; font-weight: 500; }
     .titles small { color: #bebebe; font-size: 11.5px; }
     .icon { background: transparent; border: 0; color: #bebebe; border-radius: 50%; width: 32px; height: 32px; display: grid; place-items: center; }
     .icon:hover { background: #3d3d3d; color: #fff; }
-    .icon .material-icons { font-size: 20px; }
+    
 
     .messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
     .welcome { color: #bebebe; font-size: 13.5px; p { margin: 0 0 8px; } display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -112,7 +112,7 @@ import { TourService } from './tour.service';
       display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
       background: #3d3d3d; color: #f5f5f5; border: 0; border-radius: 6px; padding: 7px 12px; font-size: 13px; font-weight: 500;
     }
-    .action .material-icons { font-size: 18px; }
+    .action compass-icon { font-size: 18px; }
     .action.tour { background: #ff3747; color: #fff; }
     .action:hover { filter: brightness(1.12); }
 
@@ -125,7 +125,7 @@ import { TourService } from './tour.service';
     .composer input { flex: 1; border: 0; outline: 0; border-radius: 18px; background: #3d3d3d; color: #f5f5f5; padding: 0 14px; height: 36px; font-size: 13.5px; font-family: inherit; }
     .composer button { width: 36px; height: 36px; border-radius: 50%; border: 0; background: #ff3747; color: #fff; display: grid; place-items: center; }
     .composer button:disabled { opacity: .45; }
-    .composer .material-icons { font-size: 18px; }
+    .composer compass-icon { font-size: 18px; }
 
     .toast { position: absolute; right: 0; bottom: 68px; width: 300px; background: #3a2024; color: #ffd0d4; border-radius: 8px; padding: 10px 12px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
   `,

@@ -42,7 +42,7 @@ app.get('/v1/health', async () => ({
   features: store.featureMap.features.length,
   tours: store.featureMap.tours.length,
   llmConfigured: Boolean(config.llm.apiKey),
-  model: config.llm.model,
+  provider: config.llm.provider, model: config.llm.model,
 }));
 
 app.get('/v1/tours/:id', { preHandler: authenticate }, async (request, reply) => {

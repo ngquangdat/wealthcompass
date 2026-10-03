@@ -35,6 +35,7 @@
               "@fontsource/roboto/700.css",
               "material-icons/iconfont/material-icons.css",
               "driver.js/dist/driver.css",
+              "../../packages/angular/src/compass-theme.scss",
               "src/styles.scss"
             ]
           },

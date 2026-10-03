@@ -30,14 +30,14 @@ Các câu hỏi khác để thử: "nộp tiền vào tài khoản", "xem lãi l
 
 ## Cấu hình LLM
 
-Xem `server/.env.example`. Mặc định server dùng Gemini qua endpoint tương thích OpenAI, khóa lấy theo thứ tự `COMPASS_LLM_API_KEY` → `GOOGLE_API_KEY` → biến `GOOGLE_API_KEY` trong `~/tcbs-agent/.env` (chỉ đọc đúng biến đó). Đổi sang DeepSeek hay model on-prem bằng `COMPASS_LLM_BASE_URL` + `COMPASS_LLM_MODEL` + `COMPASS_LLM_API_KEY`.
+Xem `server/.env.example`. Mặc định server dùng **DeepSeek** (`deepseek-v4-flash`) qua endpoint tương thích OpenAI; khóa lấy theo thứ tự `COMPASS_LLM_API_KEY` → `DEEPSEEK_API_KEY` → biến `DEEPSEEK_API_KEY` trong `~/tcbs-agent/.env` (chỉ đọc đúng biến đó). Đổi sang Gemini bằng `COMPASS_LLM_PROVIDER=gemini` (khóa `GOOGLE_API_KEY`; khóa hiện có đã hết tiền trả trước ngày 2026-10-03), hay model on-prem bằng `COMPASS_LLM_BASE_URL` + `COMPASS_LLM_MODEL` + `COMPASS_LLM_API_KEY`.
 
 **Chế độ dự phòng:** khi LLM lỗi (hết hạn mức, mất mạng), agent vẫn trả lời từ bản đồ tính năng (đường đi, các bước, nút tour) và ghi chú rõ "chế độ dự phòng". `GET /v1/health` cho biết cấu hình LLM; log server ghi `chat_error` khi gọi LLM thất bại.
 
 ## Kiểm thử
 
 ```bash
-npm run check   # tsc cho server và core, test scanner (7) và agent (9)
+npm run check   # tsc cho server và core, test scanner (7) và agent (10)
 ```
 
 Test agent dùng LLM giả (`server/src/test/mock-llm.ts`) nên không tốn hạn mức và kiểm được: tool-calling, whitelist tourId, thiếu quyền, chặn tư vấn đầu tư, che PII, chế độ dự phòng.
@@ -46,5 +46,7 @@ Test agent dùng LLM giả (`server/src/test/mock-llm.ts`) nên không tốn h�
 
 - Giao diện mô phỏng bản **mobile** của TCInvest (bố cục 430px, căn giữa trên màn hình rộng), dựa trên ảnh chụp và số đo màu/cỡ chữ. Icon dùng Material Icons thay cho bộ icon riêng; banner khuyến mãi và linh vật không được sao chép; mọi số liệu là dữ liệu giả. Bản desktop (menu trái, nhiều cột) chưa làm.
 - Màn hình đặt lệnh bán chỉ là hộp thoại giải thích; các màn hình khác (nộp tiền, sổ lệnh...) là trang giữ chỗ nhưng vẫn có route, tiêu đề, mô tả để trợ lý chỉ đường tới.
-- Tìm kiếm hiện là từ khóa (BM25) + từ điển đồng nghĩa của Domain Pack; chưa có embedding/pgvector. Giao diện `FeatureStore` tách riêng nên thay được.
+- Tìm kiếm hiện là từ khóa (BM25) + từ điển đồng nghĩa của Domain Pack; chưa có embedding/pgvector. Lớp `FeatureStore` tách riêng nên thay được.
 - Rate limit và log nằm trong bộ nhớ/stdout; chưa có dashboard, eval hit@3 tự động và E2E Playwright cho tour.
+
+Để gắn vào một web khác, xem [integration-guide.md](integration-guide.md).

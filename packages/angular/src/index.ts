@@ -6,3 +6,4 @@ export * from './compass-api.service';
 export * from './tour.service';
 export * from './chat.service';
 export * from './chat-widget.component';
+export * from './compass-icon.component';

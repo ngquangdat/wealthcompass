@@ -47,6 +47,8 @@ export async function* streamChat(
       tool_choice: 'auto',
       temperature: 0.2,
       stream: true,
+      // Mô hình suy luận (DeepSeek V4...) chậm hơn nhiều nếu để mặc định; cho phép hạ mức qua cấu hình
+      ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
     }),
     signal: params.signal,
   });

@@ -4,7 +4,7 @@ import { Document, YAMLMap, YAMLSeq, isMap, isScalar, isSeq, parseDocument } fro
 // Sửa một màn hình trong compass.overrides.yaml từ Studio, giữ nguyên chú thích và phần khác của file.
 // Trường nào người vừa sửa thì coi như đã duyệt: bỏ khỏi llmDraft; hết llmDraft thì bỏ luôn dòng DRAFT.
 
-export type EditableField = 'title' | 'description' | 'keywords' | 'sampleQuestions' | 'facets' | 'hidden';
+export type EditableField = 'title' | 'description' | 'keywords' | 'sampleQuestions' | 'facets' | 'hidden' | 'requires';
 export type FeatureChanges = Partial<{
   title: string | null;
   description: string | null;
@@ -12,6 +12,8 @@ export type FeatureChanges = Partial<{
   sampleQuestions: string[];
   facets: Record<string, string>;
   hidden: boolean;
+  // Quyền ghi đè cho riêng màn hình; null = bỏ ghi đè, dùng lại quyền từ guard. [] là "không cần quyền riêng", khác null
+  requires: string[] | null;
 }>;
 
 function load(file: string): Document {
@@ -66,7 +68,7 @@ export function updateFeature(file: string, id: string, changes: FeatureChanges)
   for (const [key, value] of Object.entries(changes) as Array<[EditableField, unknown]>) {
     if (value === undefined) continue;
     touched.push(key);
-    const empty = value === null || value === '' || (Array.isArray(value) && value.length === 0) || (key === 'hidden' && value === false) ||
+    const empty = value === null || value === '' || (Array.isArray(value) && value.length === 0 && key !== 'requires') || (key === 'hidden' && value === false) ||
       (typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length === 0);
     // Rỗng = bỏ ghi đè, quay về giá trị lấy từ code
     if (empty) map.delete(key);

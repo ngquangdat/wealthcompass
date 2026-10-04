@@ -22,6 +22,8 @@ interface Overrides {
     string,
     Partial<Pick<Feature, 'title' | 'description' | 'keywords' | 'sampleQuestions' | 'facets'>> & {
       hidden?: boolean;
+      // Quyền ghi đè cho riêng màn hình (thay cho quyền suy từ guard); [] = không cần quyền riêng
+      requires?: string[];
       // Các trường do LLM soạn (lệnh enrich) và chưa được người duyệt; xóa khóa này sau khi đọc lại
       llmDraft?: string[];
     }
@@ -152,7 +154,9 @@ export function scan(configPath: string): ScanResult {
       if (mapped) mapped.requires.forEach((x) => requires.add(x));
       else unknownGuards.push(g);
     }
-    if (unknownGuards.length) warnings.push(`${r.sourceRef}: guard chưa ánh xạ quyền: ${unknownGuards.join(', ')}`);
+    // Người duyệt ghi đè quyền cho màn hình này thì dùng đúng danh sách đó, guard chưa ánh xạ không còn là vấn đề
+    const overrideRequires = Array.isArray(ov.requires) ? ov.requires.map(String) : null;
+    if (unknownGuards.length && !overrideRequires) warnings.push(`${r.sourceRef}: guard chưa ánh xạ quyền: ${unknownGuards.join(', ')}`);
 
     const seen = new Set<string>();
     const targets: Target[] = [];
@@ -179,14 +183,14 @@ export function scan(configPath: string): ScanResult {
       keywords: ov.keywords ?? ((r.data['keywords'] as string[] | undefined) ?? []),
       menuPath: menuPath.length ? menuPath : title ? [title] : [],
       facets: ov.facets ?? ((r.data['facets'] as Record<string, string> | undefined) ?? {}),
-      access: { requires: [...requires], unknownGuards },
+      access: { requires: overrideRequires ?? [...requires], unknownGuards: overrideRequires ? [] : unknownGuards },
       targets,
       sampleQuestions: ov.sampleQuestions ?? [],
       tourIds: [],
       provenance: {
         source: [
           'static',
-          ...(ov.title || ov.description || ov.keywords || ov.sampleQuestions ? (['manual'] as const) : []),
+          ...(ov.title || ov.description || ov.keywords || ov.sampleQuestions || overrideRequires ? (['manual'] as const) : []),
           ...(drafted.length ? (['llm'] as const) : []),
         ],
         reviewed: Boolean(ov.title || ov.description) && !drafted.length,

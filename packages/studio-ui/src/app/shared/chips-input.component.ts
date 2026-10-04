@@ -1,4 +1,6 @@
-import { ChangeDetectionStrategy, Component, ElementRef, input, model, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, computed, input, model, viewChild } from '@angular/core';
+
+let nextId = 0;
 import { IconComponent } from './icon.component';
 
 // Ô nhập dạng thẻ: Enter hoặc dấu phẩy để thêm, x để bỏ
@@ -11,7 +13,10 @@ import { IconComponent } from './icon.component';
       @for (v of value(); track $index) {
         <span class="chip">{{ v }} @if (!readonly()) { <button type="button" (click)="remove($index)" aria-label="Bỏ"><ui-icon name="x" [size]="11" /></button> }</span>
       }
-      @if (!readonly()) { <input #box (input)="onInput()" (keydown)="onKey($event)" (blur)="add()" [placeholder]="placeholder()" /> }
+      @if (!readonly()) {
+        <input #box (input)="onInput($event)" (keydown)="onKey($event)" (blur)="add()" [placeholder]="placeholder()" [attr.list]="options().length ? listId : null" />
+        @if (options().length) { <datalist [id]="listId">@for (o of options(); track o) { <option [value]="o"></option> }</datalist> }
+      }
     </div>
   `,
   styles: `
@@ -24,12 +29,22 @@ export class ChipsInputComponent {
   readonly value = model<string[]>([]);
   readonly placeholder = input('Gõ rồi Enter');
   readonly readonly = input(false);
+  // Gợi ý (vd. danh mục quyền): hiện khi gõ, chọn là thêm thẻ ngay
+  readonly suggestions = input<string[]>([]);
+  protected readonly options = computed(() => this.suggestions().filter((o) => !this.value().includes(o)));
+  protected readonly listId = `chips-${++nextId}`;
   private readonly box = viewChild<ElementRef<HTMLInputElement>>('box');
 
   // Có dấu phẩy (gõ, dán, bộ gõ tiếng Việt không phát keydown) thì tách thành thẻ, phần sau dấu phẩy cuối giữ lại để gõ tiếp
-  protected onInput(): void {
+  protected onInput(e?: Event): void {
     const el = this.box()?.nativeElement;
     if (!el) return;
+    // Chọn từ danh sách gợi ý (Chrome báo insertReplacementText, trình duyệt khác không có inputType)
+    const type = (e as InputEvent | undefined)?.inputType;
+    if ((type === 'insertReplacementText' || type === undefined) && this.options().includes(el.value.trim())) {
+      this.add();
+      return;
+    }
     const cut = el.value.lastIndexOf(',');
     if (cut === -1) return;
     const rest = el.value.slice(cut + 1);

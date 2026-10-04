@@ -1,4 +1,4 @@
-import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { YAMLMap, isMap, isScalar } from 'yaml';
@@ -13,6 +13,7 @@ import { finishRecording } from '../record/run';
 import { recordSession } from '../record/recorder';
 import { parsePatch } from './patch-hunks';
 import { updateEnvFile } from './env-file';
+import { readOverrides } from './overrides-edit';
 import { cachedScan, configPath, httpError, invalidateScan, llm, loadDoc, parseJson, patchFile, requireApp, state, stream } from './context';
 
 // Đợt 2 của Studio: quyền, gắn tourId (có AI), tour, Domain Pack
@@ -81,6 +82,58 @@ export function registerPhase2(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  // ======================= Danh mục quyền =======================
+  // Gồm quyền khai trong access.roles và quyền đang được dùng (guard, ghi đè màn hình) dù chưa khai
+  app.get('/api/roles', async () => {
+    const dir = requireApp();
+    const { config } = loadConfig(configPath(dir));
+    const scanned = cachedScan(dir);
+    const raw = readOverrides(overridesPath(dir));
+    const titles = new Map(scanned.featureMap.features.map((f) => [f.id, f.title]));
+    const rows = new Map<string, { name: string; description: string; inCatalog: boolean; guards: string[]; screens: string[] }>();
+    const row = (name: string) => {
+      if (!rows.has(name)) rows.set(name, { name, description: '', inCatalog: false, guards: [], screens: [] });
+      return rows.get(name)!;
+    };
+    for (const [name, r] of Object.entries(config.access.roles)) Object.assign(row(name), { description: r.description, inCatalog: true });
+    for (const [guard, g] of Object.entries(config.access.guards)) for (const r of g.requires) row(r).guards.push(guard);
+    for (const [id, ov] of Object.entries(raw)) {
+      if (Array.isArray(ov['requires'])) for (const r of ov['requires'] as string[]) row(r).screens.push(titles.get(id) ?? id);
+    }
+    return [...rows.values()].sort((a, b) => a.name.localeCompare(b.name));
+  });
+
+  app.put('/api/roles/:name', async (req) => {
+    const dir = requireApp();
+    const { name } = req.params as { name: string };
+    if (!ROLE.test(name)) throw httpError(400, 'Tên quyền chỉ gồm chữ, số và các ký tự _ : . -');
+    const { description } = (req.body ?? {}) as { description?: string };
+    const doc = loadDoc(configPath(dir));
+    if (!doc.hasIn(['access', 'roles'])) doc.setIn(['access', 'roles'], doc.createNode({}));
+    (doc.getIn(['access', 'roles'], true) as YAMLMap).flow = false;
+    const value = doc.createNode({ description: String(description ?? '').trim().slice(0, 200) }) as YAMLMap;
+    value.flow = true;
+    doc.setIn(['access', 'roles', name], value);
+    writeFileSync(configPath(dir), String(doc));
+    invalidateScan();
+    return { ok: true };
+  });
+
+  // Chỉ xóa quyền không còn guard hay màn hình nào dùng, để không làm lệch ánh xạ đang chạy
+  app.delete('/api/roles/:name', async (req) => {
+    const dir = requireApp();
+    const { name } = req.params as { name: string };
+    const { config } = loadConfig(configPath(dir));
+    const guards = Object.entries(config.access.guards).filter(([, g]) => g.requires.includes(name)).map(([g]) => g);
+    const screens = Object.entries(readOverrides(overridesPath(dir))).filter(([, ov]) => Array.isArray(ov['requires']) && (ov['requires'] as string[]).includes(name)).map(([id]) => id);
+    if (guards.length || screens.length) throw httpError(400, `Quyền "${name}" đang được dùng ở ${[...guards.map((g) => `guard ${g}`), ...screens.map((s) => `màn hình ${s}`)].join(', ')}; bỏ ở đó trước`);
+    const doc = loadDoc(configPath(dir));
+    doc.deleteIn(['access', 'roles', name]);
+    writeFileSync(configPath(dir), String(doc));
+    invalidateScan();
+    return { ok: true };
+  });
+
   // AI đọc code guard: chỉ khi người dùng đã bật quyền gửi mã nguồn
   app.post('/api/guards/:name/ai', async (req, reply) => {
     const dir = requireApp();
@@ -122,6 +175,34 @@ export function registerPhase2(app: FastifyInstance): void {
       })),
       skipped: result.skipped.map((s) => ({ ...s, file: relative(dir, s.file) })),
       screens: scanned.featureMap.features.map((f) => ({ route: f.route.pattern, title: f.title, tourIds: f.targets.length })),
+    };
+  });
+
+  // Các tourId đã gắn: màn hình chứa, nhãn/gợi ý/user-only, vị trí trong mã nguồn, tour nào đang dùng
+  app.get('/api/tourids/existing', async () => {
+    const dir = requireApp();
+    const { featureMap } = cachedScan(dir);
+    const { config, root } = loadConfig(configPath(dir));
+    const usedBy = new Map<string, string[]>();
+    for (const t of featureMap.tours) for (const st of t.steps) usedBy.set(st.tourId, [...new Set([...(usedBy.get(st.tourId) ?? []), t.title])]);
+    const items = new Map<string, { tourId: string; label: string | null; hint: string | null; userOnly: boolean; screens: Array<{ route: string; title: string }>; menu: boolean }>();
+    for (const f of featureMap.features) {
+      for (const t of f.targets) {
+        const cur = items.get(t.tourId) ?? { tourId: t.tourId, label: t.label ?? null, hint: t.hint ?? null, userOnly: t.sensitivity === 'user-only', screens: [], menu: t.tourId.startsWith('menu-') };
+        cur.screens.push({ route: f.route.pattern, title: f.title });
+        items.set(t.tourId, cur);
+      }
+    }
+    const where = locateTourIds(join(root, config.discovery.srcRoot), dir);
+    const total = featureMap.features.length;
+    return {
+      items: [...items.values()].map((x) => ({
+        ...x,
+        // Có ở (gần) mọi màn hình = nằm trong khung chung (menu, header)
+        shared: total > 1 && x.screens.length === total,
+        location: where.get(x.menu ? '[tourMenu]' : x.tourId) ?? null,
+        usedBy: usedBy.get(x.tourId) ?? [],
+      })),
     };
   });
 
@@ -423,4 +504,26 @@ function readPack(appDir: string, name: string, packDir: string) {
     topics: topicsRaw.map((t) => ({ id: t.id, patterns: t.patterns ?? [], refusal: refusals[t.refusal] ?? '' })),
     prompt,
   };
+}
+
+// Tìm vị trí khai báo tourId (chuỗi tĩnh) và [tourMenu] trong mã nguồn: id -> "file:dòng"
+function locateTourIds(srcDir: string, appDir: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const walk = (d: string) => {
+    for (const name of existsSync(d) ? readdirSync(d) : []) {
+      if (name === 'node_modules' || name.startsWith('.')) continue;
+      const full = join(d, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (/\.(html|ts)$/.test(name) && !name.endsWith('.spec.ts')) {
+        const lines = readFileSync(full, 'utf8').split('\n');
+        lines.forEach((line, i) => {
+          const at = `${relative(appDir, full)}:${i + 1}`;
+          for (const m of line.matchAll(/(?:\btourId|data-tour-id)="([^"]+)"|\[tourId\]="'([^']+)'"/g)) if (!out.has(m[1] ?? m[2])) out.set(m[1] ?? m[2], at);
+          if (/\[tourMenu\]|\btourMenu=/.test(line) && !out.has('[tourMenu]')) out.set('[tourMenu]', at);
+        });
+      }
+    }
+  };
+  walk(srcDir);
+  return out;
 }

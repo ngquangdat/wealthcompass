@@ -1,9 +1,11 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import type { AiState, FeatureRow } from '../core/models';
 import { ProjectStore } from '../core/project.store';
 import { ToastService } from '../core/toast.service';
+import { ChipsInputComponent } from '../shared/chips-input.component';
 import { IconComponent } from '../shared/icon.component';
 import { LogConsoleComponent } from '../shared/log-console.component';
 import { PageHeaderComponent } from '../shared/page-header.component';
@@ -16,13 +18,16 @@ interface Draft {
   keywords: string[];
   questions: string;
   hidden: boolean;
+  // Ghi đè quyền cho riêng màn hình (thay cho quyền suy từ guard)
+  overrideRoles: boolean;
+  roles: string[];
 }
 
 const FIELD_LABEL: Record<string, string> = { description: 'mô tả', keywords: 'từ khóa', sampleQuestions: 'câu hỏi mẫu', title: 'tiêu đề' };
 
 @Component({
   selector: 'page-screens',
-  imports: [FormsModule, IconComponent, PageHeaderComponent, LogConsoleComponent],
+  imports: [FormsModule, RouterLink, ChipsInputComponent, IconComponent, PageHeaderComponent, LogConsoleComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ui-page-header title="Màn hình" subtitle="Dữ liệu trợ lý dùng để tìm đúng màn hình. Nội dung AI soạn cần bạn duyệt trước khi dùng thật.">
@@ -66,7 +71,10 @@ const FIELD_LABEL: Record<string, string> = { description: 'mô tả', keywords:
                 <span [class.muted]="!r.description">{{ r.description ? truncate(r.description, 70) : 'Chưa có mô tả' }}</span>
                 <div class="muted t-meta">{{ r.keywords.length }} từ khóa · {{ r.sampleQuestions.length }} câu hỏi</div>
               </td>
-              <td>@for (q of r.requires; track q) { <span class="chip">{{ q }}</span> } @empty { <span class="muted small">—</span> }</td>
+              <td>
+                @for (q of r.requires; track q) { <span class="chip">{{ q }}</span> } @empty { <span class="muted small">—</span> }
+                @if (r.requiresOverride) { <span class="badge tiny" title="Quyền ghi đè cho riêng màn hình này">ghi đè</span> }
+              </td>
               <td>
                 @if (r.hidden) { <span class="badge"><ui-icon name="eye-off" [size]="12" /> Ẩn</span> }
                 @else if (r.draft.length) { <span class="badge ai"><ui-icon name="sparkles" [size]="12" /> Chờ duyệt</span> }
@@ -112,12 +120,7 @@ const FIELD_LABEL: Record<string, string> = { description: 'mô tả', keywords:
           </div>
           <div class="field">
             <label>Từ khóa</label>
-            <div class="chips-input">
-              @for (k of draft.keywords; track $index) {
-                <span class="chip">{{ k }} <button type="button" (click)="removeKeyword($index)" aria-label="Xóa"><ui-icon name="x" [size]="11" /></button></span>
-              }
-              <input [(ngModel)]="keywordInput" (keydown.enter)="addKeyword($event)" (keydown.comma)="addKeyword($event)" placeholder="Gõ rồi Enter" />
-            </div>
+            <ui-chips [(value)]="draft.keywords" placeholder="Gõ rồi Enter hoặc dấu phẩy" />
             <span class="hint">Cách người dùng hay gọi, nên có cả cách viết không dấu.</span>
           </div>
           <div class="field">
@@ -131,9 +134,28 @@ const FIELD_LABEL: Record<string, string> = { description: 'mô tả', keywords:
               <div class="hint">Trợ lý sẽ không chỉ đường tới màn hình này (ví dụ trang đăng nhập, trang lỗi).</div>
             </div>
           </label>
-          @if (r.requires.length) {
-            <div class="hint"><ui-icon name="lock" [size]="12" /> Cần quyền: {{ r.requires.join(', ') }} (lấy từ guard)</div>
-          }
+          <div class="field">
+            <label>Quyền cần có</label>
+            <div class="perm">
+              <div class="perm-row">
+                <ui-icon name="lock" [size]="13" />
+                <span class="grow">
+                  Theo guard
+                  @for (g of r.guards; track g) { <code>{{ g }}</code> }
+                  : <b>{{ r.guardRequires.length ? r.guardRequires.join(', ') : 'chỉ cần đăng nhập' }}</b>
+                </span>
+                @if (r.guards.length) { <a routerLink="/permissions" class="small">Sửa ở guard</a> }
+              </div>
+              <label class="perm-row check">
+                <input type="checkbox" [(ngModel)]="draft.overrideRoles" />
+                <span>Ghi đè cho riêng màn hình này</span>
+              </label>
+              @if (draft.overrideRoles) {
+                <ui-chips [(value)]="draft.roles" [suggestions]="roleNames()" placeholder="Tên quyền rồi Enter (để trống = không cần quyền riêng)" />
+              }
+            </div>
+            <span class="hint">Trợ lý chỉ dẫn tới màn hình khi người hỏi có đủ các quyền này (lấy từ claim quyền của JWT). Sửa ở guard thì áp cho mọi màn hình dùng guard đó. Đây không phải lớp bảo mật: web vẫn tự chặn bằng guard.</span>
+          </div>
         </div>
 
         <div class="d-foot">
@@ -148,6 +170,11 @@ const FIELD_LABEL: Record<string, string> = { description: 'mô tả', keywords:
     }
   `,
   styles: `
+    .perm { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+    .perm-row { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+    .perm-row code { margin-left: 4px; }
+    .perm-row.check { cursor: pointer; }
+    .badge.tiny { font-size: 10.5px; margin-left: 4px; }
     :host { display: flex; flex-direction: column; gap: 16px; }
     .toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
     .tabs { display: flex; gap: 4px; flex: 1; }
@@ -167,9 +194,6 @@ const FIELD_LABEL: Record<string, string> = { description: 'mô tả', keywords:
     .d-body { flex: 1; overflow: auto; padding: 20px 24px; }
     .d-foot { display: flex; align-items: center; gap: 8px; padding: 14px 24px; border-top: 1px solid var(--border); background: var(--surface-2); }
     .ai-alert { align-items: center; background: var(--ai-soft); border-color: #d9d6fe; color: #5925dc; }
-    .chips-input { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); min-height: 38px; }
-    .chips-input input { border: 0; outline: 0; flex: 1; min-width: 120px; font: 14px Inter, sans-serif; }
-    .chips-input .chip button { border: 0; background: none; padding: 0; cursor: pointer; color: var(--text-3); display: inline-flex; }
     .toggle-row { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
   `,
 })
@@ -193,8 +217,7 @@ export class ScreensPage implements OnInit {
   protected readonly saving = signal(false);
   protected readonly ai = signal<AiState | null>(null);
 
-  protected draft: Draft = { title: '', description: '', keywords: [], questions: '', hidden: false };
-  protected keywordInput = '';
+  protected draft: Draft = { title: '', description: '', keywords: [], questions: '', hidden: false, overrideRoles: false, roles: [] };
 
   protected readonly counts = computed(() => {
     const a = this.all();
@@ -218,9 +241,14 @@ export class ScreensPage implements OnInit {
     });
   });
 
+  // Danh mục quyền để gợi ý khi ghi đè quyền
+  protected readonly roleNames = signal<string[]>([]);
+
   async ngOnInit(): Promise<void> {
     this.ai.set(await this.api.get<AiState>('/api/ai').catch(() => null));
     await this.load();
+    const roles = await this.api.get<Array<{ name: string }>>('/api/roles').catch(() => []);
+    this.roleNames.set(roles.map((r) => r.name));
   }
 
   private async load(): Promise<void> {
@@ -239,23 +267,13 @@ export class ScreensPage implements OnInit {
       keywords: [...r.keywords],
       questions: r.sampleQuestions.join('\n'),
       hidden: r.hidden,
+      overrideRoles: r.requiresOverride,
+      roles: [...r.requires],
     };
-    this.keywordInput = '';
   }
 
   protected close(): void {
     this.selectedId.set(null);
-  }
-
-  protected addKeyword(e: Event): void {
-    e.preventDefault();
-    const k = this.keywordInput.replace(/,/g, '').trim();
-    if (k && !this.draft.keywords.includes(k)) this.draft.keywords = [...this.draft.keywords, k];
-    this.keywordInput = '';
-  }
-
-  protected removeKeyword(i: number): void {
-    this.draft.keywords = this.draft.keywords.filter((_, idx) => idx !== i);
   }
 
   protected async save(r: FeatureRow): Promise<void> {
@@ -269,6 +287,10 @@ export class ScreensPage implements OnInit {
       if (JSON.stringify(this.draft.keywords) !== JSON.stringify(r.keywords)) changes['keywords'] = this.draft.keywords;
       if (JSON.stringify(questions) !== JSON.stringify(r.sampleQuestions)) changes['sampleQuestions'] = questions;
       if (this.draft.hidden !== r.hidden) changes['hidden'] = this.draft.hidden;
+      // Quyền: bật ghi đè gửi danh sách (kể cả rỗng); tắt ghi đè gửi null để quay về quyền từ guard
+      if (this.draft.overrideRoles !== r.requiresOverride || (this.draft.overrideRoles && JSON.stringify(this.draft.roles) !== JSON.stringify(r.requires))) {
+        changes['requires'] = this.draft.overrideRoles ? this.draft.roles : null;
+      }
       if (!Object.keys(changes).length && !r.draft.length) {
         this.close();
         return;

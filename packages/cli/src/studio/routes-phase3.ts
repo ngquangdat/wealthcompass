@@ -5,7 +5,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { normalizeVi } from '@wealthcompass/core';
 import { completeText } from '@wealthcompass/llm';
-import { backendUrl, cachedScan, eventLogFile, httpError, llm, loadDoc, parseJson, requireApp, stream } from './context';
+import { loadConfig } from '../scan';
+import { backendUrl, cachedScan, configPath, eventLogFile, httpError, llm, loadDoc, parseJson, requireApp, stream } from './context';
 
 // Đợt 3: thử trợ lý (qua chế độ debug của backend), bộ kiểm thử tìm kiếm, thống kê nhật ký hỏi đáp
 
@@ -51,7 +52,8 @@ function readCases(app: string): EvalCase[] {
 
 // Mọi quyền xuất hiện trong bản đồ tính năng: dùng khi câu kiểm thử không nêu quyền
 function allRoles(app: string): string[] {
-  return [...new Set(cachedScan(app).featureMap.features.flatMap((f) => f.access.requires))].sort();
+  const catalog = Object.keys(loadConfig(configPath(app)).config.access.roles);
+  return [...new Set([...catalog, ...cachedScan(app).featureMap.features.flatMap((f) => f.access.requires)])].sort();
 }
 
 async function backendHealth(app: string): Promise<{ running: boolean; debug: boolean; url: string }> {

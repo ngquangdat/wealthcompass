@@ -122,3 +122,58 @@ test('Studio đợt 2: quyền, gắn tourId, tour, domain pack qua API', async 
     await close();
   }
 });
+
+test('Studio: ghi đè quyền cho riêng màn hình, bỏ ghi đè quay về guard; API chỉ nhận trường sửa được', async () => {
+  const dir = await integratedApp();
+  const port = 5500 + Math.floor(Math.random() * 50);
+  const { url, close } = await startStudio({ port, tarballs: null, open: dir });
+  const api = client(port, new URL(url).searchParams.get('t')!);
+  try {
+    type Row = { id: string; requires: string[]; guardRequires: string[]; guards: string[]; requiresOverride: boolean };
+    const row = async (id: string) => ((await api('GET', '/api/features')).json as Row[]).find((r) => r.id === id)!;
+    const reports = await row('reports');
+    assert.deepEqual([reports.guards, reports.requiresOverride], [['authGuard', 'reportsGuard'], false], 'gồm cả guard của route cha');
+
+    let put = await api('PUT', '/api/features/reports', { requires: ['finance', 'finance', ' '] });
+    assert.deepEqual([put.json.requires, put.json.requiresOverride, put.json.guardRequires], [['finance'], true, reports.guardRequires]);
+    assert.match(readFileSync(join(dir, 'compass.overrides.yaml'), 'utf8'), /reports:[\s\S]*requires:[\s\S]*finance/);
+    // [] = không cần quyền riêng (khác với bỏ ghi đè)
+    put = await api('PUT', '/api/features/reports', { requires: [] });
+    assert.deepEqual([put.json.requires, put.json.requiresOverride], [[], true]);
+    put = await api('PUT', '/api/features/reports', { requires: null });
+    assert.deepEqual([put.json.requires, put.json.requiresOverride], [reports.guardRequires, false]);
+
+    assert.equal((await api('PUT', '/api/features/reports', { requires: ['bad role!'] })).status, 400);
+    assert.equal((await api('PUT', '/api/features/reports', { evil: 'x' })).status, 400, 'trường lạ bị từ chối');
+  } finally {
+    await close();
+  }
+});
+
+test('Studio: danh mục quyền — thêm có mô tả, liệt kê cả quyền đang dùng chưa khai, không xóa quyền đang dùng', async () => {
+  const dir = await integratedApp();
+  const port = 5550 + Math.floor(Math.random() * 50);
+  const { url, close } = await startStudio({ port, tarballs: null, open: dir });
+  const api = client(port, new URL(url).searchParams.get('t')!);
+  try {
+    type Role = { name: string; description: string; inCatalog: boolean; guards: string[]; screens: string[] };
+    const roles = async () => (await api('GET', '/api/roles')).json as Role[];
+    const used = (await roles()).find((r) => r.name === 'shop_admin')!;
+    assert.deepEqual([used.inCatalog, used.guards], [false, ['adminGuard']], 'quyền của guard hiện dù chưa khai');
+
+    assert.equal((await api('PUT', '/api/roles/bad%20name', { description: 'x' })).status, 400);
+    assert.equal((await api('PUT', '/api/roles/employee', { description: 'Mọi nhân viên' })).status, 200);
+    assert.equal((await api('PUT', '/api/roles/shop_admin', { description: 'Quản trị cửa hàng' })).status, 200);
+    const list = await roles();
+    assert.deepEqual(list.find((r) => r.name === 'employee'), { name: 'employee', description: 'Mọi nhân viên', inCatalog: true, guards: [], screens: [] });
+    assert.match(readFileSync(join(dir, 'compass.config.yaml'), 'utf8'), /roles:\n\s+employee: \{ description: Mọi nhân viên \}/);
+    // Thử trợ lý gợi ý cả quyền chưa màn hình nào dùng
+    assert.ok(((await api('GET', '/api/assistant/meta')).json as { roles: string[] }).roles.includes('employee'));
+
+    assert.equal((await api('DELETE', '/api/roles/shop_admin')).status, 400, 'đang dùng ở adminGuard');
+    assert.equal((await api('DELETE', '/api/roles/employee')).status, 200);
+    assert.ok(!(await roles()).some((r) => r.name === 'employee'));
+  } finally {
+    await close();
+  }
+});

@@ -37,6 +37,9 @@ export interface FeatureRow {
   menuPath: string[];
   facets: Record<string, string>;
   requires: string[];
+  guards: string[];
+  guardRequires: string[];
+  requiresOverride: boolean;
   tourIds: string[];
   targets: number;
   overridden: string[];
@@ -82,6 +85,14 @@ export interface AiState {
   keySource: string | null;
   aiCode: boolean;
   providers: string[];
+}
+
+export interface RoleRow {
+  name: string;
+  description: string;
+  inCatalog: boolean; // đã khai trong access.roles
+  guards: string[];
+  screens: string[]; // màn hình ghi đè quyền dùng quyền này
 }
 
 export interface GuardRow {

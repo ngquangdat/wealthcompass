@@ -10,6 +10,18 @@ import { IconComponent } from '../shared/icon.component';
 import { LogConsoleComponent } from '../shared/log-console.component';
 import { PageHeaderComponent } from '../shared/page-header.component';
 
+interface ExistingTourId {
+  tourId: string;
+  label: string | null;
+  hint: string | null;
+  userOnly: boolean;
+  menu: boolean;
+  shared: boolean;
+  screens: Array<{ route: string; title: string }>;
+  location: string | null;
+  usedBy: string[];
+}
+
 interface Row extends TourIdCandidate {
   include: boolean;
   newId: string;
@@ -30,6 +42,48 @@ const KIND: Record<string, string> = { button: 'Nút', link: 'Link', input: 'Ô 
     <ui-page-header title="Gắn tourId" subtitle="Đánh dấu các phần tử tour sẽ trỏ vào. Chỉ chọn phần tử của luồng cần dẫn; mỗi tourId là một cam kết lâu dài với tour." />
 
     @if (!files().length) {
+      <div class="tabs">
+        <button [class.active]="tab() === 'scan'" (click)="tab.set('scan')">Chưa gắn</button>
+        <button [class.active]="tab() === 'existing'" (click)="tab.set('existing')">Đã gắn <span class="count">{{ existing().length }}</span></button>
+      </div>
+    }
+
+    @if (!files().length && tab() === 'existing') {
+      <div class="card">
+        <div class="toolbar">
+          <ui-icon name="search" [size]="15" />
+          <input class="input grow" [(ngModel)]="query" (ngModelChange)="touch()" placeholder="Tìm theo tourId, nhãn, màn hình hoặc tên tour" />
+          <label class="check small"><input type="checkbox" [(ngModel)]="unusedOnly" (ngModelChange)="touch()" /> Chỉ mốc chưa dùng trong tour</label>
+        </div>
+        @for (g of existingGroups(); track g.title) {
+          <div class="group-head"><b>{{ g.title }}</b> <span class="mono muted">{{ g.sub }}</span></div>
+          <table class="table">
+            <tbody>
+              @for (x of g.items; track x.tourId) {
+                <tr>
+                  <td class="c-tid">
+                    <code>{{ x.tourId }}</code>
+                    @if (x.userOnly) { <span class="badge danger tiny-badge" title="Tour chỉ tô sáng, người dùng tự thao tác"><ui-icon name="lock" [size]="11" /> user-only</span> }
+                  </td>
+                  <td>
+                    <div>{{ x.label || '(chưa có nhãn)' }}</div>
+                    @if (x.hint) { <div class="muted small">{{ x.hint }}</div> }
+                  </td>
+                  <td class="c-loc mono muted small">{{ x.location ?? '' }}</td>
+                  <td class="c-used">
+                    @for (t of x.usedBy; track t) { <span class="badge info">{{ t }}</span> } @empty { <span class="muted small">chưa dùng</span> }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        } @empty {
+          <div class="empty-row">@if (existing().length) { Không có mốc nào khớp. } @else { Dự án chưa có tourId nào. Chuyển sang tab "Chưa gắn" để quét. }</div>
+        }
+      </div>
+    }
+
+    @if (!files().length && tab() === 'scan') {
       <div class="card">
         <div class="card-body stack">
           <div class="field">
@@ -128,7 +182,8 @@ const KIND: Record<string, string> = { button: 'Nút', link: 'Link', input: 'Ô 
       } @else if (scanned()) {
         <div class="card empty"><h3>Không còn phần tử nào thiếu tourId</h3><p>Các màn hình đã chọn đều đã được gắn.</p></div>
       }
-    } @else {
+    }
+    @if (files().length) {
       <div class="alert info"><ui-icon name="info" /><span>Thay đổi gồm thuộc tính <code>tourId</code> (hoặc <code>[tourMenu]</code> cho menu) trên phần tử và directive tương ứng trong component. Code chỉ đổi khi bạn bấm Áp.</span></div>
       <ui-diff-view [files]="files()" [selected]="selected()" (toggle)="toggle($event)" (setMany)="setMany($event.ids, $event.on)" />
       <div class="row">
@@ -159,6 +214,15 @@ const KIND: Record<string, string> = { button: 'Nút', link: 'Link', input: 'Ô 
     .skipped-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 10px 16px; border: 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: #faf8ff; cursor: pointer; font: 13.5px Inter, sans-serif; text-align: left; color: var(--text); }
     .screen-tag { margin-left: 8px; }
     .menu-id { font-size: 12.5px; }
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-top: -8px; }
+    .tabs button { border: 0; background: none; padding: 10px 12px; font: 500 14px Inter, sans-serif; color: var(--text-2); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+    .count { font-size: 11.5px; background: var(--surface-2); border-radius: 10px; padding: 1px 7px; margin-left: 4px; color: var(--text-3); }
+    .check { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); white-space: nowrap; }
+    .c-tid { width: 280px; } .c-loc { width: 260px; } .c-used { width: 220px; }
+    .c-used .badge { margin: 0 4px 4px 0; }
+    .tiny-badge { margin-left: 6px; font-size: 11px; }
+    .empty-row { padding: 28px; text-align: center; color: var(--text-3); }
     .foot { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--border); }
   `,
 })
@@ -197,6 +261,28 @@ export class TourIdsPage implements OnInit {
   });
 
   protected readonly showSkipped = signal(true);
+  protected readonly tab = signal<'scan' | 'existing'>('scan');
+  protected readonly existing = signal<ExistingTourId[]>([]);
+  protected query = '';
+  protected unusedOnly = false;
+  // Nhóm: khung chung (menu, header) trước, rồi theo màn hình
+  protected readonly existingGroups = computed(() => {
+    this.version();
+    const q = this.query.trim().toLowerCase();
+    const items = this.existing().filter(
+      (x) =>
+        (!this.unusedOnly || !x.usedBy.length) &&
+        (!q || [x.tourId, x.label ?? '', x.hint ?? '', ...x.usedBy, ...x.screens.map((s) => s.title + ' ' + s.route)].some((v) => v.toLowerCase().includes(q))),
+    );
+    const groups = new Map<string, { title: string; sub: string; items: ExistingTourId[] }>();
+    for (const x of items) {
+      const key = x.shared ? '*' : x.screens[0]?.route ?? '?';
+      const g = groups.get(key) ?? { title: x.shared ? 'Khung chung (mọi màn hình)' : x.screens[0]?.title ?? '?', sub: x.shared ? 'menu, header, thanh tab' : key, items: [] };
+      g.items.push(x);
+      groups.set(key, g);
+    }
+    return [...groups.values()].sort((a, b) => (a.title.startsWith('Khung') ? -1 : b.title.startsWith('Khung') ? 1 : a.sub.localeCompare(b.sub)));
+  });
   protected readonly aiSkipped = computed(() => (this.version(), this.rows().filter((r) => r.aiSkipped && !r.include)));
 
   async ngOnInit(): Promise<void> {
@@ -205,6 +291,8 @@ export class TourIdsPage implements OnInit {
     const res = await this.api.get<{ screens: Array<{ route: string; title: string; tourIds: number }> }>('/api/tourids?only=__none__').catch(() => null);
     if (res) this.screens.set(res.screens);
     this.screensLoaded.set(true);
+    const ex = await this.api.get<{ items: ExistingTourId[] }>('/api/tourids/existing').catch(() => null);
+    if (ex) this.existing.set(ex.items.sort((a, b) => a.tourId.localeCompare(b.tourId)));
   }
 
   protected kind(k: string): string {

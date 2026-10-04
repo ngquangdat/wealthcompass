@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { OutgoingHttpHeaders } from 'node:http';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
+import { z } from 'zod';
 import { completeText, LLM_PRESETS } from '@wealthcompass/llm';
 import { buildGitPatch, gitTopLevel } from '../codemod';
 import { enrich } from '../enrich';
@@ -211,7 +212,27 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
     const dir = requireApp();
     const { id } = req.params as { id: string };
     const { config, root } = loadConfig(configPath(dir));
-    updateFeature(join(root, config.discovery.overrides), id, req.body as FeatureChanges);
+    // Chỉ nhận các trường sửa được; quyền phải là tên hợp lệ
+    const body = z
+      .object({
+        title: z.string().nullable(),
+        description: z.string().nullable(),
+        keywords: z.array(z.string()),
+        sampleQuestions: z.array(z.string()),
+        facets: z.record(z.string(), z.string()),
+        hidden: z.boolean(),
+        // Bỏ khoảng trắng và mục rỗng trước khi kiểm tên quyền
+        requires: z
+          .preprocess((v) => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : v), z.array(z.string().regex(/^[\w:.-]{1,60}$/, 'Tên quyền không hợp lệ')))
+          .nullable(),
+      })
+      .partial()
+      .strict()
+      .safeParse(req.body);
+    if (!body.success) throw httpError(400, body.error.issues[0]?.message ?? 'Dữ liệu không hợp lệ');
+    const changes = body.data as FeatureChanges;
+    if (changes.requires) changes.requires = [...new Set(changes.requires)];
+    updateFeature(join(root, config.discovery.overrides), id, changes);
     return featureRows(dir).find((r) => r.id === id) ?? null;
   });
 

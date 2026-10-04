@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
-import type { AiState, GuardRow } from '../core/models';
+import type { AiState, GuardRow, RoleRow } from '../core/models';
 import { ProjectStore } from '../core/project.store';
 import { ToastService } from '../core/toast.service';
 import { ChipsInputComponent } from '../shared/chips-input.component';
@@ -18,14 +19,64 @@ const STATUS: Record<GuardRow['status'], { label: string; cls: string }> = {
 
 @Component({
   selector: 'page-permissions',
-  imports: [IconComponent, PageHeaderComponent, ChipsInputComponent],
+  imports: [FormsModule, IconComponent, PageHeaderComponent, ChipsInputComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ui-page-header title="Quyền" subtitle="Guard trên route quyết định màn hình cần quyền gì. Trợ lý dựa vào đây để không chỉ đường tới màn hình người dùng không vào được." />
 
     <div class="alert info"><ui-icon name="info" /><span>Tên quyền phải trùng với giá trị trong claim quyền của JWT (mặc định <code>roles</code>). Guard chỉ kiểm tra đăng nhập thì để trống.</span></div>
 
+    <section class="card">
+      <div class="sec-head">
+        <h3 class="grow">Danh mục quyền</h3>
+        <span class="muted small">Lưu trong <code>compass.config.yaml</code> (<code>access.roles</code>); dùng làm gợi ý khi chọn quyền cho guard, màn hình và Thử trợ lý.</span>
+      </div>
+      <table class="table">
+        <thead><tr><th class="c-name">Quyền</th><th>Mô tả</th><th>Dùng ở</th><th></th></tr></thead>
+        <tbody>
+          @for (r of roles(); track r.name) {
+            <tr>
+              <td><code>{{ r.name }}</code> @if (!r.inCatalog) { <span class="badge warning tiny" title="Đang được dùng nhưng chưa khai trong danh mục">chưa khai</span> }</td>
+              <td>
+                @if (editingRole() === r.name) {
+                  <input class="input" [(ngModel)]="roleDesc" (keydown.enter)="saveRole(r.name)" placeholder="Ví dụ: nhân viên phòng nhân sự, xem được bảng lương" />
+                } @else {
+                  {{ r.description || '' }} @if (!r.description) { <span class="muted small">chưa có mô tả</span> }
+                }
+              </td>
+              <td class="small">
+                @for (g of r.guards; track g) { <span class="chip">{{ g }}</span> }
+                @for (s of r.screens; track s) { <span class="chip screen">{{ s }}</span> }
+                @if (!r.guards.length && !r.screens.length) { <span class="muted">chưa dùng</span> }
+              </td>
+              <td class="actions">
+                @if (editingRole() === r.name) {
+                  <button class="btn btn-sm" (click)="editingRole.set(null)">Hủy</button>
+                  <button class="btn btn-primary btn-sm" (click)="saveRole(r.name)">Lưu</button>
+                } @else {
+                  <button class="btn btn-ghost btn-sm" (click)="editRole(r)"><ui-icon name="edit" [size]="13" /> {{ r.inCatalog ? 'Sửa' : 'Khai' }}</button>
+                  @if (r.inCatalog && !r.guards.length && !r.screens.length) {
+                    <button class="btn btn-ghost btn-icon btn-sm" (click)="removeRole(r)" title="Xóa khỏi danh mục"><ui-icon name="trash" [size]="13" /></button>
+                  }
+                }
+              </td>
+            </tr>
+          }
+          <tr class="add-row">
+            <td><input class="input mono" [(ngModel)]="newName" placeholder="ten_quyen" (keydown.enter)="addRole()" /></td>
+            <td><input class="input" [(ngModel)]="newDesc" placeholder="Mô tả ngắn: ai có quyền này, làm được gì" (keydown.enter)="addRole()" /></td>
+            <td class="muted small">Tên trùng giá trị trong claim JWT</td>
+            <td class="actions"><button class="btn btn-sm" (click)="addRole()" [disabled]="!newName.trim()">+ Thêm quyền</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <div class="card">
+      <div class="sec-head">
+        <h3 class="grow">Guard trên route</h3>
+        <span class="muted small">Quyền của guard áp cho mọi màn hình dùng guard đó; ghi đè riêng từng màn hình ở trang Màn hình.</span>
+      </div>
       <table class="table">
         <thead><tr><th>Guard</th><th>Dùng ở</th><th>Quyền yêu cầu</th><th>Nguồn</th><th></th></tr></thead>
         <tbody>
@@ -35,7 +86,7 @@ const STATUS: Record<GuardRow['status'], { label: string; cls: string }> = {
               <td class="small muted">{{ g.screens.join(', ') || '—' }}</td>
               <td class="roles">
                 @if (editing() === g.name) {
-                  <ui-chips [(value)]="draft" placeholder="Tên quyền rồi Enter" />
+                  <ui-chips [(value)]="draft" [suggestions]="roleNames()" placeholder="Chọn hoặc gõ tên quyền" />
                   @if (g.evidence) { <div class="hint">{{ g.evidence }}</div> }
                 } @else {
                   @for (r of g.requires ?? []; track r) { <span class="chip">{{ r }}</span> }
@@ -74,6 +125,13 @@ const STATUS: Record<GuardRow['status'], { label: string; cls: string }> = {
     td.actions { white-space: nowrap; text-align: right; }
     td.actions .btn { margin-left: 6px; }
     .hint { margin-top: 6px; }
+    .sec-head { display: flex; align-items: baseline; gap: 12px; padding: 14px 16px 6px; flex-wrap: wrap; }
+    .sec-head h3 { margin: 0; }
+    .c-name { width: 220px; }
+    td .chip { margin: 0 4px 4px 0; }
+    .chip.screen { background: var(--primary-soft); color: var(--primary); }
+    .badge.tiny { font-size: 10.5px; margin-left: 6px; }
+    tr.add-row td { background: var(--surface-2); }
   `,
 })
 export class PermissionsPage implements OnInit {
@@ -85,6 +143,12 @@ export class PermissionsPage implements OnInit {
   protected readonly aiBusy = signal(false);
   protected readonly ai = signal<AiState | null>(null);
   protected draft: string[] = [];
+  protected readonly roles = signal<RoleRow[]>([]);
+  protected readonly roleNames = computed(() => this.roles().map((r) => r.name));
+  protected readonly editingRole = signal<string | null>(null);
+  protected roleDesc = '';
+  protected newName = '';
+  protected newDesc = '';
 
   async ngOnInit(): Promise<void> {
     this.ai.set(await this.api.get<AiState>('/api/ai').catch(() => null));
@@ -93,7 +157,9 @@ export class PermissionsPage implements OnInit {
 
   private async load(): Promise<void> {
     try {
-      this.guards.set(await this.api.get<GuardRow[]>('/api/guards'));
+      const [guards, roles] = await Promise.all([this.api.get<GuardRow[]>('/api/guards'), this.api.get<RoleRow[]>('/api/roles')]);
+      this.guards.set(guards);
+      this.roles.set(roles);
     } catch (e) {
       this.toast.error(e);
     }
@@ -115,6 +181,46 @@ export class PermissionsPage implements OnInit {
       await this.load();
       void this.store.refreshOverview();
       this.toast.success(`Đã lưu quyền của ${g.name}. Trợ lý dùng ngay quyền mới.`);
+    } catch (e) {
+      this.toast.error(e);
+    }
+  }
+
+  protected editRole(r: RoleRow): void {
+    this.roleDesc = r.description;
+    this.editingRole.set(r.name);
+  }
+
+  protected async saveRole(name: string): Promise<void> {
+    try {
+      await this.api.put(`/api/roles/${encodeURIComponent(name)}`, { description: this.roleDesc });
+      this.editingRole.set(null);
+      await this.load();
+    } catch (e) {
+      this.toast.error(e);
+    }
+  }
+
+  protected async addRole(): Promise<void> {
+    const name = this.newName.trim();
+    if (!name) return;
+    if (this.roles().some((r) => r.name === name && r.inCatalog)) return this.toast.show(`Quyền "${name}" đã có.`);
+    try {
+      await this.api.put(`/api/roles/${encodeURIComponent(name)}`, { description: this.newDesc });
+      this.newName = '';
+      this.newDesc = '';
+      await this.load();
+      this.toast.success(`Đã thêm quyền ${name}`);
+    } catch (e) {
+      this.toast.error(e);
+    }
+  }
+
+  protected async removeRole(r: RoleRow): Promise<void> {
+    if (!confirm(`Xóa quyền "${r.name}" khỏi danh mục?`)) return;
+    try {
+      await this.api.delete(`/api/roles/${encodeURIComponent(r.name)}`);
+      await this.load();
     } catch (e) {
       this.toast.error(e);
     }

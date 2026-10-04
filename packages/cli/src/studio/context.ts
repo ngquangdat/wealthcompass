@@ -100,7 +100,7 @@ export function projectSummary(app: string) {
 
 export function featureRows(app: string) {
   const config = configPath(app);
-  const { featureMap, hidden } = cachedScan(app);
+  const { featureMap, hidden, contexts } = cachedScan(app);
   const { config: cfg, root } = loadConfig(config);
   const raw = readOverrides(join(root, cfg.discovery.overrides));
   return featureMap.features.map((f) => {
@@ -116,6 +116,10 @@ export function featureRows(app: string) {
       menuPath: f.menuPath,
       facets: f.facets,
       requires: f.access.requires,
+      // Quyền suy từ guard (để so với bản ghi đè) và guard trên route
+      guards: contexts[f.id]?.guards ?? [],
+      guardRequires: [...new Set((contexts[f.id]?.guards ?? []).flatMap((g) => cfg.access.guards[g]?.requires ?? []))],
+      requiresOverride: Array.isArray(ov['requires']),
       tourIds: f.tourIds,
       targets: f.targets.length,
       overridden: Object.keys(ov).filter((k) => k !== 'llmDraft'),
@@ -137,7 +141,10 @@ export function featureRows(app: string) {
         sampleQuestions: (ov['sampleQuestions'] as string[] | undefined) ?? [],
         menuPath: [],
         facets: {},
-        requires: [],
+        requires: (ov['requires'] as string[] | undefined) ?? [],
+        guards: [] as string[],
+        guardRequires: [] as string[],
+        requiresOverride: Array.isArray(ov['requires']),
         tourIds: [],
         targets: 0,
         overridden: Object.keys(ov).filter((k) => k !== 'llmDraft'),

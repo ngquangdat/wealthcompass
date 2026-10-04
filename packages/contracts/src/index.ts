@@ -161,8 +161,10 @@ export const compassConfigSchema = z.object({
   access: z
     .object({
       guards: z.record(z.string(), z.object({ requires: z.array(z.string()) })).default({}),
+      // Danh mục quyền của hệ thống (trùng giá trị trong claim quyền của JWT) kèm mô tả, để chọn thay vì gõ tay
+      roles: z.record(z.string(), z.object({ description: z.string().default('') })).default({}),
     })
-    .default({ guards: {} }),
+    .default({ guards: {}, roles: {} }),
   safety: z
     .object({
       userOnly: z.array(z.string()).default([]),

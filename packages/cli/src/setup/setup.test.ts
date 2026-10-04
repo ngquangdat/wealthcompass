@@ -198,3 +198,19 @@ test('--ai-code: chỉ guard phải đoán từ tên mới được gửi cho LL
   await bad.close();
   assert.equal(kept.find((g) => g.name === 'reportsGuard')?.how, 'name', 'chuỗi quyền không hợp lệ thì giữ bản đoán cũ');
 });
+
+test('setup: thêm .wealthcompass/ vào .gitignore qua patch (một lần), không có .gitignore thì nhắc trong việc cần làm', async () => {
+  const dir = tempRepo('setup-app');
+  writeFileSync(join(dir, '.gitignore'), 'node_modules');
+  git(dir, 'add', '-A');
+  git(dir, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'gi');
+  const result = await setup(options(dir), () => undefined);
+  assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), 'node_modules', 'chưa đụng trước khi áp');
+  execFileSync('git', ['apply', result.patchFile!], { cwd: dir });
+  assert.match(readFileSync(join(dir, '.gitignore'), 'utf8'), /^node_modules\n\n# WealthCompass[^\n]*\n\.wealthcompass\/\n$/);
+  const again = await setup(options(dir, { force: true }), () => undefined);
+  assert.doesNotMatch(again.patchFile ? readFileSync(again.patchFile, 'utf8') : '', /\.gitignore/);
+
+  const bare = await setup(options(tempRepo('setup-app')), () => undefined);
+  assert.ok(bare.todo.some((t) => t.includes('.wealthcompass/')));
+});

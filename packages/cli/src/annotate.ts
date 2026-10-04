@@ -2,14 +2,15 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { parse } from 'angular-html-parser';
 import { ClassDeclaration, Node } from 'ts-morph';
-import { addEdit, addToDecoratorArray, buildGitPatch, decoratorArg, importEdit, type EditSet } from './codemod';
+import { addEdit, addToDecoratorArray, buildGitPatch, decoratorArg, importsEdit, type EditSet } from './codemod';
 import { normalizeVi } from '@wealthcompass/core';
 import { loadConfig, scan } from './scan';
 
 // annotate: quét template, gợi ý tourId cho phần tử tương tác chưa có, và XUẤT PATCH.
 // Không bao giờ tự ghi vào code: tourId là hợp đồng giữa template và tour, nên người phải xem và duyệt.
 
-export type CandidateKind = 'button' | 'link' | 'input' | 'tab' | 'other';
+// menu: link trong vòng lặp sinh từ dữ liệu menu; gắn [tourMenu] thay cho tourId cố định (mỗi mục một mốc menu-<route>)
+export type CandidateKind = 'button' | 'link' | 'input' | 'tab' | 'menu' | 'other';
 
 export interface Sensitivity {
   // sure: chắc chắn nhạy cảm (nộp, mật khẩu, nút gửi/đặt lệnh...). maybe: có dấu hiệu, người cần xem lại
@@ -29,6 +30,12 @@ export interface Candidate {
   component: string;
   // Vị trí chèn thuộc tính trong file (đã tính cả offset nếu template nằm trong .ts)
   offset: number;
+  // Khóa của component chứa phần tử (để chỉ thêm TourIdDirective vào component có phần tử được chọn)
+  classKey: string;
+  // Gợi ý ngắn (tourHint), do người hoặc AI soạn
+  hint?: string;
+  // Chỉ có ở loại menu: biểu thức route của mục menu, chèn thành [tourMenu]="..."
+  menuExpr?: string;
 }
 
 export interface SkippedComponent {
@@ -56,6 +63,8 @@ export interface AnnotateResult {
   applyHint: string | null;
   // Các chỗ sửa (chưa áp) để setup gộp chung vào một patch
   edits: EditSet;
+  // Component theo classKey, để dựng lại patch khi người chọn bớt/đổi tên trên Studio
+  classes: Map<string, ClassDeclaration>;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +94,8 @@ export interface SensitivityInput {
   // Các chuỗi định danh khác: name, id, formControlName, tên hàm trong (click), class...
   identifiers: string[];
   navigates: boolean;
+  // Nút nằm cùng biểu mẫu/khối với ô mật khẩu, OTP, PIN
+  nearSecret?: boolean;
 }
 
 export function detectSensitive(input: SensitivityInput): Sensitivity | null {
@@ -101,6 +112,9 @@ export function detectSensitive(input: SensitivityInput): Sensitivity | null {
 
   const label = input.label ? normalizeVi(input.label) : '';
   if (label && SURE_LABELS.has(label) && input.kind !== 'input') return { level: 'sure', reason: `chữ "${input.label}" là nút hành động` };
+  // Nút đổi/cập nhật/gửi mật khẩu, OTP, PIN: dù chữ không nằm trong danh sách hành động vẫn là thao tác bí mật
+  if (input.kind !== 'input' && SURE_FIELD.test(label)) return { level: 'sure', reason: `chữ "${input.label}" thao tác với mật khẩu/OTP/PIN` };
+  if (input.kind === 'button' && input.nearSecret) return { level: 'sure', reason: 'nút nằm cùng khối với ô mật khẩu/OTP/PIN' };
 
   if (input.kind === 'input' || input.kind === 'link') return null;
   const phrase = MAYBE_PHRASES.find((p) => ` ${label} `.includes(` ${p} `));
@@ -138,6 +152,8 @@ interface RawCandidate {
   type?: string;
   autocomplete?: string;
   navigates: boolean;
+  nearSecret?: boolean;
+  menuExpr?: string;
   insertAt: number; // offset trong chính template
 }
 
@@ -159,8 +175,9 @@ const attr = (n: LooseNode, name: string): string | undefined => {
 };
 const has = (n: LooseNode, name: string): boolean => Boolean(n.attrs?.some((a) => a.name === name || a.name === `[${name}]`));
 
-// Chữ tĩnh bên trong phần tử (bỏ nội suy, bỏ icon font và svg)
-function innerText(node: LooseNode): string {
+// Chữ tĩnh bên trong phần tử (bỏ nội suy, bỏ icon font và svg).
+// skipControls: bỏ chữ nằm trong ô nhập (option của select...) khi lấy chữ của thẻ <label> bao ngoài
+function innerText(node: LooseNode, skipControls = false): string {
   const parts: string[] = [];
   const walk = (n: LooseNode) => {
     if (typeof n.value === 'string' && !n.name) {
@@ -168,6 +185,7 @@ function innerText(node: LooseNode): string {
       return;
     }
     if (n.name === 'mat-icon' || n.name === 'svg' || n.name === 'compass-icon') return;
+    if (skipControls && n.name && (INPUT_TAGS.has(n.name) || n.name === 'mat-error' || n.name === 'mat-hint')) return;
     const cls = attr(n, 'class') ?? '';
     if (/material-icons|material-symbols/.test(cls)) return;
     (n.children ?? []).forEach(walk);
@@ -202,40 +220,89 @@ function containsInteractive(n: LooseNode): boolean {
   return (n.children ?? []).some((c) => (typeof c.name === 'string' && Array.isArray(c.attrs) && classify(c) !== null) || containsInteractive(c));
 }
 
+// Nhãn của ô nhập: chữ của ô (option của select) không nói ô đó là gì, phải tìm nhãn quanh nó
+function controlLabel(n: LooseNode, ancestors: LooseNode[], labelsFor: Map<string, string>): string | undefined {
+  const id = attr(n, 'id');
+  if (id && labelsFor.get(id)) return labelsFor.get(id);
+  for (const a of [...ancestors].reverse()) {
+    if (a.name === 'label') return innerText(a, true) || undefined;
+    if (a.name === 'mat-form-field') {
+      const matLabel = (a.children ?? []).find((c) => c.name === 'mat-label');
+      return matLabel ? innerText(matLabel) || undefined : undefined;
+    }
+  }
+  return undefined;
+}
+
+// Khối có ô mật khẩu/OTP (để nút gửi của khối đó luôn là user-only)
+function hasSecretField(n: LooseNode): boolean {
+  return (n.children ?? []).some(
+    (c) =>
+      (Array.isArray(c.attrs) && INPUT_TAGS.has(c.name ?? '') && ((attr(c, 'type') ?? '').toLowerCase() === 'password' || /one-time-code|password/i.test(attr(c, 'autocomplete') ?? ''))) ||
+      hasSecretField(c),
+  );
+}
+
+// Nằm trong vòng lặp @for hoặc *ngFor
+function inLoop(n: LooseNode, ancestors: LooseNode[]): boolean {
+  return [...ancestors, n].some((a) => (a.name === 'for' && !Array.isArray(a.attrs)) || (Array.isArray(a.attrs) && has(a, '*ngFor')));
+}
+
 export function analyzeTemplateForAnnotate(html: string): RawCandidate[] {
   const result = parse(html, { canSelfClose: true, tokenizeAngularBlocks: true, tokenizeAngularLetDeclaration: true, isTagNameCaseSensitive: true });
   const out: RawCandidate[] = [];
+  const roots = result.rootNodes as unknown as LooseNode[];
+  // <label for="x">: gom trước để ô nhập ở chỗ khác trong template vẫn tìm được nhãn
+  const labelsFor = new Map<string, string>();
+  const collect = (n: LooseNode) => {
+    if (n.name === 'label' && attr(n, 'for')) labelsFor.set(attr(n, 'for')!, innerText(n, true));
+    (n.children ?? []).forEach(collect);
+  };
+  roots.forEach(collect);
+  const ancestors: LooseNode[] = [];
   const visit = (n: LooseNode) => {
     if (typeof n.name === 'string' && n.name && Array.isArray(n.attrs) && n.startSourceSpan) {
       const kind = classify(n);
-      const marked = has(n, 'tourId') || has(n, 'data-tour-id');
+      const marked = has(n, 'tourId') || has(n, 'data-tour-id') || has(n, 'tourMenu');
       const hidden = has(n, 'hidden') || has(n, '[hidden]');
       // Phần tử chung chung (div, section...) mà có (click) nhưng bao ngoài phần tử tương tác khác là khung chứa, không phải nút
       const container = kind !== null && n.name !== 'button' && n.name !== 'a' && containsInteractive(n);
       if (kind && !marked && !hidden && !container) {
         const click = attr(n, '(click)') ?? '';
         const label =
-          attr(n, 'aria-label') || innerText(n) || attr(n, 'placeholder') || attr(n, 'title') || null;
+          kind === 'input'
+            ? attr(n, 'aria-label') || controlLabel(n, ancestors, labelsFor) || attr(n, 'placeholder') || attr(n, 'title') || (n.name === 'select' ? null : innerText(n)) || null
+            : attr(n, 'aria-label') || innerText(n) || attr(n, 'placeholder') || attr(n, 'title') || null;
         const routerLink = attr(n, 'routerLink');
+        // Link trong vòng lặp với [routerLink]="mục.trường" là MỘT thẻ cho mọi mục menu: tourId cố định sẽ trùng cho mọi mục,
+        // nên gắn [tourMenu] để mỗi mục tự có mốc menu-<route>
+        const bound = n.attrs.find((a) => a.name === '[routerLink]')?.value.trim();
+        const menuExpr = bound && /^[\w$]+(\.[\w$]+)+$/.test(bound) && inLoop(n, ancestors) ? bound : undefined;
+        // Nút gửi trong cùng form (hoặc cùng khối cha) với ô mật khẩu/OTP
+        const block = [...ancestors].reverse().find((a) => a.name === 'form') ?? [...ancestors].reverse().find((a) => Array.isArray(a.attrs));
         out.push({
           tag: n.name,
-          kind,
-          label: label ? label.slice(0, 60) : null,
+          kind: menuExpr ? 'menu' : kind,
+          label: menuExpr ? 'mọi mục menu' : label ? label.slice(0, 60) : null,
+          menuExpr,
+          nearSecret: kind === 'button' && Boolean(block && hasSecretField(block)),
           identifiers: [
             attr(n, 'name'), attr(n, 'id'), attr(n, 'formControlName'), attr(n, 'class'), handlerName(click),
             routerLink && !routerLink.includes('{{') ? routerLink.split('/').filter(Boolean).at(-1) : undefined,
           ].filter((x): x is string => Boolean(x)),
           type: attr(n, 'type'),
           autocomplete: attr(n, 'autocomplete'),
-          navigates: kind === 'link',
+          navigates: kind === 'link' || Boolean(menuExpr),
           // Ngay sau tên thẻ: "<button" + chèn + phần còn lại
           insertAt: n.startSourceSpan.start.offset + 1 + n.name.length,
         });
       }
     }
+    ancestors.push(n);
     (n.children ?? []).forEach(visit);
+    ancestors.pop();
   };
-  (result.rootNodes as unknown as LooseNode[]).forEach(visit);
+  roots.forEach(visit);
   return out;
 }
 
@@ -315,7 +382,9 @@ export function annotate(opts: AnnotateOptions): AnnotateResult {
     if (ctx && selected(f.route.pattern, f.id)) units.push({ path: f.route.pattern, classes: ctx.classes });
   }
   for (const l of layouts) {
-    if (!only || units.some((u) => u.path === l.path || u.path.startsWith(l.path + '/'))) units.push({ path: l.path, classes: l.classes });
+    // Layout gốc "/" (menu, header) bao mọi màn hình: chọn màn hình nào cũng quét kèm
+    const covers = (p: string) => l.path === '/' || p === l.path || p.startsWith(l.path + '/');
+    if (!only || units.some((u) => covers(u.path))) units.push({ path: l.path, classes: l.classes });
   }
 
   const taken = new Set<string>(featureMap.features.flatMap((f) => f.targets.map((t) => t.tourId)));
@@ -355,7 +424,7 @@ export function annotate(opts: AnnotateOptions): AnnotateResult {
 
         const screen = screenSlug(unit.path);
         const labelSlug = slug(raw.label ?? '');
-        const part = /[a-z]/.test(labelSlug) ? labelSlug : raw.kind;
+        const part = raw.kind === 'menu' ? 'menu' : /[a-z]/.test(labelSlug) ? labelSlug : raw.kind;
         let base = `${screen}-${part}`;
         if (raw.kind === 'input' && !base.endsWith('-input')) base += '-input';
         if (raw.kind === 'tab' && !base.endsWith('-tab')) base += '-tab';
@@ -368,12 +437,14 @@ export function annotate(opts: AnnotateOptions): AnnotateResult {
           tag: raw.tag,
           kind: raw.kind,
           label: raw.label,
-          sensitive: detectSensitive({ tag: raw.tag, kind: raw.kind, type: raw.type, autocomplete: raw.autocomplete, label: raw.label, identifiers: raw.identifiers, navigates: raw.navigates }),
+          sensitive: raw.kind === 'menu' ? null : detectSensitive({ tag: raw.tag, kind: raw.kind, type: raw.type, autocomplete: raw.autocomplete, label: raw.label, identifiers: raw.identifiers, navigates: raw.navigates, nearSecret: raw.nearSecret }),
+          menuExpr: raw.menuExpr,
           screen: unit.path,
           file: src.file,
           line: lineOf(src.file.endsWith('.ts') ? readFileSync(src.file, 'utf8') : src.html, offset),
           component: className,
           offset,
+          classKey: `${cls.getSourceFile().getFilePath()}#${className}`,
         });
         added++;
       }
@@ -390,28 +461,43 @@ export function annotate(opts: AnnotateOptions): AnnotateResult {
     writeFileSync(patchFile, patch);
   }
   const applyHint = patchFile ? `cd ${base} && git apply --check ${relative(base, patchFile) || patchFile} && git apply ${relative(base, patchFile) || patchFile}` : null;
-  return { candidates, skipped, patch, patchFile, patchFileCount: files, applyHint, edits };
+  return { candidates, skipped, patch, patchFile, patchFileCount: files, applyHint, edits, classes: touchedClasses };
 }
 
 // Dựng chỗ sửa: thuộc tính tourId trên phần tử + TourIdDirective trong component
 export function annotationEdits(candidates: Candidate[], classes: Map<string, ClassDeclaration>, directiveModule: string): EditSet {
   const edits: EditSet = new Map();
+  // Directive cần cho từng component: TourIdDirective (tourId cố định) và/hoặc TourMenuDirective (mục menu)
+  const needs = new Map<string, Set<string>>();
   for (const c of candidates) {
+    const directive = c.menuExpr ? 'TourMenuDirective' : 'TourIdDirective';
+    needs.set(c.classKey, (needs.get(c.classKey) ?? new Set()).add(directive));
+    if (c.menuExpr) {
+      addEdit(edits, c.file, { pos: c.offset, text: ` [tourMenu]="${c.menuExpr}"` });
+      continue;
+    }
     const attrs = [`tourId="${c.tourId}"`];
     if (c.label) attrs.push(`tourLabel="${escapeAttr(c.label)}"`);
+    if (c.hint) attrs.push(`tourHint="${escapeAttr(c.hint)}"`);
     if (c.sensitive) attrs.push('tourRole="user-only"');
     addEdit(edits, c.file, { pos: c.offset, text: ' ' + attrs.join(' ') });
   }
-  const importedIn = new Set<string>();
-  for (const cls of classes.values()) {
+  const byFile = new Map<string, { file: ReturnType<ClassDeclaration['getSourceFile']>; symbols: Set<string> }>();
+  for (const [key, cls] of classes) {
     const file = cls.getSourceFile();
-    const path = file.getFilePath();
-    for (const e of addToDecoratorArray(cls, 'imports', 'TourIdDirective').edits) addEdit(edits, path, e);
-    if (!importedIn.has(path)) {
-      importedIn.add(path);
-      const ie = importEdit(file, directiveModule, 'TourIdDirective');
-      if (ie) addEdit(edits, path, ie);
-    }
+    const symbols = [...(needs.get(key) ?? new Set(['TourIdDirective']))];
+    // Bỏ directive component đã khai, thêm phần còn thiếu trong MỘT lần sửa mảng imports
+    const init = decoratorArg(cls)?.getProperty('imports');
+    const existing = init && Node.isPropertyAssignment(init) ? (init.getInitializer()?.getText() ?? '') : '';
+    const missing = symbols.filter((sym) => !new RegExp(`\\b${sym}\\b`).test(existing));
+    if (missing.length) for (const e of addToDecoratorArray(cls, 'imports', missing.join(', ')).edits) addEdit(edits, file.getFilePath(), e);
+    const entry = byFile.get(file.getFilePath()) ?? { file, symbols: new Set<string>() };
+    symbols.forEach((sym) => entry.symbols.add(sym));
+    byFile.set(file.getFilePath(), entry);
+  }
+  for (const [path, { file, symbols }] of byFile) {
+    const ie = importsEdit(file, directiveModule, [...symbols]);
+    if (ie) addEdit(edits, path, ie);
   }
   return edits;
 }
@@ -424,7 +510,8 @@ export function formatReport(result: AnnotateResult, base: string): string {
     lines.push(`\n${screen}  (${list[0].component} · ${relative(base, list[0].file)})`);
     for (const c of list) {
       const flag = c.sensitive ? (c.sensitive.level === 'sure' ? '  ⛔ user-only' : '  ⚠ user-only (cần xem lại)') : '';
-      lines.push(`  ${c.tourId.padEnd(34)} ${c.kind.padEnd(7)} ${(c.label ? `"${c.label}"` : '(không có chữ)').padEnd(30)}${flag}${c.sensitive ? ` — ${c.sensitive.reason}` : ''}`);
+      const id = c.menuExpr ? `[tourMenu]="${c.menuExpr}"` : c.tourId;
+      lines.push(`  ${id.padEnd(34)} ${c.kind.padEnd(7)} ${(c.label ? `"${c.label}"` : '(không có chữ)').padEnd(30)}${flag}${c.sensitive ? ` — ${c.sensitive.reason}` : ''}`);
     }
   }
   return lines.join('\n');

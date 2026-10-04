@@ -16,21 +16,19 @@
       </a>
 
       <nav>
-        @for (item of nav; track item.path) {
-          <a class="nav-item" [routerLink]="item.path" routerLinkActive="active">
-            <ui-icon [name]="item.icon" />
-            <span class="grow">{{ item.label }}</span>
-            @if (item.status && store.navStatus()[item.status] !== 'none') {
-              <span class="dot" [class]="store.navStatus()[item.status]"></span>
-            }
-          </a>
+        @for (g of groups; track $index) {
+          @if (g.title) { <div class="section-title">{{ g.title }}</div> } @else if (!$first) { <div class="nav-sep"></div> }
+          @for (item of g.items; track item.path) {
+            <a class="nav-item" [routerLink]="item.path" routerLinkActive="active" [title]="item.label">
+              <ui-icon [name]="item.icon" />
+              <span class="grow">{{ item.label }}</span>
+              @if (item.status && store.navStatus()[item.status] !== 'none') {
+                <span class="dot" [class]="store.navStatus()[item.status]"></span>
+              }
+            </a>
+          }
         }
       </nav>
-
-      <div class="section-title">Sắp có</div>
-      <div class="upcoming">
-        @for (u of upcoming; track u) { <span>{{ u }}</span> }
-      </div>
     } @else {
       <nav>
         <a class="nav-item active" routerLink="/open"><ui-icon name="folder" /><span class="grow">Mở dự án</span></a>

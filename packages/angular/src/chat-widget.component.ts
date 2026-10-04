@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, PLATFORM_ID, effect, inject, signal, viewChild } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { COMPASS_CONFIG } from './compass.config';
 import { CompassIconComponent } from './compass-icon.component';
@@ -149,6 +150,17 @@ export class ChatWidgetComponent {
   private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
 
   constructor() {
+    // Mở tour qua đường link (?compassTour=<id>), dùng cho nút "Chạy thử" của Studio. Đọc ngay khi tạo widget,
+    // trước khi router chuyển hướng làm mất tham số; tour vẫn qua kiểm tra quyền của backend như bình thường.
+    if (isPlatformBrowser(inject(PLATFORM_ID))) {
+      const url = new URL(window.location.href);
+      const tourId = url.searchParams.get('compassTour');
+      if (tourId && /^[a-z0-9-]{2,64}$/.test(tourId) && this.config.getToken()) {
+        url.searchParams.delete('compassTour');
+        history.replaceState(history.state, '', url.toString());
+        setTimeout(() => void this.chat.runAction({ kind: 'tour', tourId, label: '' }), 800);
+      }
+    }
     // Tự cuộn xuống cuối khi có tin nhắn hoặc chữ mới
     effect(() => {
       this.chat.messages();

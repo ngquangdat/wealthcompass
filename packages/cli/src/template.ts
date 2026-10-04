@@ -1,5 +1,9 @@
 import { parse } from 'angular-html-parser';
 import type { Sensitivity } from '@wealthcompass/contracts';
+import { menuTourId } from '@wealthcompass/core';
+
+// Đánh dấu "template có [tourMenu] động": trình quét thay bằng một mốc cho mỗi mục trong dữ liệu menu
+export const MENU_TARGETS = '*menu*';
 
 export interface TemplateTarget {
   tourId: string;
@@ -64,6 +68,12 @@ export function analyzeTemplate(html: string): TemplateInfo {
       if (SKIP_TEXT_IN.has(node.name)) return;
       tags.add(node.name);
       for (const attr of TEXT_ATTRS) addText(staticValue(node.attrs, attr));
+      const menu = node.attrs.find((a) => a.name === 'tourMenu' || a.name === '[tourMenu]');
+      if (menu) {
+        const route = staticValue(node.attrs, 'tourMenu');
+        if (route !== undefined) targets.push({ tourId: menuTourId(route), label: staticValue(node.attrs, 'tourLabel'), sensitivity: 'normal' });
+        else if (!targets.some((t) => t.tourId === MENU_TARGETS)) targets.push({ tourId: MENU_TARGETS, sensitivity: 'normal' });
+      }
       const tourId = staticValue(node.attrs, 'tourId') ?? staticValue(node.attrs, 'data-tour-id');
       if (tourId) {
         const role = staticValue(node.attrs, 'tourRole');

@@ -14,6 +14,8 @@ import {
 } from '@wealthcompass/contracts';
 import { scanRoutes, type ScannedLayout, type ScannedRoute } from './routes';
 import { scanMenu } from './menu';
+import { MENU_TARGETS } from './template';
+import { menuTourId } from '@wealthcompass/core';
 
 interface Overrides {
   features?: Record<
@@ -38,6 +40,8 @@ export interface FeatureContext {
   componentName?: string;
   uiText: string[];
   classes: import('ts-morph').ClassDeclaration[];
+  // Guard áp lên màn hình này (kể cả kế thừa từ route cha)
+  guards: string[];
 }
 
 // Màn hình bị ẩn khỏi trợ lý (overrides `hidden: true`): không vào Feature Map, nhưng Studio vẫn cần thấy để bỏ ẩn
@@ -152,7 +156,14 @@ export function scan(configPath: string): ScanResult {
 
     const seen = new Set<string>();
     const targets: Target[] = [];
-    for (const t of r.targets) {
+    if (!menu.size && r.targets.some((t) => t.tourId === MENU_TARGETS) && !warnings.some((w) => w.includes('[tourMenu]'))) {
+      warnings.push('Layout dùng [tourMenu] nhưng không đọc được dữ liệu menu (discovery.menu): các mốc menu-<route> chưa được tạo');
+    }
+    // [tourMenu] động: mỗi mục có route trong dữ liệu menu là một mốc, nhãn là đường đi menu
+    const expanded = r.targets.flatMap((t) =>
+      t.tourId === MENU_TARGETS ? [...menu].map(([path, labels]) => ({ tourId: menuTourId(path), label: labels.join(' › '), hint: undefined, sensitivity: 'normal' as const })) : [t],
+    );
+    for (const t of expanded) {
       if (seen.has(t.tourId)) continue;
       seen.add(t.tourId);
       const target: Target = { tourId: t.tourId, label: t.label, hint: t.hint, sensitivity: t.sensitivity, route: r.path };
@@ -182,7 +193,7 @@ export function scan(configPath: string): ScanResult {
         sourceRef: r.sourceRef,
       },
     });
-    contexts[id] = { id, path: r.path, componentName: r.componentName, uiText: r.uiText, classes: r.classes };
+    contexts[id] = { id, path: r.path, componentName: r.componentName, uiText: r.uiText, classes: r.classes, guards: r.guards };
 
     lock.features[id] = { route: r.path, component: r.componentName };
   }

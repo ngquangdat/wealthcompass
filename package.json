@@ -11,7 +11,7 @@
     "scan": "tsx packages/cli/src/main.ts scan --config examples/iconnect-demo/compass.config.yaml",
     "server": "npm run start -w server",
     "demo": "npm run start -w iconnect-demo -- --port 4200 --host 127.0.0.1",
-    "test": "tsx --test packages/llm/src/config.test.ts server/src/agent.test.ts packages/cli/src/scan.test.ts packages/cli/src/template.test.ts packages/cli/src/enrich.test.ts packages/cli/src/annotate.test.ts packages/cli/src/setup/setup.test.ts packages/cli/src/studio/studio.test.ts packages/cli/src/record/record.test.ts",
+    "test": "tsx --test packages/core/src/resolver.test.ts packages/llm/src/config.test.ts server/src/agent.test.ts packages/cli/src/scan.test.ts packages/cli/src/template.test.ts packages/cli/src/enrich.test.ts packages/cli/src/annotate.test.ts packages/cli/src/setup/setup.test.ts packages/cli/src/studio/studio.test.ts packages/cli/src/studio/studio-phase2.test.ts packages/cli/src/studio/studio-phase3.test.ts packages/cli/src/record/record.test.ts",
     "check": "tsc --noEmit -p server && tsc --noEmit -p packages/cli && npm run test",
     "tour:record": "tsx packages/cli/src/main.ts tour:record --config examples/iconnect-demo/compass.config.yaml",
     "enrich": "tsx packages/cli/src/main.ts enrich --config examples/iconnect-demo/compass.config.yaml",
@@ -27,5 +27,5 @@
     "tsx": "^4.20.0",
     "typescript": "~6.0.2"
   },
-  "compassVersion": "0.1.0"
+  "compassVersion": "0.3.4"
 }

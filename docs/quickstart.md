@@ -17,10 +17,19 @@ Studio chạy trên máy của bạn (chỉ nghe `127.0.0.1`, đường link có
 | **Tổng quan** | Số màn hình, số nội dung AI chờ duyệt, checklist tích hợp xanh/vàng/đỏ kèm nút tới chỗ sửa, cảnh báo của trình quét |
 | **Tích hợp** | 3 bước: tạo thay đổi (chọn lĩnh vực, AI soạn nháp) → xem diff từng file, bỏ chọn được từng đoạn → áp và cài gói (log chạy trực tiếp). Nút **Cập nhật gói** khi có bản WealthCompass mới |
 | **Màn hình** | Bảng mọi màn hình, lọc *chờ duyệt / thiếu mô tả / đã ẩn*; bấm một dòng để sửa tiêu đề, mô tả, từ khóa, câu hỏi mẫu, ẩn khỏi trợ lý; **Duyệt** nội dung AI; **AI soạn** phần còn trống |
+| **Quyền** | Mỗi guard trên route cần quyền gì, nguồn của thông tin (đọc từ code / đoán từ tên / đã duyệt); sửa bằng ô thẻ rồi lưu. Bản đoán từ tên phải duyệt: đoán sai làm trợ lý nói người dùng "không có quyền" |
+| **Gắn tourId** | Chọn màn hình → quét phần tử chưa có tourId → (tùy chọn) mô tả luồng cần dẫn để **AI gợi ý** chọn phần tử thuộc luồng, đánh dấu thêm phần tử nhạy cảm, viết `tourHint` → sửa tên, bỏ chọn → xem diff → áp. Phần tử nhạy cảm chắc chắn (submit, Xác nhận, nút đổi mật khẩu, nút cùng khối với ô mật khẩu...) luôn là user-only. Menu sinh từ dữ liệu được gắn `[tourMenu]`: mỗi mục có mốc `menu-<route>`. Phần tử AI cho là không thuộc luồng nằm ở nhóm riêng để tích lại |
+| **Tour** | Danh sách tour (nháp AI / sẵn sàng / bị loại kèm lý do). **Ghi tour mới**: mô tả tính năng, Chrome mở ra, thao tác thật, AI soạn chữ từng bước. **Soạn tay** hoặc sửa: chọn màn hình đích, bước bắt đầu, từng bước (phần tử, chờ bấm hay nút Tiếp, chữ). **Chạy thử** mở web với `?compassTour=<id>` |
+| **Domain Pack** | Từ đồng nghĩa, chủ đề bị chặn (mẫu + câu trả lời), lời dặn cho AI. Pack đóng kèm gói chỉ xem; **Tạo bản riêng** chép vào `compass-pack/` trong dự án để sửa. Ô **Thử một câu** cho biết câu hỏi có bị chặn và khớp nhóm từ nào |
 | **Chạy thử** | Bật/tắt backend WealthCompass và web của dự án, xem log, mở web; sửa cấu hình backend (`wealthcompass.env`) bằng form |
+| **Thử trợ lý** | Hỏi như người dùng, chọn quyền của người hỏi và màn hình đang đứng; bên phải là từng bước trợ lý đã làm (bộ lọc chủ đề cấm, tra cứu ban đầu kèm điểm, các vòng AI, công cụ được gọi và kết quả). Nút tour/màn hình mở thẳng web để thử |
+| **Kiểm thử** | Bộ câu hỏi mẫu + màn hình đúng trong `compass.eval.yaml` (commit cùng code). **AI viết câu hỏi** cho từng màn hình; **Chạy kiểm thử** cho hit@1, hit@3, MRR, số câu chặn đúng, và lý do từng câu trượt (thiếu quyền, dưới ngưỡng điểm, xếp thứ mấy). Chạy lại sau mỗi lần sửa mô tả hay từ đồng nghĩa |
+| **Nhật ký** | Số câu hỏi, tỷ lệ tìm được, câu **không tìm thấy** (gom câu giống nhau, thêm thẳng vào Kiểm thử), chủ đề bị chặn, phễu tour (đề xuất → bắt đầu → đi hết), thời gian trả lời |
 | **Cài đặt AI** | Nhà cung cấp, model, đang dùng khóa từ đâu, nhập khóa cho riêng phiên Studio, thử kết nối, công tắc cho AI đọc mã nguồn |
 
-Nguyên tắc vẫn như dòng lệnh: code của web chỉ đổi khi bạn xem diff rồi bấm **Áp**; khóa AI không bao giờ ghi vào file. Các trang Quyền, Gắn tourId, Tour, Domain Pack, Thử trợ lý, Kiểm thử, Nhật ký sẽ có ở đợt sau.
+Nguyên tắc vẫn như dòng lệnh: code của web chỉ đổi khi bạn xem diff rồi bấm **Áp**; khóa AI không bao giờ ghi vào file. Sửa quyền, màn hình, tour thì trợ lý dùng ngay (backend tự nạp lại bản đồ tính năng); sửa Domain Pack thì khởi động lại backend ở trang Chạy thử.
+
+Backend bật từ Studio chạy ở chế độ debug (`COMPASS_DEBUG=1`, các đường `/debug/*` chỉ nhận kết nối từ chính máy đó) để trang Thử trợ lý và Kiểm thử dùng, và ghi nhật ký vào `~/.wealthcompass/logs/` (ngoài dự án). Nhật ký chỉ có câu hỏi đã che thông tin cá nhân và mã người dùng đã băm. **Không bật `COMPASS_DEBUG` trên máy chủ thật**; muốn có trang Nhật ký cho bản thật thì đặt `COMPASS_LOG_FILE` rồi chép file về máy.
 
 ## Cách dòng lệnh (3 bước)
 

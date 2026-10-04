@@ -26,3 +26,11 @@ export function renderLiteMarkdown(text: string): string {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\n/g, '<br>');
 }
+
+// Mốc tour của một mục menu: "menu-" + route (bỏ dấu "/" đầu, query, ký tự lạ). Widget (TourMenuDirective)
+// và trình quét dùng chung hàm này để id hai phía luôn khớp. Route gốc "/" thành menu-home.
+export function menuTourId(route: string | readonly unknown[] | null | undefined): string {
+  const path = Array.isArray(route) ? route.join('/') : String(route ?? '');
+  const slug = normalizeVi(path.split(/[?#]/)[0].replace(/[/_.]+/g, ' ')).replace(/ /g, '-').slice(0, 55).replace(/-+$/, '');
+  return `menu-${slug || 'home'}`;
+}

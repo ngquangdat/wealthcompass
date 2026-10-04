@@ -2,8 +2,11 @@ import type { OutgoingHttpHeaders } from 'node:http';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { chatRequestSchema } from '@wealthcompass/contracts';
+import { z } from 'zod';
 import { runAgent } from './agent.js';
-import { createAuthHook } from './auth.js';
+import { createAuthHook, type Principal } from './auth.js';
+import { classifyInput } from './guardrails.js';
+import { createEventLog } from './event-log.js';
 import { loadConfig } from './config.js';
 import { FeatureStore } from './feature-store.js';
 import { registerMockIdp } from './idp.js';
@@ -38,7 +41,12 @@ function allowed(user: string): boolean {
   return true;
 }
 
-const log = (entry: Record<string, unknown>) => app.log.info(entry);
+// Log của Fastify (stdout) và, nếu bật COMPASS_LOG_FILE, nhật ký JSONL để Studio thống kê
+const eventLog = createEventLog(config.logFile);
+const log = (entry: Record<string, unknown>) => {
+  app.log.info(entry);
+  eventLog(entry);
+};
 
 app.get('/v1/health', async () => ({
   ok: true,
@@ -47,6 +55,7 @@ app.get('/v1/health', async () => ({
   tours: store.featureMap.tours.length,
   llmConfigured: Boolean(config.llm.apiKey),
   provider: config.llm.provider, model: config.llm.model,
+  debug: config.debug,
 }));
 
 app.get('/v1/tours/:id', { preHandler: authenticate }, async (request, reply) => {
@@ -66,13 +75,8 @@ app.post('/v1/telemetry', { preHandler: authenticate }, async (request, reply) =
   return reply.code(204).send();
 });
 
-app.post('/v1/chat', { preHandler: authenticate }, async (request, reply) => {
-  const parsed = chatRequestSchema.safeParse(request.body);
-  if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
-  const principal = request.principal!;
-  if (!allowed(principal.id)) return reply.code(429).send({ error: 'rate_limited' });
-
-  // Phản hồi SSE; hijack để tự quản luồng nhưng giữ header CORS mà plugin đã đặt
+// Mở luồng SSE; hijack để tự quản luồng nhưng giữ header CORS mà plugin đã đặt
+function openSse(reply: import('fastify').FastifyReply): AbortSignal {
   reply.hijack();
   reply.raw.writeHead(200, {
     ...(reply.getHeaders() as OutgoingHttpHeaders),
@@ -81,16 +85,68 @@ app.post('/v1/chat', { preHandler: authenticate }, async (request, reply) => {
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
-
   const abort = new AbortController();
   reply.raw.on('close', () => abort.abort());
+  return abort.signal;
+}
 
-  for await (const event of runAgent({ config, store, pack, log }, principal, parsed.data, abort.signal)) {
+app.post('/v1/chat', { preHandler: authenticate }, async (request, reply) => {
+  const parsed = chatRequestSchema.safeParse(request.body);
+  if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
+  const principal = request.principal!;
+  if (!allowed(principal.id)) return reply.code(429).send({ error: 'rate_limited' });
+
+  const signal = openSse(reply);
+  for await (const event of runAgent({ config, store, pack, log }, principal, parsed.data, signal)) {
     if (reply.raw.writableEnded) break;
     reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
   }
   reply.raw.end();
 });
 
+// ---------------------------------------------------------------------------
+// Chế độ debug (COMPASS_DEBUG=1): Studio dùng để thử trợ lý với quyền tùy chọn và chạy bộ kiểm thử.
+// Không cần JWT nên CHỈ nhận kết nối từ chính máy này; không bật trên máy chủ thật.
+// ---------------------------------------------------------------------------
+if (config.debug) {
+  const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+  app.addHook('onRequest', async (request, reply) => {
+    if (request.url.startsWith('/debug/') && !LOOPBACK.has(request.socket.remoteAddress ?? '')) return reply.code(403).send({ error: 'forbidden' });
+  });
+  const debugBody = z.object({
+    text: z.string().min(1).max(1000),
+    roles: z.array(z.string()).max(50).default([]),
+    route: z.string().default('/'),
+    history: chatRequestSchema.shape.history,
+  });
+
+  app.post('/debug/search', async (request, reply) => {
+    const parsed = debugBody.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
+    const { text, roles } = parsed.data;
+    return { verdict: classifyInput(text, pack), ...store.explain(text, roles) };
+  });
+
+  app.post('/debug/chat', async (request, reply) => {
+    const parsed = debugBody.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
+    const { text, roles, route, history } = parsed.data;
+    const principal: Principal = { id: 'studio', name: 'Studio', roles };
+    const signal = openSse(reply);
+    const write = (data: unknown) => !reply.raw.writableEnded && reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+    const deps = {
+      config,
+      store,
+      pack,
+      // Câu hỏi thử trong Studio vẫn ghi nhật ký nhưng gắn nguồn để thống kê tách riêng
+      log: (entry: Record<string, unknown>) => log({ ...entry, source: 'studio' }),
+      trace: (stage: string, data: Record<string, unknown>) => write({ type: 'debug', stage, data }),
+    };
+    const req = { message: text, history, context: { route, visibleTargets: [], locale: 'vi', capabilities: roles } };
+    for await (const event of runAgent(deps, principal, req, signal)) write(event);
+    reply.raw.end();
+  });
+}
+
 await app.listen({ port: config.port, host: config.host });
-app.log.info(`WealthCompass server: http://${config.host}:${config.port} (pack ${pack.name}, model ${config.llm.model}, llm ${config.llm.apiKey ? 'ok' : 'THIẾU KHÓA'})`);
+app.log.info(`WealthCompass server: http://${config.host}:${config.port} (pack ${pack.name}, model ${config.llm.model}, llm ${config.llm.apiKey ? 'ok' : 'THIẾU KHÓA'}${config.debug ? ', DEBUG: /debug/* chỉ nhận từ máy này' : ''}${config.logFile ? `, nhật ký: ${config.logFile}` : ''})`);

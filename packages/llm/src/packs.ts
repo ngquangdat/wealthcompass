@@ -19,6 +19,11 @@ export function resolvePackDir(nameOrPath: string, startDir: string = process.cw
   let dir = startDir;
   for (let i = 0; i < 8; i++) {
     if (isPack(join(dir, 'packs', name))) return join(dir, 'packs', name);
+    // Dự án đã cài gói: pack đóng kèm trong node_modules
+    for (const pkg of ['server', 'cli']) {
+      const inModules = join(dir, 'node_modules', '@wealthcompass', pkg, 'packs', name);
+      if (isPack(inModules)) return inModules;
+    }
     const up = dirname(dir);
     if (up === dir) break;
     dir = up;
@@ -26,7 +31,8 @@ export function resolvePackDir(nameOrPath: string, startDir: string = process.cw
 
   // Gói đã build: <gói>/bin/x.mjs và <gói>/packs/<tên>
   const here = dirname(fileURLToPath(import.meta.url));
-  for (const candidate of [join(here, '..', 'packs', name), join(here, 'packs', name)]) {
+  // Chạy từ mã nguồn: packages/llm/src -> <repo>/packs
+  for (const candidate of [join(here, '..', 'packs', name), join(here, 'packs', name), join(here, '..', '..', '..', 'packs', name)]) {
     if (isPack(candidate)) return candidate;
   }
   return null;

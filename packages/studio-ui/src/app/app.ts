@@ -21,16 +21,36 @@ interface NavItem {
 export class App {
   protected readonly store = inject(ProjectStore);
 
-  protected readonly nav: NavItem[] = [
-    { path: '/overview', label: 'Tổng quan', icon: 'grid', status: 'overview' },
-    { path: '/integrate', label: 'Tích hợp', icon: 'plug', status: 'integrate' },
-    { path: '/screens', label: 'Màn hình', icon: 'list', status: 'screens' },
-    { path: '/run', label: 'Chạy thử', icon: 'play' },
-    { path: '/settings', label: 'Cài đặt AI', icon: 'sliders' },
+  // Nhóm theo thứ tự làm việc: dựng dữ liệu cho trợ lý → kiểm tra trợ lý → cấu hình
+  protected readonly groups: Array<{ title: string | null; items: NavItem[] }> = [
+    {
+      title: null,
+      items: [
+        { path: '/overview', label: 'Tổng quan', icon: 'grid', status: 'overview' },
+        { path: '/integrate', label: 'Tích hợp', icon: 'plug', status: 'integrate' },
+      ],
+    },
+    {
+      title: 'Dữ liệu cho trợ lý',
+      items: [
+        { path: '/screens', label: 'Màn hình', icon: 'list', status: 'screens' },
+        { path: '/permissions', label: 'Quyền', icon: 'key' },
+        { path: '/tourids', label: 'Gắn tourId', icon: 'search' },
+        { path: '/tours', label: 'Tour', icon: 'compass' },
+        { path: '/pack', label: 'Domain Pack', icon: 'file-text' },
+      ],
+    },
+    {
+      title: 'Kiểm tra',
+      items: [
+        { path: '/run', label: 'Chạy thử', icon: 'play' },
+        { path: '/assistant', label: 'Thử trợ lý', icon: 'message' },
+        { path: '/eval', label: 'Kiểm thử', icon: 'target' },
+        { path: '/logs', label: 'Nhật ký', icon: 'chart' },
+      ],
+    },
+    { title: null, items: [{ path: '/settings', label: 'Cài đặt AI', icon: 'sliders' }] },
   ];
-
-  // Các màn hình của đợt sau: hiện rõ để người dùng biết lộ trình
-  protected readonly upcoming = ['Quyền', 'Gắn tourId', 'Tour', 'Domain Pack', 'Thử trợ lý', 'Kiểm thử', 'Nhật ký'];
 
   // Đường dẫn ngắn cho thanh bên: thay thư mục nhà bằng ~, dài quá thì chỉ giữ 2 thư mục cuối
   protected shortPath(p: string): string {

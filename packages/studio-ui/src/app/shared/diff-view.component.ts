@@ -40,6 +40,7 @@ import { IconComponent } from './icon.component';
     </div>
   `,
   styles: `
+    :host { display: block; container: diff / inline-size; }
     .diff { display: grid; grid-template-columns: 260px 1fr; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
     .files { border-right: 1px solid var(--border); background: var(--surface-2); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
     .file { display: flex; align-items: center; gap: 8px; padding: 8px; border: 0; background: none; border-radius: 6px; cursor: pointer; text-align: left; font-size: 12.5px; color: var(--text-2); }
@@ -50,6 +51,10 @@ import { IconComponent } from './icon.component';
     .fcheck.on { background: var(--primary); border-color: var(--primary); }
     .fcheck.part { background: linear-gradient(var(--primary), var(--primary)) center/8px 2px no-repeat; border-color: var(--primary); }
     .plus { color: var(--success-text); font-size: 12px; } .minus { color: var(--danger-text); font-size: 12px; }
+    @container diff (max-width: 640px) {
+      .diff { grid-template-columns: 1fr; }
+      .files { border-right: 0; border-bottom: 1px solid var(--border); }
+    }
     .hunks { min-width: 0; max-height: 560px; overflow: auto; }
     .fhead { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); z-index: 1; font-size: 12.5px; }
     .hunk { border-bottom: 1px solid var(--border); }

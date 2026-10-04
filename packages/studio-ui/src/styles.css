@@ -144,3 +144,8 @@ code { background: var(--surface-2); border: 1px solid var(--border); border-rad
 @keyframes spin { to { transform: rotate(360deg); } }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #d0d5dd; border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+
+/* Nút chọn dạng viên thuốc (chọn màn hình, quyền, câu mẫu) */
+.pick { min-height: 30px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border-strong); background: #fff; cursor: pointer; font: 13px Inter, sans-serif; color: var(--text-2); text-align: left; }
+.pick:hover { border-color: var(--text-3); }
+.pick.on { background: var(--primary-soft); border-color: #c9d6fb; color: var(--primary); font-weight: 500; }

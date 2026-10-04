@@ -28,11 +28,12 @@ if (command === 'doctor' && arg('app')) {
 } else if (command === 'studio') {
   // Giao diện web trên máy dev, thay cho việc gõ từng lệnh
   const repoTarballs = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'dist', 'tarballs');
-  const tgz = process.env['COMPASS_TARBALLS'] ?? repoTarballs;
+  // Chỉ chọn thư mục; có đúng bản .tgz hay không thì kiểm tra lúc dùng (có thể `npm run pack` sau khi mở Studio)
+  const tgz = process.env['COMPASS_TARBALLS'] ?? (existsSync(repoTarballs) ? repoTarballs : null);
   const { url } = await startStudio({
     port: Number(arg('port', '5310')),
     open: arg('app'),
-    tarballs: existsSync(join(tgz, `wealthcompass-angular-${VERSION}.tgz`)) ? tgz : null,
+    tarballs: process.argv.includes('--registry') ? null : tgz,
   });
   console.log(`WealthCompass Studio: ${url}\n(chỉ mở trên máy này; Ctrl+C để tắt, các tiến trình Studio mở sẽ dừng theo)`);
   if (!process.argv.includes('--no-open')) {

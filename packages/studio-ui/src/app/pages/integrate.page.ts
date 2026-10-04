@@ -203,7 +203,9 @@ export class IntegratePage implements OnInit {
     const res = await this.api.get<{ exists: boolean; files: FilePatch[]; report: string | null }>('/api/patch');
     this.files.set(res.files);
     this.selected.set(new Set(res.files.flatMap((f) => f.hunks.map((h) => h.id))));
-    this.todo.set(parseTodo(res.report));
+    // Patch chỉ đổi phiên bản gói (Cập nhật gói): báo cáo của lần setup trước không liên quan
+    const onlyPackages = res.files.length > 0 && res.files.every((f) => f.path === 'package.json');
+    this.todo.set(onlyPackages ? [] : parseTodo(res.report));
     this.step.set(2);
   }
 

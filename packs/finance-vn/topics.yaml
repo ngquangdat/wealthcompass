@@ -22,3 +22,4 @@ topics:
       - '\b(dat|mua|ban|chuyen|rut|nop) (giup|ho|dum)\b'
       - '\bdat lenh (giup|ho|cho toi)\b'
       - '\b(nhap|dien) (giup|ho) (otp|mat khau|pin)\b'
+      - '\b(nhap|dien) (ma )?(otp|mat khau|pin) (giup|ho|dum)\b'

@@ -60,3 +60,18 @@ export function waitForTarget(
     observer.observe(observeRoot, { childList: true, subtree: true, attributes: true });
   });
 }
+
+// Route của bước có thể chứa tham số (/orders/:id): khớp mọi đoạn khác rỗng ở vị trí đó
+export function routeMatches(pattern: string, path: string): boolean {
+  const a = pattern.split('/').filter(Boolean);
+  const b = path.split(/[?#]/)[0].split('/').filter(Boolean);
+  return a.length === b.length && a.every((seg, i) => seg.startsWith(':') ? b[i].length > 0 : seg === b[i]);
+}
+
+// Người dùng đã ở giữa luồng (vd. đang ở màn hình đích của tour): bắt đầu từ bước đầu tiên nằm trên màn hình hiện tại
+// thay vì quay về màn hình xuất phát. Đang ở màn hình xuất phát hoặc không bước nào thuộc màn hình này thì từ bước đầu.
+export function resumeStep(tour: { startRoute: string; steps: Array<{ route?: string }> }, path: string): number {
+  if (routeMatches(tour.startRoute, path)) return 0;
+  const index = tour.steps.findIndex((s, i) => i > 0 && s.route !== undefined && routeMatches(s.route, path));
+  return index === -1 ? 0 : index;
+}

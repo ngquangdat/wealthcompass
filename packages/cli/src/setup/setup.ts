@@ -108,6 +108,17 @@ export async function setup(opts: SetupOptions, log: (m: string) => void = conso
   const suggestions = pickSuggestions(scan(configFile).featureMap.features);
   integrationEdits(info, opts, auth, edits, todo, suggestions);
 
+  // .wealthcompass/ chứa khóa của IdP giả lập và dữ liệu chạy (kết quả kiểm thử): không được commit
+  const gitignore = join(appDir, '.gitignore');
+  if (existsSync(gitignore)) {
+    const text = readFileSync(gitignore, 'utf8');
+    if (!/^\/?\.wealthcompass\/?\s*$/m.test(text)) {
+      addEdit(edits, gitignore, { pos: text.length, text: `${text && !text.endsWith('\n') ? '\n' : ''}\n# WealthCompass: dữ liệu chạy trên máy (khóa IdP giả lập, kết quả kiểm thử)\n.wealthcompass/\n` });
+    }
+  } else {
+    todo.push('Thêm `.wealthcompass/` vào .gitignore: thư mục chứa khóa của IdP giả lập và dữ liệu chạy, không commit.');
+  }
+
   let annotated = 0;
   if (opts.annotate) {
     const res = annotate({ config: configFile, only: opts.annotate === 'all' ? undefined : opts.annotate, out: null });

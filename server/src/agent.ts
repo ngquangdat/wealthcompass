@@ -1,4 +1,4 @@
-import { redactPii } from '@wealthcompass/core';
+import { normalizeVi, redactPii } from '@wealthcompass/core';
 import type { ChatEvent, ChatRequest } from '@wealthcompass/contracts';
 import type { Principal } from './auth.js';
 import type { ServerConfig } from './config.js';
@@ -49,11 +49,13 @@ export interface AgentDeps {
   store: FeatureStore;
   pack: DomainPack;
   log: (entry: Record<string, unknown>) => void;
+  // Chỉ có ở chế độ debug (Studio): từng bước agent làm gì, để hiện bên cạnh câu trả lời
+  trace?: (stage: string, data: Record<string, unknown>) => void;
 }
 
 // Chế độ dự phòng khi LLM không khả dụng (hết hạn mức, mất mạng): vẫn trả lời được từ bản đồ tính năng,
 // chỉ kém tự nhiên hơn. Hạ cấp thay vì báo lỗi cứng (plan mục 6.4). Có ghi chú để không đánh lạc hướng người dùng.
-function* fallbackReply(prefetch: ReturnType<FeatureStore['search']>, offered: Set<string>): Generator<ChatEvent> {
+function* fallbackReply(prefetch: ReturnType<FeatureStore['search']>, offered: Set<string>, currentRoute: string): Generator<ChatEvent> {
   const top = prefetch.results[0];
   // `restricted` chỉ có khi tính năng khớp nhất bị khóa quyền, nên ưu tiên giải thích thay vì chỉ sang màn hình kém liên quan
   if (prefetch.restricted) {
@@ -75,8 +77,8 @@ function* fallbackReply(prefetch: ReturnType<FeatureStore['search']>, offered: S
   if (tour) {
     offered.add(tour.id);
     yield { type: 'offer_tour', tourId: tour.id, label: `Dẫn tôi đi: ${tour.title}` };
-    if (!top.route.includes(':')) yield { type: 'offer_navigate', route: top.route, label: `Mở thẳng: ${top.title}` };
-  } else if (!top.route.includes(':')) {
+    if (!top.route.includes(':') && top.route !== currentRoute) yield { type: 'offer_navigate', route: top.route, label: `Mở thẳng: ${top.title}` };
+  } else if (!top.route.includes(':') && top.route !== currentRoute) {
     offered.add(top.id);
     yield { type: 'offer_navigate', route: top.route, label: `Mở: ${top.title}` };
   }
@@ -89,12 +91,14 @@ export async function* runAgent(
   signal: AbortSignal,
 ): AsyncGenerator<ChatEvent> {
   const { store, pack, config, log } = deps;
+  const trace = deps.trace ?? (() => undefined);
   const startedAt = Date.now();
   const message = redactPii(request.message).text;
   const toolsUsed: string[] = [];
 
   // Lớp 1: chặn trước khi gọi LLM
   const verdict = classifyInput(message, pack);
+  trace('guardrail', { normalized: normalizeVi(message), blocked: verdict.blocked, topic: verdict.topic ?? null });
   if (verdict.blocked) {
     log({ event: 'chat', user: principal.id, q: message, outcome: 'refused', topic: verdict.topic });
     yield { type: 'refusal', message: verdict.message ?? '' };
@@ -105,6 +109,9 @@ export async function* runAgent(
   // Quyền lấy từ token đã xác minh, KHÔNG tin danh sách quyền client gửi lên
   const capabilities = principal.roles;
   const prefetch = store.search(message, capabilities);
+  // Màn hình người dùng đang mở: không hiện nút "Mở" tới chính nó
+  const currentRoute = request.context.routePattern ?? request.context.route.split(/[?#]/)[0];
+  trace('prefetch', { roles: capabilities, results: prefetch.results.map((r) => ({ id: r.id, title: r.title, score: r.score, tours: r.tours.map((t) => t.id) })), restricted: prefetch.restricted ?? null });
 
   const context = [
     `Màn hình hiện tại của người dùng: ${request.context.route}`,
@@ -122,12 +129,15 @@ export async function* runAgent(
   const offered = new Set<string>();
   let anyText = false;
   let handedOff = false;
+  let fallback = false;
+  let failed = false;
 
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       let text = '';
       let calls: Array<import('@wealthcompass/llm').ToolCall> = [];
 
+      const roundStart = Date.now();
       for await (const chunk of streamChat(config.llm, { messages, tools: TOOLS, signal })) {
         if (chunk.type === 'text') {
           text += chunk.delta;
@@ -137,6 +147,7 @@ export async function* runAgent(
           calls = chunk.calls;
         }
       }
+      trace('llm', { round: round + 1, model: config.llm.model, ms: Date.now() - roundStart, textChars: text.length, calls: calls.map((c) => c.function.name) });
       if (!calls.length) break;
       // Đã viết câu trả lời cùng lượt với các lệnh chỉ hiện nút: không gọi thêm lượt nữa, tránh lặp câu
       const onlyOffers = calls.every((c) => ['offer_tour', 'offer_navigate', 'handoff_support'].includes(c.function.name));
@@ -167,7 +178,7 @@ export async function* runAgent(
               offered.add(tour.id);
               yield { type: 'offer_tour', tourId: tour.id, label: `Dẫn tôi đi: ${tour.title}` };
               // Kèm nút mở thẳng màn hình đích cho người dùng tự thao tác, không cần đi theo tour
-              if (owner && !owner.route.pattern.includes(':') && !offered.has(owner.id)) {
+              if (owner && !owner.route.pattern.includes(':') && owner.route.pattern !== currentRoute && !offered.has(owner.id)) {
                 offered.add(owner.id);
                 yield { type: 'offer_navigate', route: owner.route.pattern, label: `Mở thẳng: ${owner.title}` };
               }
@@ -181,7 +192,9 @@ export async function* runAgent(
           case 'offer_navigate': {
             const feature = store.getFeature(String(args['feature_id']));
             const permitted = feature?.access.requires.every((r) => capabilities.includes(r)) ?? false;
-            if (feature && permitted && !feature.route.pattern.includes(':') && !offered.has(feature.id)) {
+            if (feature && feature.route.pattern === currentRoute) {
+              result = { ok: false, error: 'người dùng đang ở đúng màn hình này: chỉ cần nói phần tử nằm ở đâu trên màn hình' };
+            } else if (feature && permitted && !feature.route.pattern.includes(':') && !offered.has(feature.id)) {
               offered.add(feature.id);
               yield { type: 'offer_navigate', route: feature.route.pattern, label: `Mở: ${feature.title}` };
               result = { ok: true };
@@ -199,6 +212,7 @@ export async function* runAgent(
           default:
             result = { ok: false, error: 'công cụ không tồn tại' };
         }
+        trace('tool', { name: call.function.name, args, result });
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
       }
       if (finishAfterTools) break;
@@ -214,10 +228,13 @@ export async function* runAgent(
     if ((error as Error).name === 'AbortError') return;
     const detail = error instanceof LlmError ? error.message : 'lỗi không xác định';
     log({ event: 'chat_error', user: principal.id, detail, fallback: !anyText });
+    trace('error', { detail, fallback: !anyText });
     if (anyText) {
+      failed = true;
       yield { type: 'error', message: 'Trợ lý gặp sự cố giữa chừng, bạn thử hỏi lại nhé.' };
     } else {
-      yield* fallbackReply(prefetch, offered);
+      fallback = true;
+      yield* fallbackReply(prefetch, offered, currentRoute);
     }
   }
 
@@ -227,9 +244,15 @@ export async function* runAgent(
     q: message,
     route: request.context.route,
     hits: prefetch.results.map((r) => r.id),
+    restricted: prefetch.restricted?.id,
     tools: toolsUsed,
     offered: [...offered],
+    // Không có nút dẫn mà AI chuyển sang hỗ trợ (hoặc tra cứu rỗng) = web không có câu trả lời: đưa vào danh sách "chưa tìm thấy"
+    outcome: failed ? 'error' : offered.size ? 'offered' : handedOff || !prefetch.results.length ? 'not_found' : 'answered',
+    fallback,
+    handoff: handedOff,
     ms: Date.now() - startedAt,
   });
+  trace('done', { ms: Date.now() - startedAt, offered: [...offered], fallback });
   yield { type: 'done' };
 }

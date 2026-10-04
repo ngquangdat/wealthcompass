@@ -4,6 +4,7 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { menuTourId } from '@wealthcompass/core';
 import { analyzeTemplateForAnnotate, annotate, detectSensitive, screenSlug, slug } from './annotate';
 import { scan } from './scan';
 
@@ -66,6 +67,19 @@ test('phân tích template: bỏ phần tử đã có tourId, ẩn, input hidden
     <button (click)="go()"><mat-icon>refresh</mat-icon> Làm mới</button>
     @if (a) { <a routerLink="/x/y">Đi</a> }`);
   assert.deepEqual(found.map((f) => [f.kind, f.label]), [['button', 'Làm mới'], ['link', 'Đi']]);
+});
+
+test('nhãn ô nhập: lấy từ <label> bao ngoài hoặc <label for>, không lấy chữ của option', () => {
+  const found = analyzeTemplateForAnnotate(`
+    <label>Loại nghỉ
+      <select name="type"><option>Nghỉ phép năm</option><option>Nghỉ ốm</option></select>
+    </label>
+    <label for="reason">Lý do</label><textarea id="reason"></textarea>
+    <mat-form-field><mat-label>Số tiền</mat-label><input matInput name="amount" /><mat-hint>VND</mat-hint></mat-form-field>
+    <select name="bare"><option>A</option></select>
+    <input aria-label="Tìm kiếm" placeholder="Nhập mã" />
+  `);
+  assert.deepEqual(found.map((f) => f.label), ['Loại nghỉ', 'Lý do', 'Số tiền', null, 'Tìm kiếm']);
 });
 
 test('annotate: gợi ý đúng, không sửa code, patch áp được bằng git apply', () => {
@@ -139,4 +153,44 @@ test('--only giới hạn theo route; --print không ghi file; id mới không t
   assert.equal(only.patchFile, null);
   const refresh = only.candidates.find((c) => c.label === 'Làm mới')!;
   assert.equal(refresh.tourId, 'orders-lam-moi-2', 'đã có orders-lam-moi nên thêm hậu tố');
+});
+
+test('menu sinh từ dữ liệu: gắn [tourMenu] thay vì tourId trùng, scan tạo mốc menu-<route> cho từng mục; nút cùng khối mật khẩu là user-only', () => {
+  const { dir, config } = tempRepo();
+  const shell = join(dir, 'src/app/shell.ts');
+  writeFileSync(
+    shell,
+    readFileSync(shell, 'utf8').replace(
+      '<nav><a routerLink="/orders">Quay về sổ lệnh</a></nav>',
+      '<nav>@for (m of nav; track m.route) { <a [routerLink]="m.route">{{ m.label }}</a> }</nav><section><input type="password" name="p" /><button>Lưu</button></section>',
+    ),
+  );
+  assert.equal(menuTourId('/leave/request'), 'menu-leave-request');
+  assert.equal(menuTourId('shell/inner?x=1'), 'menu-shell-inner');
+  assert.equal(menuTourId('/'), 'menu-home');
+  assert.equal(menuTourId(['/orders', 'returns']), 'menu-orders-returns');
+
+  const first = annotate({ config });
+  const menu = first.candidates.find((c) => c.kind === 'menu')!;
+  assert.equal(menu.menuExpr, 'm.route');
+  assert.equal(menu.sensitive, null);
+  assert.equal(first.candidates.find((c) => c.label === 'Lưu')?.sensitive?.reason, 'nút nằm cùng khối với ô mật khẩu/OTP/PIN');
+  execFileSync('git', ['apply', first.patchFile!], { cwd: dir });
+  const ts = readFileSync(shell, 'utf8');
+  assert.match(ts, /<a \[tourMenu\]="m\.route" \[routerLink\]="m\.route">/);
+  assert.match(ts, /import \{ TourMenuDirective, TourIdDirective \} from '@wealthcompass\/angular';/);
+  assert.match(ts, /imports: \[TourMenuDirective, TourIdDirective\]/);
+
+  const targets = scan(config).featureMap.features.find((f) => f.route.pattern === '/shell/inner')!.targets;
+  const inner = targets.find((t) => t.tourId === 'menu-shell-inner');
+  assert.equal(inner?.label, 'Khung › Trong khung');
+  assert.ok(targets.some((t) => t.tourId === 'menu-orders'));
+  assert.ok(!annotate({ config, out: null }).candidates.some((c) => c.kind === 'menu'), 'đã có [tourMenu] thì không gợi ý lại');
+});
+
+test('nút có chữ mật khẩu/OTP là user-only chắc chắn; link "Quên mật khẩu" thì không', () => {
+  const base = { tag: 'button', kind: 'button' as const, identifiers: [], navigates: false };
+  assert.equal(detectSensitive({ ...base, label: 'Cập nhật mật khẩu' })?.level, 'sure');
+  assert.equal(detectSensitive({ ...base, label: 'Gửi lại OTP' })?.level, 'sure');
+  assert.equal(detectSensitive({ ...base, tag: 'a', kind: 'link', label: 'Quên mật khẩu', navigates: true }), null);
 });

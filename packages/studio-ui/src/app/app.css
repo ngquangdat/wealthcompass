@@ -22,10 +22,23 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .nav-item:hover { background: #f2f4f7; text-decoration: none; }
 .nav-item.active { background: var(--primary-soft); color: var(--primary); }
 
-.section-title { margin: 22px 10px 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-3); }
-.upcoming { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px; }
-.upcoming span { font-size: 12px; color: var(--text-3); background: var(--surface-2); border: 1px dashed var(--border-strong); border-radius: 6px; padding: 2px 7px; }
+.nav-sep { height: 1px; background: var(--border); margin: 10px 6px; }
+.section-title { margin: 16px 10px 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-3); }
 
 .sidebar-foot { margin-top: auto; display: flex; align-items: center; gap: 6px; padding: 10px 8px 0; font-size: 12px; color: var(--text-3); border-top: 1px solid var(--border); }
 
 .content { flex: 1; min-width: 0; padding: 32px 40px 64px; max-width: 1200px; }
+
+/* Cửa sổ hẹp (chia đôi màn hình, khung trình duyệt nhỏ): thanh bên chỉ còn icon */
+@media (max-width: 900px) {
+  .sidebar { width: 60px; padding: 14px 8px; align-items: center; }
+  .brand { padding: 4px 0 14px; }
+  .brand-name, .brand-tag, .project > .grow, .sidebar-foot > :not(ui-icon) { display: none; }
+  .section-title { font-size: 0; height: 1px; margin: 10px 6px; background: var(--border); }
+  .project { padding: 8px; margin-bottom: 12px; justify-content: center; }
+  .nav-item { width: 40px; padding: 0; justify-content: center; position: relative; }
+  .nav-item > .grow { display: none; }
+  .nav-item .dot { position: absolute; top: 6px; right: 6px; }
+  .sidebar-foot { justify-content: center; padding: 10px 0 0; }
+  .content { padding: 20px 16px 48px; }
+}

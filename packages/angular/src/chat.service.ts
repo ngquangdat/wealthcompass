@@ -76,7 +76,9 @@ export class ChatService {
   // Người dùng bấm nút "Dẫn tôi đi": lúc này tour mới bắt đầu
   async runAction(action: ChatAction): Promise<void> {
     if (action.kind === 'navigate' && action.route) {
-      const ok = await this.router.navigateByUrl(action.route);
+      const path = () => this.router.url.split(/[?#]/)[0];
+      // Đang ở đúng màn hình: Angular bỏ qua điều hướng cùng URL (không trả true), không phải lỗi quyền
+      const ok = path() === action.route || (await this.router.navigateByUrl(action.route)) || path() === action.route;
       if (ok) this.open.set(false); // thu khung chat để người dùng thấy màn hình vừa mở
       else this.push({ role: 'assistant', text: 'Không mở được màn hình này, có thể tài khoản chưa có quyền truy cập.', actions: [], tone: 'error' });
       return;
@@ -88,6 +90,7 @@ export class ChatService {
         await this.tours.start(tour);
       } catch (e) {
         this.push({ role: 'assistant', text: (e as Error).message, actions: [], tone: 'error' });
+        this.open.set(true); // mở từ deep link thì khung chat đang đóng: mở ra để thấy lỗi
       }
     }
   }

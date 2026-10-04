@@ -21,6 +21,10 @@ export interface ServerConfig {
   llm: LlmConfig;
   capabilitiesClaim: string;
   rateLimit: { max: number; windowMs: number };
+  // COMPASS_DEBUG=1: mở /debug/search và /debug/chat, CHỈ nhận yêu cầu từ chính máy này (Studio dùng để thử và kiểm thử)
+  debug: boolean;
+  // COMPASS_LOG_FILE: ghi nhật ký hỏi đáp JSONL để thống kê
+  logFile?: string;
 }
 
 export function loadConfig(): ServerConfig {
@@ -42,6 +46,8 @@ export function loadConfig(): ServerConfig {
     llm: resolveLlmConfig(),
     capabilitiesClaim: process.env['COMPASS_CAPABILITIES_CLAIM'] ?? 'roles',
     rateLimit: { max: Number(process.env['COMPASS_RATE_MAX'] ?? 30), windowMs: 10 * 60_000 },
+    debug: process.env['COMPASS_DEBUG'] === '1',
+    logFile: process.env['COMPASS_LOG_FILE'] ? resolve(process.env['COMPASS_LOG_FILE']) : undefined,
   };
 }
 

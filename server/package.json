@@ -15,6 +15,7 @@
     "@fastify/cors": "^11.0.0",
     "jose": "^6.0.0",
     "yaml": "^2.8.0",
-    "@wealthcompass/llm": "*"
+    "@wealthcompass/llm": "*",
+    "zod": "^4.0.0"
   }
 }

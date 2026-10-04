@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadConfig, scan } from '../scan';
+import { loadConfig, scan, type ScanResult } from '../scan';
 import { detectProject } from './detect';
 
 // Kiểm tra một web đã gắn WealthCompass đúng chưa. Mỗi dòng: trạng thái, việc kiểm, cách sửa.
@@ -11,7 +11,7 @@ export interface Check {
   fix?: string;
 }
 
-export async function doctor(appDir: string, project?: string): Promise<Check[]> {
+export async function doctor(appDir: string, project?: string, prescanned?: ScanResult): Promise<Check[]> {
   const checks: Check[] = [];
   const add = (c: Check) => checks.push(c);
 
@@ -24,7 +24,8 @@ export async function doctor(appDir: string, project?: string): Promise<Check[]>
   add({ status: 'ok', name: 'compass.config.yaml' });
 
   // Quét lại và đếm cảnh báo
-  const scanned = scan(configFile);
+  // Studio truyền sẵn kết quả quét (đã đệm) để khỏi quét lại
+  const scanned = prescanned ?? scan(configFile);
   const fm = scanned.featureMap;
   const drafts = fm.coverage.warnings.filter((w) => w.includes('do LLM soạn')).length;
   const others = fm.coverage.warnings.length - drafts;

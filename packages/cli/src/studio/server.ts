@@ -7,16 +7,18 @@ import { fileURLToPath } from 'node:url';
 import type { OutgoingHttpHeaders } from 'node:http';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
-import { completeText, resolveLlmConfig, LLM_PRESETS } from '@wealthcompass/llm';
+import { completeText, LLM_PRESETS } from '@wealthcompass/llm';
 import { buildGitPatch, gitTopLevel } from '../codemod';
-import { enrich, findGaps } from '../enrich';
+import { enrich } from '../enrich';
 import { loadConfig, scan } from '../scan';
-import { detectProject } from '../setup/detect';
 import { doctor } from '../setup/doctor';
 import { setup } from '../setup/setup';
 import { VERSION } from '../version';
 import { readEnvFile, updateEnvFile } from './env-file';
-import { approveFeature, readOverrides, updateFeature, type FeatureChanges } from './overrides-edit';
+import { approveFeature, updateFeature, type FeatureChanges } from './overrides-edit';
+import { cachedScan, eventLogFile, invalidateScan, patchFile, configPath, featureRows, httpError, integrated, keySource, llm, llmEnv, projectSummary, requireApp, runCommand, state, stream } from './context';
+import { registerPhase2 } from './routes-phase2';
+import { registerPhase3 } from './routes-phase3';
 import { parsePatch, selectHunks } from './patch-hunks';
 import { backendBin, ngBin, onLog, procInfo, procLogs, startProc, stopAll, stopProc, type ProcName } from './processes';
 
@@ -27,141 +29,6 @@ export interface StudioOptions {
   port: number;
   open?: string; // thư mục dự án mở sẵn
   tarballs: string | null;
-}
-
-interface State {
-  appDir: string | null;
-  // Ghi đè cấu hình AI trong phiên Studio (không ghi file)
-  ai: { provider?: string; model?: string; apiKey?: string; aiCode: boolean };
-}
-
-const state: State = { appDir: null, ai: { aiCode: false } };
-
-function llmEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  if (state.ai.provider) env['COMPASS_LLM_PROVIDER'] = state.ai.provider;
-  if (state.ai.model) env['COMPASS_LLM_MODEL'] = state.ai.model;
-  if (state.ai.apiKey) env['COMPASS_LLM_API_KEY'] = state.ai.apiKey;
-  return env;
-}
-
-const llm = () => resolveLlmConfig(llmEnv());
-
-function keySource(): string | null {
-  const env = llmEnv();
-  const preset = LLM_PRESETS[(env['COMPASS_LLM_PROVIDER'] ?? 'deepseek') as keyof typeof LLM_PRESETS] ?? LLM_PRESETS.deepseek;
-  if (state.ai.apiKey) return 'nhập trong Studio (chỉ trong phiên này)';
-  if (env['COMPASS_LLM_API_KEY']) return 'biến COMPASS_LLM_API_KEY';
-  if (env[preset.keyVar]) return `biến ${preset.keyVar}`;
-  if (env['COMPASS_ENV_FILE'] && resolveLlmConfig(env).apiKey) return `file ${env['COMPASS_ENV_FILE']}`;
-  return null;
-}
-
-function requireApp(): string {
-  if (!state.appDir) throw httpError(400, 'Chưa chọn dự án');
-  return state.appDir;
-}
-
-function httpError(status: number, message: string): Error & { statusCode: number } {
-  return Object.assign(new Error(message), { statusCode: status });
-}
-
-const configPath = (app: string) => join(app, 'compass.config.yaml');
-const integrated = (app: string) => existsSync(configPath(app));
-
-// Luồng sự kiện cho việc chạy lâu (setup, enrich, npm install): {type:'log'|'result'|'error'}
-async function stream(reply: FastifyReply, task: (log: (m: string) => void) => Promise<unknown>): Promise<void> {
-  reply.hijack();
-  reply.raw.writeHead(200, { ...(reply.getHeaders() as OutgoingHttpHeaders), 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-  const send = (e: unknown) => reply.raw.write(`data: ${JSON.stringify(e)}\n\n`);
-  try {
-    const result = await task((m) => send({ type: 'log', message: m }));
-    send({ type: 'result', result });
-  } catch (e) {
-    send({ type: 'error', message: (e as Error).message });
-  }
-  reply.raw.end();
-}
-
-function runCommand(cmd: string, args: string[], cwd: string, log: (m: string) => void, env = process.env): Promise<void> {
-  return new Promise((ok, fail) => {
-    const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    const relay = (d: Buffer) => d.toString().split('\n').filter((l) => l.trim()).forEach(log);
-    child.stdout.on('data', relay);
-    child.stderr.on('data', relay);
-    child.on('error', fail);
-    child.on('exit', (code) => (code === 0 ? ok() : fail(new Error(`${cmd} ${args.join(' ')} thoát với mã ${code}`))));
-  });
-}
-
-function projectSummary(app: string) {
-  const info = detectProject(app);
-  return {
-    path: app,
-    name: info.projectName,
-    angularVersion: info.angularVersion,
-    devPort: info.devPort,
-    bootstrap: info.bootstrap ? { kind: info.bootstrap.kind, root: info.bootstrap.root.className } : null,
-    routesFile: info.routesFile,
-    menuFile: info.menuFile,
-    auth: info.auth ? { service: info.auth.service, tokenExpr: info.auth.tokenExpr, rolesExpr: info.auth.rolesExpr } : null,
-    notes: info.notes,
-    integrated: integrated(app),
-    installed: existsSync(join(app, 'node_modules', '@wealthcompass', 'angular', 'package.json')),
-    patchPending: existsSync(join(app, 'wealthcompass-setup.patch')),
-  };
-}
-
-function featureRows(app: string) {
-  const config = configPath(app);
-  const { featureMap, hidden } = scan(config);
-  const { config: cfg, root } = loadConfig(config);
-  const raw = readOverrides(join(root, cfg.discovery.overrides));
-  return featureMap.features.map((f) => {
-    const ov = raw[f.id] ?? {};
-    const draft = Array.isArray(ov['llmDraft']) ? (ov['llmDraft'] as string[]) : [];
-    return {
-      id: f.id,
-      route: f.route.pattern,
-      title: f.title,
-      description: f.description,
-      keywords: f.keywords,
-      sampleQuestions: f.sampleQuestions,
-      menuPath: f.menuPath,
-      facets: f.facets,
-      requires: f.access.requires,
-      tourIds: f.tourIds,
-      targets: f.targets.length,
-      overridden: Object.keys(ov).filter((k) => k !== 'llmDraft'),
-      draft,
-      gaps: findGaps(f),
-      hidden: false,
-      sourceRef: f.provenance.sourceRef,
-    };
-  }).concat(
-    // Màn hình đang ẩn: hiện để có thể bỏ ẩn; dữ liệu tìm kiếm lấy từ overrides
-    hidden.map((h) => {
-      const ov = raw[h.id] ?? {};
-      return {
-        id: h.id,
-        route: h.path,
-        title: h.title,
-        description: String(ov['description'] ?? ''),
-        keywords: (ov['keywords'] as string[] | undefined) ?? [],
-        sampleQuestions: (ov['sampleQuestions'] as string[] | undefined) ?? [],
-        menuPath: [],
-        facets: {},
-        requires: [],
-        tourIds: [],
-        targets: 0,
-        overridden: Object.keys(ov).filter((k) => k !== 'llmDraft'),
-        draft: [],
-        gaps: [],
-        hidden: true,
-        sourceRef: h.sourceRef,
-      };
-    }),
-  );
 }
 
 export async function startStudio(opts: StudioOptions): Promise<{ url: string; close: () => Promise<void> }> {
@@ -219,8 +86,9 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
   app.get('/api/overview', async () => {
     const dir = requireApp();
     if (!integrated(dir)) return { integrated: false, checks: [], warnings: [], stats: null };
-    const checks = await doctor(dir);
-    const { featureMap } = scan(configPath(dir));
+    const scanned = cachedScan(dir);
+    const checks = await doctor(dir, undefined, scanned);
+    const { featureMap } = scanned;
     const rows = featureRows(dir);
     return {
       integrated: true,
@@ -246,7 +114,7 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
           app: dir,
           pack: body.pack ?? 'generic',
           backendUrl: body.backendUrl ?? 'http://localhost:8890',
-          tarballs: opts.tarballs,
+          tarballs: tarballsDir(),
           version: VERSION,
           llm: body.useAi === false ? null : llm(),
           aiCode: state.ai.aiCode,
@@ -259,17 +127,17 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
     });
   });
 
-  app.get('/api/patch', async () => {
+  app.get('/api/patch', async (req) => {
     const dir = requireApp();
-    const file = join(dir, 'wealthcompass-setup.patch');
+    const file = patchFile(dir, (req.query as { name?: string }).name);
     if (!existsSync(file)) return { exists: false, files: [], report: readReport(dir) };
     return { exists: true, files: parsePatch(readFileSync(file, 'utf8')), report: readReport(dir) };
   });
 
   app.post('/api/patch/apply', async (req) => {
     const dir = requireApp();
-    const { hunks } = req.body as { hunks: string[] };
-    const file = join(dir, 'wealthcompass-setup.patch');
+    const { hunks, name } = req.body as { hunks: string[]; name?: string };
+    const file = patchFile(dir, name);
     if (!existsSync(file)) throw httpError(400, 'Không có patch nào');
     const selected = selectHunks(parsePatch(readFileSync(file, 'utf8')), new Set(hunks));
     if (!selected) throw httpError(400, 'Chưa chọn thay đổi nào');
@@ -284,18 +152,27 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
     }
     // Áp xong thì patch cũ không còn đúng (vị trí đã đổi); chạy lại tích hợp sẽ sinh patch cho phần còn thiếu
     unlinkSync(file);
+    invalidateScan();
     return { applied: hunks.length };
   });
 
   // Cập nhật gói WealthCompass lên bản đang có (file .tgz mới hoặc phiên bản mới): tạo patch cho package.json để duyệt như bình thường
+  // Thư mục .tgz có đúng phiên bản thì cài từ file; có thư mục mà thiếu bản thì báo, không âm thầm chuyển sang registry
+  const tarballsDir = (): string | null => {
+    if (!opts.tarballs) return null;
+    if (existsSync(join(opts.tarballs, `wealthcompass-angular-${VERSION}.tgz`))) return opts.tarballs;
+    throw httpError(400, `Chưa có gói ${VERSION} trong ${opts.tarballs}. Chạy \`npm run pack\` trong repo WealthCompass rồi thử lại.`);
+  };
+
   app.post('/api/update-packages', async () => {
     const dir = requireApp();
     const file = join(dir, 'package.json');
     const text = readFileSync(file, 'utf8');
     const pkg = JSON.parse(text) as Record<string, Record<string, string> | undefined>;
+    const tarballs = tarballsDir();
     const spec = (name: string) => {
-      if (!opts.tarballs) return `^${VERSION}`;
-      const tgz = join(opts.tarballs, `wealthcompass-${name}-${VERSION}.tgz`);
+      if (!tarballs) return `^${VERSION}`;
+      const tgz = join(tarballs, `wealthcompass-${name}-${VERSION}.tgz`);
       const rel = relative(dir, tgz).split('\\').join('/');
       return `file:${(rel.match(/\.\.\//g)?.length ?? 0) > 3 ? tgz : rel}`;
     };
@@ -386,7 +263,9 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
       const bin = backendBin(dir);
       if (!bin) throw httpError(400, 'Chưa cài @wealthcompass/server trong dự án (áp patch tích hợp rồi npm install)');
       if (!existsSync(join(dir, 'wealthcompass.env'))) throw httpError(400, 'Chưa có wealthcompass.env (chạy tích hợp trước)');
-      return startProc('backend', process.execPath, [bin, '--env-file', 'wealthcompass.env'], dir, llmEnv());
+      // Studio bật debug (chỉ nhận từ máy này) cho trang Thử trợ lý/Kiểm thử, và ghi nhật ký cho trang Nhật ký
+      const env = { ...llmEnv(), COMPASS_DEBUG: '1', COMPASS_LOG_FILE: eventLogFile(dir) };
+      return startProc('backend', process.execPath, [bin, '--env-file', 'wealthcompass.env'], dir, env);
     }
     if (name === 'web') {
       const ng = ngBin(dir);
@@ -447,6 +326,9 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
       return { ok: false, message: (e as Error).message, ms: Date.now() - started };
     }
   });
+
+  registerPhase2(app);
+  registerPhase3(app);
 
   if (opts.open) {
     const dir = resolve(opts.open);

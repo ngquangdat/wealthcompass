@@ -2,7 +2,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { driver, type Driver } from 'driver.js';
 import type { Tour, ToolResultStatus } from '@wealthcompass/contracts';
-import { isBlockedRoute, isUserOnly, renderLiteMarkdown, waitForTarget } from '@wealthcompass/core';
+import { isBlockedRoute, isUserOnly, renderLiteMarkdown, resolveTarget, resumeStep, waitForTarget } from '@wealthcompass/core';
 import { COMPASS_CONFIG } from './compass.config';
 import { CompassApiService } from './compass-api.service';
 
@@ -38,13 +38,18 @@ export class TourService {
     if (isBlockedRoute(tour.startRoute, this.config.safety)) {
       return this.finish(tour, run, 'failed', 0, 'route_denied');
     }
-    if (this.router.url.split('?')[0] !== tour.startRoute) {
+    // Đang ở giữa luồng (vd. đã ở màn hình đích): bắt đầu từ bước của màn hình này, khi phần tử của bước đó đang hiện
+    const path = this.router.url.split(/[?#]/)[0];
+    let from = resumeStep(tour, path);
+    if (from > 0 && !resolveTarget(tour.steps[from].tourId)) from = 0;
+    // Phần tử của bước đầu đã có trên màn hình hiện tại (vd. mục menu ở khung chung): bắt đầu tại chỗ, không chuyển trang
+    if (from === 0 && path !== tour.startRoute && !resolveTarget(tour.steps[0].tourId)) {
       const ok = await this.router.navigateByUrl(tour.startRoute);
       // Guard chặn điều hướng (thiếu quyền, hết phiên) thì dừng và báo rõ
       if (!ok) return this.finish(tour, run, 'failed', 0, 'route_denied');
     }
 
-    for (let index = 0; index < tour.steps.length; index++) {
+    for (let index = from; index < tour.steps.length; index++) {
       if (run !== this.runId) return { tourId: tour.id, status: 'cancelled', lastStep: index };
       const result = await this.runStep(tour, index, run);
       if (result === 'cancelled') return this.finish(tour, run, 'cancelled', index);

@@ -18,6 +18,8 @@ export interface RecordOptions {
   force: boolean;
   noLlm: boolean;
   dryRun: boolean;
+  // Cấu hình LLM truyền sẵn (Studio có thể ghi đè trong phiên); không có thì đọc biến môi trường
+  llm?: import('@wealthcompass/llm').LlmConfig | null;
 }
 
 export function loadFeatureMap(path: string): FeatureMap | null {
@@ -65,7 +67,7 @@ export async function finishRecording(
   const purpose = (recorded.purpose?.trim() || opts.about?.trim() || '').slice(0, 600);
   if (!purpose) log('! Chưa có mô tả tính năng (ô trong khung ghi hoặc --about): LLM sẽ phải đoán mục đích từ tên nút nên dễ lệch.');
 
-  const llm = opts.noLlm ? null : resolveLlmConfig();
+  const llm = opts.noLlm ? null : opts.llm !== undefined ? opts.llm : resolveLlmConfig();
   log(llm?.apiKey ? `Soạn nội dung bằng LLM (${llm.provider} / ${llm.model})...` : 'Soạn nội dung bằng mẫu (không dùng LLM).');
   const draft = await draftTour({ id: opts.id, title: opts.title, steps: mapped, featureMap, featureId, purpose, llm });
   if (draft.note) log(`! ${draft.note}`);

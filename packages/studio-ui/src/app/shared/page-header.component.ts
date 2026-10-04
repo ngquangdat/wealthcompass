@@ -11,10 +11,10 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
     <div class="actions"><ng-content /></div>
   `,
   styles: `
-    :host { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 24px; }
-    .text { flex: 1; min-width: 0; }
+    :host { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; margin-bottom: 24px; }
+    .text { flex: 1 1 320px; min-width: 0; }
     .text p { margin-top: 4px; }
-    .actions { display: flex; gap: 8px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   `,
 })
 export class PageHeaderComponent {

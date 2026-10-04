@@ -198,9 +198,18 @@ Quy tắc:
 1. Import `TourIdDirective` vào component standalone chứa phần tử.
 2. Viết **chuỗi tĩnh** (`tourId="x"` hoặc `[tourId]="'x'"`). Scanner chỉ đọc được literal; id sinh động (`[tourId]="item.id"`) không được quét và tour sẽ bị loại.
 3. Id ổn định, dạng `màn-hình-phần-tử` (`assets-select-sell`). Đổi id là phá tour, nên coi như API công khai.
-4. Nút **giao dịch, xác nhận, nhập mật khẩu/OTP** luôn gắn `tourRole="user-only"`: tour chỉ tô sáng và giải thích, không bao giờ click hay điền. Thêm vào đó engine còn tự coi `input[type=password]`, ô OTP, ô thẻ, `[data-sensitive]` là user-only.
+4. Nút **giao dịch, xác nhận, nhập hay đổi mật khẩu/OTP** luôn gắn `tourRole="user-only"`: tour chỉ tô sáng và giải thích, không bao giờ click hay điền. Thêm vào đó engine còn tự coi `input[type=password]`, ô OTP, ô thẻ, `[data-sensitive]` là user-only.
 5. Phần tử lặp trong danh sách có thể dùng chung một `tourId`; tour trỏ vào phần tử hiển thị đầu tiên.
 6. Phần tử nằm trong khung chung (thanh tab dưới, header) nên gắn ở component khung; scanner tự gán nó cho mọi route con.
+7. **Menu sinh từ dữ liệu** (`@for` trên mảng menu, một thẻ `<a>` cho mọi mục) không gắn được `tourId` cố định: mọi mục sẽ trùng id. Dùng `TourMenuDirective`:
+
+   ```html
+   @for (entry of nav; track entry.title) {
+     <a [tourMenu]="entry.link" [routerLink]="entry.link">{{ entry.title }}</a>
+   }
+   ```
+
+   Mỗi mục tự có mốc `menu-<route>` (`/leave/request` → `menu-leave-request`, `/` → `menu-home`). Scanner đọc dữ liệu menu (`discovery.menu`) và tạo đủ các mốc này kèm nhãn theo đường đi menu, nên tour và `tour:record` trỏ được vào từng mục, kể cả mục thêm sau. `annotate`/Studio tự gợi ý `[tourMenu]` cho link trong vòng lặp có `[routerLink]="mục.trường"`.
 
 ### 5.1 Gợi ý `tourId` hàng loạt bằng `annotate`
 
@@ -364,6 +373,10 @@ npx tsx packages/cli/src/main.ts scan --config ... --strict # trả mã lỗi 1 
 
 Kết quả là `feature-map.json` và `compass.lock.json` (giữ `id` ổn định khi đổi tên route). Commit cả hai. Backend tự nạp lại `feature-map.json` khi file đổi, nên đưa file lên máy chạy backend là đủ. **Đưa vào CI:** chạy `scan --strict` mỗi build, có thay đổi thì triển khai file mới cùng bản web.
 
+### 6.4 Mở thẳng một tour bằng đường link
+
+Thêm `?compassTour=<id tour>` vào bất kỳ địa chỉ nào của web (ví dụ `https://web/dashboard?compassTour=tao-don-nghi`): khi trang mở và người dùng đã đăng nhập, widget tự chạy tour đó, rồi bỏ tham số khỏi thanh địa chỉ. Dùng cho nút "Chạy thử" của Studio, link trong email hướng dẫn hoặc trang trợ giúp. Id tour chỉ nhận chữ thường, số và gạch nối; tour không tồn tại thì widget báo lỗi trong khung chat, không làm gì khác. Nếu web chuyển sang trang đăng nhập rồi về trang chủ mà không giữ lại query, tham số sẽ mất: mở lại link sau khi đăng nhập.
+
 ## 7. Domain Pack (nội dung theo ngành)
 
 `COMPASS_PACK` trỏ tới một thư mục:
@@ -389,6 +402,8 @@ Web ngành khác: sao chép `packs/finance-vn`, sửa từ điển, chủ đề 
 - [ ] Gửi câu chứa số điện thoại/số tài khoản: log chỉ thấy bản đã che (`[sdt]`, `[so-tai-khoan]`).
 - [ ] Tắt LLM (sai khóa): vẫn trả lời ở chế độ dự phòng, có ghi chú rõ.
 - [ ] Mở trên điện thoại và máy tính; widget không che nút quan trọng của web.
+- [ ] Bộ kiểm thử `compass.eval.yaml` (Studio > Kiểm thử) đạt hit@3 từ 90% trở lên, mọi câu phải chặn đều bị chặn.
+- [ ] Máy chủ thật **không** đặt `COMPASS_DEBUG`; nếu cần thống kê thì đặt `COMPASS_LOG_FILE` (file JSONL, tự xoay vòng ở 20 MB, chỉ chứa câu hỏi đã che và mã người dùng đã băm).
 
 ## 9. Giới hạn hiện tại của scanner và widget
 

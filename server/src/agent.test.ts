@@ -102,3 +102,48 @@ test('LLM viết câu trả lời cùng lượt với offer_tour: không gọi t
   assert.equal(text(events).includes('LẶP LẠI'), false);
   assert.equal(events.some((e) => e.type === 'offer_tour'), true);
 });
+
+test('debug: trace đủ các bước, nhật ký ghi kết quả; explain trả cả màn hình thiếu quyền', async () => {
+  const llm = await startMockLlm([{ toolCalls: [{ name: 'offer_tour', args: { tour_id: 'sell-bond' } }] }, { text: 'Bấm nút bên dưới nhé.' }]);
+  const stages: string[] = [];
+  const logs: Array<Record<string, unknown>> = [];
+  const deps: AgentDeps = {
+    config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } },
+    store,
+    pack,
+    log: (e) => logs.push(e),
+    trace: (stage) => stages.push(stage),
+  };
+  for await (const _ of runAgent(deps, { id: 't', name: 't', roles: ['bond_account'] }, request('Bán trái phiếu ở đâu?'), new AbortController().signal));
+  await llm.close();
+  assert.deepEqual(stages, ['guardrail', 'prefetch', 'llm', 'tool', 'llm', 'done']);
+  const chat = logs.find((e) => e['event'] === 'chat')!;
+  assert.equal(chat['outcome'], 'offered');
+  assert.deepEqual(chat['offered'], ['sell-bond', 'iconnect.assets']);
+
+  const explained = store.explain('bán trái phiếu', ['stock_account']);
+  assert.ok(explained.ranked.length > 0 && explained.threshold > 0);
+  assert.ok(explained.terms.includes('trai') || explained.terms.includes('phieu'));
+  assert.equal(explained.ranked.find((r) => r.id === 'iconnect.assets')?.allowed, false, 'thiếu quyền vẫn hiện, gắn allowed=false');
+});
+
+test('nhật ký: AI chuyển hỗ trợ mà không có nút thì tính là không tìm thấy', async () => {
+  const llm = await startMockLlm([{ toolCalls: [{ name: 'handoff_support', args: {} }] }, { text: 'Mình chưa thấy tính năng này trên web.' }]);
+  const logs: Array<Record<string, unknown>> = [];
+  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store, pack, log: (e) => logs.push(e) };
+  for await (const _ of runAgent(deps, { id: 't', name: 't', roles: [] }, request('Đăng ký bảo hiểm trái phiếu ở đâu?'), new AbortController().signal));
+  await llm.close();
+  const chat = logs.find((e) => e['event'] === 'chat')!;
+  assert.deepEqual([chat['outcome'], chat['handoff']], ['not_found', true]);
+});
+
+test('đang ở đúng màn hình đích: vẫn có nút tour, không có nút "Mở thẳng" tới chính màn hình đó', async () => {
+  const llm = await startMockLlm([{ toolCalls: [{ name: 'offer_tour', args: { tour_id: 'sell-bond' } }, { name: 'offer_navigate', args: { feature_id: 'iconnect.assets' } }] }, { text: 'Bấm CHỌN BÁN ở dòng trái phiếu.' }]);
+  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store, pack, log: () => undefined };
+  const req = { ...request('Bán trái phiếu ở đâu?'), context: { route: '/iconnect/assets?tab=1', visibleTargets: [], locale: 'vi', capabilities: [] } };
+  const events: ChatEvent[] = [];
+  for await (const e of runAgent(deps, { id: 't', name: 't', roles: ['bond_account'] }, req, new AbortController().signal)) events.push(e);
+  await llm.close();
+  assert.ok(events.some((e) => e.type === 'offer_tour'));
+  assert.equal(events.some((e) => e.type === 'offer_navigate'), false);
+});

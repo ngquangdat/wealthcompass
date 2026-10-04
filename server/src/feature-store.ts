@@ -26,6 +26,15 @@ export interface SearchResult {
   restricted?: { id: string; title: string; requires: string[] };
 }
 
+export interface SearchExplain {
+  terms: string[]; // từ khóa sau khi mở rộng bằng từ đồng nghĩa
+  threshold: number;
+  ranked: Array<{ id: string; title: string; route: string; score: number; allowed: boolean; requires: string[] }>;
+}
+
+// Dưới ngưỡng này coi như không tìm thấy
+const SCORE_THRESHOLD = 1.2;
+
 // Từ hỏi chung không mang nghĩa tìm kiếm
 const STOPWORDS = new Set(
   'o dau la nhu the nao cach lam sao de toi muon co the xem khong cho minh ban oi voi va cua tai trong tren di den thi hay gi nay kia can biet tim giup duoc'.split(' '),
@@ -106,7 +115,8 @@ export class FeatureStore {
     return [...terms];
   }
 
-  search(query: string, capabilities: string[], limit = 3): SearchResult {
+  // Chấm điểm mọi màn hình cho câu hỏi (BM25 trên các trường + thưởng cụm từ liền nhau)
+  private rank(query: string): { terms: string[]; scored: Array<{ d: IndexedFeature; score: number }> } {
     this.refresh();
     const terms = this.expand(query);
     const queryTokens = tokenize(query).filter((t) => !STOPWORDS.has(t) || t === 'ban');
@@ -130,7 +140,11 @@ export class FeatureStore {
       })
       .filter((x) => x.score > 0)
       .sort((a, b2) => b2.score - a.score);
+    return { terms, scored };
+  }
 
+  search(query: string, capabilities: string[], limit = 3): SearchResult {
+    const { scored } = this.rank(query);
     const allowed = (f: Feature) => f.access.requires.every((r) => capabilities.includes(r));
     const results = scored
       .filter((x) => allowed(x.d.feature))
@@ -145,7 +159,24 @@ export class FeatureStore {
 
     // Điểm quá thấp thì coi như không tìm thấy để agent hỏi lại thay vì đoán
     const top = results[0]?.score ?? 0;
-    return { results: top < 1.2 ? [] : results, restricted };
+    return { results: top < SCORE_THRESHOLD ? [] : results, restricted };
+  }
+
+  // Cho chế độ debug và bộ kiểm thử: toàn bộ thứ hạng kèm điểm, kể cả màn hình thiếu quyền hoặc dưới ngưỡng
+  explain(query: string, capabilities: string[], limit = 10): SearchExplain {
+    const { terms, scored } = this.rank(query);
+    return {
+      terms,
+      threshold: SCORE_THRESHOLD,
+      ranked: scored.slice(0, limit).map(({ d, score }) => ({
+        id: d.feature.id,
+        title: d.feature.title,
+        route: d.feature.route.pattern,
+        score: Math.round(score * 100) / 100,
+        allowed: d.feature.access.requires.every((r) => capabilities.includes(r)),
+        requires: d.feature.access.requires,
+      })),
+    };
   }
 
   private hit(f: Feature, score: number): SearchHit {

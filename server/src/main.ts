@@ -71,7 +71,7 @@ app.get('/v1/tours/:id', { preHandler: authenticate }, async (request, reply) =>
 app.post('/v1/telemetry', { preHandler: authenticate }, async (request, reply) => {
   // Chỉ ghi các trường đã biết, không ghi nguyên body
   const body = (request.body ?? {}) as Record<string, unknown>;
-  log({ event: 'telemetry', user: request.principal!.id, what: body['event'], tourId: body['tourId'], status: body['status'], lastStep: body['lastStep'], reason: body['reason'] });
+  log({ event: 'telemetry', user: request.principal!.id, what: body['event'], tourId: body['tourId'], status: body['status'], lastStep: body['lastStep'], reason: body['reason'], stepKey: body['stepKey'], matchedBy: body['matchedBy'], score: body['score'] });
   return reply.code(204).send();
 });
 

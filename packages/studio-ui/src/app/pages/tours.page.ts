@@ -37,7 +37,7 @@ interface Editing {
     </ui-page-header>
 
     @if (!targets().length && loaded()) {
-      <div class="alert warning"><ui-icon name="alert" /><span>Dự án chưa có tourId nào. Tour cần tourId để trỏ vào phần tử; <a routerLink="/tourids">gắn tourId</a> trước.</span></div>
+      <div class="alert info"><ui-icon name="alert" /><span>Dự án chưa có tourId nào. "Ghi tour mới" không cần tourId: trợ lý nhận ra phần tử theo vai trò, chữ, thuộc tính và component. Chỉ soạn tay mới cần <a routerLink="/tourids">gắn tourId</a>.</span></div>
     }
 
     <div class="list">
@@ -147,9 +147,11 @@ interface Editing {
             <div class="step">
               <div class="s-num">{{ i + 1 }}</div>
               <div class="grow stack s-body">
+                @if (s.element) { <div class="hint"><ui-icon name="play" [size]="12" /> Phần tử đã ghi: <code>{{ s.element }}</code></div> }
                 <div class="row">
                   <select class="select grow" [ngModel]="s.target" (ngModelChange)="setTarget(s, $event)">
-                    @for (t of targets(); track t.tourId) { <option [value]="t.tourId">{{ t.label || t.tourId }} · {{ t.route }}</option> }
+                    @if (s.element) { <option value="">Tìm theo phần tử đã ghi (không cần tourId)</option> }
+                    @for (t of targets(); track t.tourId) { <option [value]="t.tourId">{{ s.element ? 'Ghim tourId: ' : '' }}{{ t.label || t.tourId }} · {{ t.route }}</option> }
                   </select>
                   <select class="select kind" [(ngModel)]="s.advanceOn" [disabled]="isSensitive(s.target)" title="Ô nhập và phần tử nhạy cảm nên dùng nút Tiếp">
                     <option value="click">Chờ người dùng bấm</option>
@@ -258,7 +260,7 @@ export class ToursPage implements OnInit {
       description: t.description ?? '',
       feature: t.feature ?? '',
       startRoute: t.startRoute ?? this.routes()[0] ?? '/',
-      steps: t.steps.map((s) => ({ target: s.target, advanceOn: s.advanceOn, text: s.text })),
+      steps: t.steps.map((s) => ({ key: s.key, element: s.element, target: s.target, advanceOn: s.advanceOn, text: s.text })),
     });
   }
 
@@ -293,7 +295,7 @@ export class ToursPage implements OnInit {
   protected async save(e: Editing): Promise<void> {
     this.saving.set(true);
     try {
-      const steps = e.steps.map((s) => ({ ...s, advanceOn: this.isSensitive(s.target) ? 'next' : s.advanceOn }));
+      const steps = e.steps.map(({ element: _element, ...s }) => ({ ...s, advanceOn: this.isSensitive(s.target) ? 'next' : s.advanceOn }));
       await this.api.put(`/api/tours/${encodeURIComponent(e.id.trim())}`, { title: e.title, description: e.description, feature: e.feature || undefined, startRoute: e.startRoute, steps });
       this.editing.set(null);
       await this.load();

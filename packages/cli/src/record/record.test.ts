@@ -1,13 +1,14 @@
 import { strict as assert } from 'node:assert';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { draftTour } from './draft';
 import { finishRecording, loadFeatureMap } from './run';
-import { mergeTourIntoOverrides } from './write';
+import { mergeTourIntoOverrides, mergeTourIntoToursFile } from './write';
+import { scan } from '../scan';
 import type { RecordedStep } from './recorder';
 import type { LlmConfig } from '@wealthcompass/llm';
 
@@ -124,9 +125,69 @@ test('tính năng đích lấy theo màn hình lúc dừng, không theo route l�
       { steps: toOrders, startRoute: '/home', endRoute },
       () => undefined,
     );
-  assert.match((await run('/iconnect/orders')).yaml, /feature: iconnect\.orders/);
+  assert.equal(JSON.parse((await run('/iconnect/orders')).json).tours['to-orders'].feature, 'iconnect.orders');
   // Thiếu endRoute thì rơi về route của bước cuối (hành vi cũ, kém chính xác hơn)
-  assert.match((await run()).yaml, /feature: iconnect\.price-board/);
+  assert.equal(JSON.parse((await run()).json).tours['to-orders'].feature, 'iconnect.price-board');
+});
+
+// Bước không có tourId: chỉ có locator ghi được từ trang (web chưa gắn tourId nào)
+const sellButton = { tag: 'button', role: 'button', name: 'Tất toán', attrs: {}, component: 'app-loans', context: { heading: 'Khoản vay của tôi' } };
+const locatorSteps: RecordedStep[] = [
+  { tourId: null, route: '/loans', advanceOn: 'next', userOnly: false, tag: 'button', text: 'Tất toán', locator: sellButton },
+  // Không có manh mối nào dùng được: phải bị bỏ
+  { tourId: null, route: '/loans', advanceOn: 'click', userOnly: false, tag: 'div', text: '', locator: { tag: 'div', attrs: {}, context: {}, css: 'div:nth-child(3)' } },
+];
+
+test('ghi tour không cần tourId: giữ bước có locator, bỏ bước không nhận ra, ghi vào compass.tours.json', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'compass-loc-'));
+  cpSync(resolve(import.meta.dirname, '../../test-fixtures/mini-app'), dir, { recursive: true });
+  const config = join(dir, 'compass.config.yaml');
+  scan(config);
+  const logs: string[] = [];
+  const result = await finishRecording(
+    { config, url: '', id: 'settle-loan', force: false, noLlm: true, dryRun: false },
+    { steps: locatorSteps, startRoute: '/loans', endRoute: '/loans', purpose: 'Tất toán khoản vay' },
+    (m) => logs.push(m),
+  );
+  assert.equal(result.written, true);
+  const file = JSON.parse(readFileSync(join(dir, 'compass.tours.json'), 'utf8'));
+  const tour = file.tours['settle-loan'];
+  assert.equal(tour.draft, true);
+  assert.equal(tour.feature, 'loans');
+  assert.equal(tour.steps.length, 1, 'bước không có manh mối bị bỏ');
+  assert.deepEqual(tour.steps[0].locator.name, 'Tất toán');
+  assert.equal(tour.steps[0].tourId, undefined);
+  assert.equal(tour.steps[0].key, 's1');
+  assert.ok(logs.some((l) => l.includes('Bỏ qua lần bấm vào <div>')));
+  assert.ok(logs.some((l) => l.includes('✔ scan')), logs.join('\n'));
+
+  // Scanner gộp tour vào Feature Map, gắn vào tính năng đích, cảnh báo nháp
+  const map = JSON.parse(readFileSync(join(dir, 'feature-map.json'), 'utf8'));
+  const inMap = map.tours.find((t: { id: string }) => t.id === 'settle-loan');
+  assert.equal(inMap.steps[0].label, 'Tất toán');
+  assert.equal(inMap.steps[0].route, '/loans');
+  assert.ok(map.features.find((f: { id: string }) => f.id === 'loans').tourIds.includes('settle-loan'));
+  assert.ok(map.coverage.warnings.some((w: string) => w.includes('"settle-loan" là nháp')));
+  // Không sửa template
+  assert.equal(readFileSync(join(dir, 'src/app/app.routes.ts'), 'utf8').includes('tourId'), false);
+
+  // Đã có thì không ghi đè khi chưa --force
+  await assert.rejects(
+    finishRecording({ config, url: '', id: 'settle-loan', force: false, noLlm: true, dryRun: true }, { steps: locatorSteps, startRoute: '/loans' }, () => undefined),
+    /--force/,
+  );
+});
+
+test('tour ghi bằng locator: route thật đổi sang mẫu route của tính năng', async () => {
+  const draft = { title: 'T tour', description: '', source: 'template' as const, steps: [{ text: 'a' }], sampleQuestions: [] };
+  const out = mergeTourIntoToursFile(join(mkdtempSync(join(tmpdir(), 'compass-')), 't.json'), {
+    id: 'x', draft, startRoute: '/orders/42', force: false, today: '2026-11-06',
+    steps: [{ ...locatorSteps[0], route: '/orders/42', routePattern: '/orders/:id' }],
+  });
+  const tour = JSON.parse(out.json).tours.x;
+  assert.equal(tour.steps[0].route, '/orders/:id');
+  assert.equal(tour.recordedAt, '2026-11-06');
+  assert.equal(tour.draftSource, 'template');
 });
 
 // E2E với Chrome thật: bỏ qua nếu không đặt COMPASS_E2E_URL (cần dev server demo đang chạy)
@@ -169,7 +230,7 @@ test('E2E: ghi tour trên web demo bằng Chrome thật, bước BÁN bị chặ
       { steps: recorder.steps, startRoute: recorder.startRoute, endRoute: recorder.endRoute, purpose: recorder.purpose },
       () => undefined,
     );
-    assert.match(result.yaml, /sell-bond-e2e:/);
+    assert.ok(JSON.parse(result.json).tours['sell-bond-e2e']);
     assert.equal(readFileSync(join(demoDir, 'compass.overrides.yaml'), 'utf8'), overridesBackup, 'dry-run không được ghi file');
   } finally {
     await browser.close();

@@ -2,10 +2,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { featureMapSchema, type FeatureMap } from '@wealthcompass/contracts';
 import { resolveLlmConfig } from '@wealthcompass/llm';
+import { describeLocator, isUsableLocator, routeMatches } from '@wealthcompass/core';
+import { writeFileSync } from 'node:fs';
 import { loadConfig, scan } from '../scan';
 import { draftTour } from './draft';
 import { recordSession, type RecordedStep } from './recorder';
-import { mergeTourIntoOverrides, writeOverrides } from './write';
+import { mergeSampleQuestionsIntoOverrides, mergeTourIntoToursFile, writeOverrides } from './write';
 
 export interface RecordOptions {
   config: string;
@@ -20,6 +22,16 @@ export interface RecordOptions {
   dryRun: boolean;
   // Cấu hình LLM truyền sẵn (Studio có thể ghi đè trong phiên); không có thì đọc biến môi trường
   llm?: import('@wealthcompass/llm').LlmConfig | null;
+  // Dưới bề rộng này (px) coi là bố cục mobile
+  mobileBreakpoint?: number;
+}
+
+// Mẫu route của tính năng khớp với đường dẫn thật (/orders/42 -> /orders/:id); ưu tiên khớp chính xác, rồi ít tham số nhất
+export function matchRoutePattern(featureMap: FeatureMap | null, path: string): string | undefined {
+  const clean = path.split(/[?#]/)[0];
+  const candidates = (featureMap?.features ?? []).map((f) => f.route.pattern).filter((p) => routeMatches(p, clean));
+  if (candidates.includes(clean)) return clean;
+  return candidates.sort((a, b) => (a.match(/:/g)?.length ?? 0) - (b.match(/:/g)?.length ?? 0))[0];
 }
 
 export function loadFeatureMap(path: string): FeatureMap | null {
@@ -37,18 +49,24 @@ export async function finishRecording(
   opts: RecordOptions,
   recorded: { steps: RecordedStep[]; startRoute: string | null; endRoute?: string | null; purpose?: string },
   log: (msg: string) => void = console.log,
-): Promise<{ yaml: string; written: boolean }> {
+): Promise<{ json: string; written: boolean }> {
   const { config, root } = loadConfig(opts.config);
   const featureMap = loadFeatureMap(join(root, config.discovery.out));
   if (!featureMap) log('! Chưa có feature-map.json (hãy chạy `scan` trước) nên không gắn được nhãn/tính năng đích tự động.');
 
-  const mapped = recorded.steps.filter((s) => s.tourId !== null);
-  const unmapped = recorded.steps.filter((s) => s.tourId === null);
-  for (const u of unmapped) {
-    log(`! Bỏ qua lần bấm vào <${u.tag}> "${u.text}" ở ${u.route}: chưa có tourId. Thêm tourId="..." vào template rồi ghi lại nếu muốn có bước này.`);
+  // Bước dùng được: có tourId (ghim) hoặc locator đủ manh mối. Không còn bắt buộc phải gắn tourId vào HTML.
+  const mapped = recorded.steps
+    .filter((s) => s.tourId !== null || isUsableLocator(s.locator))
+    .map((s) => ({ ...s, routePattern: matchRoutePattern(featureMap, s.route) }));
+  for (const u of recorded.steps.filter((s) => s.tourId === null && !isUsableLocator(s.locator))) {
+    log(`! Bỏ qua lần bấm vào <${u.tag}> ở ${u.route}: phần tử không có tên, chữ hay thuộc tính ổn định để tìm lại. Thêm aria-label hoặc tourId nếu cần bước này.`);
   }
-  if (!mapped.length) throw new Error('Không có bước nào gắn tourId, không có gì để lưu.');
+  if (!mapped.length) throw new Error('Không có bước nào nhận ra được, không có gì để lưu.');
   if (!recorded.startRoute) throw new Error('Chưa bấm "Bắt đầu ghi".');
+  for (const s of mapped) {
+    if (!s.tourId && s.locator) log(`  · ${s.route}: ${describeLocator(s.locator)}`);
+    if (featureMap && !s.routePattern) log(`! Màn hình ${s.route} không khớp route nào trong feature-map.json; bước vẫn được lưu nhưng tour không tự mở được màn hình đó.`);
+  }
 
   // Bước nhạy cảm phải là bước chỉ-tô-sáng; các bước sau nó (nếu có) thường là bấm nhầm
   const firstSensitive = mapped.findIndex((s) => s.userOnly);
@@ -56,10 +74,11 @@ export async function finishRecording(
     log(`! Bước ${firstSensitive + 1} là phần tử nhạy cảm (user-only) nhưng còn ${mapped.length - 1 - firstSensitive} bước sau nó; thường bước nhạy cảm nên là bước cuối.`);
   }
 
-  // Tính năng đích: --feature, hoặc tính năng có route trùng màn hình người dùng đứng lúc dừng ghi
+  // Tính năng đích: --feature, hoặc tính năng có route khớp màn hình người dùng đứng lúc dừng ghi
   // (không dùng route lúc bấm bước cuối: bước cuối hay là bấm tab để chuyển sang màn hình đích)
   const destination = recorded.endRoute ?? mapped.at(-1)!.route;
-  const featureId = opts.feature ?? featureMap?.features.find((f) => f.route.pattern === destination)?.id;
+  const destinationPattern = matchRoutePattern(featureMap, destination);
+  const featureId = opts.feature ?? featureMap?.features.find((f) => f.route.pattern === destinationPattern)?.id;
   if (!featureId) log('! Không xác định được tính năng đích (dùng --feature <id>); tour sẽ không gắn với tính năng nào nên trợ lý chưa thể đề xuất nó.');
   else if (featureMap && !featureMap.features.some((f) => f.id === featureId)) throw new Error(`--feature "${featureId}" không có trong feature-map.json`);
 
@@ -72,8 +91,8 @@ export async function finishRecording(
   const draft = await draftTour({ id: opts.id, title: opts.title, steps: mapped, featureMap, featureId, purpose, llm });
   if (draft.note) log(`! ${draft.note}`);
 
-  const overridesFile = join(root, config.discovery.overrides);
-  const merged = mergeTourIntoOverrides(overridesFile, {
+  const toursFile = join(root, config.discovery.tours);
+  const merged = mergeTourIntoToursFile(toursFile, {
     id: opts.id,
     draft,
     steps: mapped,
@@ -82,26 +101,30 @@ export async function finishRecording(
     purpose,
     force: opts.force,
   });
+  const overridesFile = join(root, config.discovery.overrides);
+  const questions = featureId ? mergeSampleQuestionsIntoOverrides(overridesFile, featureId, draft.sampleQuestions) : { yaml: '', added: [] };
 
   if (opts.dryRun) {
-    log('\n--- compass.overrides.yaml (dry-run, chưa ghi) ---\n' + merged.yaml);
-    return { yaml: merged.yaml, written: false };
+    log(`\n--- ${config.discovery.tours} (dry-run, chưa ghi) ---\n` + merged.json);
+    return { json: merged.json, written: false };
   }
-  writeOverrides(overridesFile, merged.yaml);
-  log(`Đã ghi tour "${opts.id}" (${mapped.length} bước${merged.addedQuestions.length ? `, thêm ${merged.addedQuestions.length} câu hỏi mẫu` : ''}) vào ${overridesFile}`);
+  writeFileSync(toursFile, merged.json);
+  if (questions.added.length) writeOverrides(overridesFile, questions.yaml);
+  log(`Đã ghi tour "${opts.id}" (${mapped.length} bước) vào ${toursFile}${questions.added.length ? `, thêm ${questions.added.length} câu hỏi mẫu vào ${overridesFile}` : ''}`);
 
-  // Quét lại để chắc tour hợp lệ (mọi tourId có trong template)
+  // Quét lại để chắc tour vào được Feature Map
   const result = scan(opts.config);
   const ok = result.featureMap.tours.some((t) => t.id === opts.id);
   const problems = result.featureMap.coverage.warnings.filter((w) => w.includes(`"${opts.id}"`));
   log(ok ? `✔ scan: tour "${opts.id}" hợp lệ.` : `✘ scan: tour "${opts.id}" bị loại.`);
   for (const p of problems) log(`  - ${p}`);
-  log('Mở file, đọc lại chữ của từng bước (đang ở dạng DRAFT) rồi commit.');
-  return { yaml: merged.yaml, written: true };
+  log(`Mở ${config.discovery.tours}, đọc lại chữ của từng bước, xóa "draft": true rồi commit. Không cần sửa template.`);
+  return { json: merged.json, written: true };
 }
 
 export async function recordTour(opts: RecordOptions): Promise<void> {
-  const { recorder, browser } = await recordSession(opts.url, opts.about);
+  const { config } = loadConfig(opts.config);
+  const { recorder, browser } = await recordSession(opts.url, opts.about, { userOnlyText: config.safety.userOnlyText, mobileBreakpoint: opts.mobileBreakpoint });
   console.log('Đã mở Chrome. Đăng nhập, vào màn hình xuất phát, bấm "● Bắt đầu ghi" ở góc trái dưới, thao tác theo đúng luồng, rồi bấm "■ Dừng & lưu".');
   const closed = new Promise<void>((resolve) => browser.on('disconnected', () => resolve()));
   await Promise.race([recorder.done, closed]);

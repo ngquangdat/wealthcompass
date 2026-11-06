@@ -26,7 +26,7 @@ Chi tiết: [docs/quickstart.md](docs/quickstart.md). Thử toàn bộ quy trìn
 - [Bắt đầu nhanh: gắn vào web trong 3 bước](docs/quickstart.md)
 - [Hướng dẫn tích hợp chi tiết (làm tay, tham khảo)](docs/integration-guide.md)
 - Gắn `tourId` hàng loạt bằng `annotate` (mục 5.1) và soạn mô tả màn hình bằng `enrich` (mục 6.2b) trong hướng dẫn tích hợp
-- [Ghi tour bằng `tour:record`](docs/tour-record.md): ghi thao tác thật, LLM soạn nháp tour vào overrides
+- [Ghi tour bằng `tour:record`](docs/tour-record.md): ghi thao tác thật, không cần `tourId` trong HTML (locator nhiều manh mối), LLM soạn nháp tour vào `compass.tours.json`
 - [Demo iConnect](docs/demo.md)
 - [Plan kỹ thuật tổng quát](docs/universal-plan.md): áp vào bất kỳ web Angular 20+ nào, tự host, mức A có source (hợp đồng, scanner, backend tự host, Domain Pack, lộ trình)
 

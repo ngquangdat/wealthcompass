@@ -2,7 +2,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { driver, type Driver } from 'driver.js';
 import type { Tour, ToolResultStatus } from '@wealthcompass/contracts';
-import { isBlockedRoute, isUserOnly, renderLiteMarkdown, resolveTarget, resumeStep, waitForTarget } from '@wealthcompass/core';
+import { describeLocator, isBlockedRoute, isUserOnly, renderLiteMarkdown, resolveStep, resumeStep, waitForStep, type StepResolution } from '@wealthcompass/core';
 import { COMPASS_CONFIG } from './compass.config';
 import { CompassApiService } from './compass-api.service';
 
@@ -41,9 +41,9 @@ export class TourService {
     // Đang ở giữa luồng (vd. đã ở màn hình đích): bắt đầu từ bước của màn hình này, khi phần tử của bước đó đang hiện
     const path = this.router.url.split(/[?#]/)[0];
     let from = resumeStep(tour, path);
-    if (from > 0 && !resolveTarget(tour.steps[from].tourId)) from = 0;
+    if (from > 0 && !resolveStep(tour.steps[from])?.confident) from = 0;
     // Phần tử của bước đầu đã có trên màn hình hiện tại (vd. mục menu ở khung chung): bắt đầu tại chỗ, không chuyển trang
-    if (from === 0 && path !== tour.startRoute && !resolveTarget(tour.steps[0].tourId)) {
+    if (from === 0 && path !== tour.startRoute && !resolveStep(tour.steps[0])?.confident) {
       const ok = await this.router.navigateByUrl(tour.startRoute);
       // Guard chặn điều hướng (thiếu quyền, hết phiên) thì dừng và báo rõ
       if (!ok) return this.finish(tour, run, 'failed', 0, 'route_denied');
@@ -90,19 +90,58 @@ export class TourService {
     return { tourId: tour.id, status, lastStep, reason };
   }
 
+  // Bước không chắc phần tử: popover không gắn phần tử, nói rõ cần tìm gì, người dùng bấm "Tiếp" để đi tiếp
+  private showUnanchored(tour: Tour, index: number, run: number): Promise<'next' | 'cancelled'> {
+    const step = tour.steps[index];
+    const isLast = index === tour.steps.length - 1;
+    const hint = step.locator ? describeLocator(step.locator).split(' · ')[0] : step.label ?? '';
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (value: 'next' | 'cancelled') => {
+        if (settled) return;
+        settled = true;
+        this.teardown();
+        resolve(run === this.runId ? value : 'cancelled');
+      };
+      this.current = driver({
+        popoverClass: 'compass-popover',
+        overlayColor: '#000',
+        overlayOpacity: 0.5,
+        allowClose: true,
+        onDestroyStarted: () => settle('cancelled'),
+      });
+      this.current.highlight({
+        popover: {
+          title: step.label ?? `Bước ${index + 1}/${tour.steps.length}`,
+          description: renderLiteMarkdown(step.text) + (hint ? `<br><small>Tìm trên màn hình: ${renderLiteMarkdown(hint)}</small>` : ''),
+          showButtons: ['next', 'close'],
+          nextBtnText: isLast ? 'Xong' : 'Tiếp',
+          onNextClick: () => settle('next'),
+          onCloseClick: () => settle('cancelled'),
+        },
+      });
+    });
+  }
+
   // Trả về 'next' khi sang bước sau, 'cancelled' khi người dùng đóng, 'missing' khi không thấy phần tử
   private async runStep(tour: Tour, index: number, run: number): Promise<'next' | 'cancelled' | 'missing'> {
     const step = tour.steps[index];
     const isLast = index === tour.steps.length - 1;
 
-    let found = await waitForTarget(step.tourId, step.route ? 600 : 4000);
-    if (!found && step.route && this.router.url.split('?')[0] !== step.route) {
-      const ok = await this.router.navigateByUrl(step.route);
+    let found: StepResolution | null = await waitForStep(step, step.route ? 600 : 4000);
+    // Route có tham số (/orders/:id) không điều hướng được: chỉ chờ người dùng tự mở
+    const canNavigate = step.route && !step.route.includes(':') && this.router.url.split(/[?#]/)[0] !== step.route;
+    if (!found?.confident && canNavigate) {
+      const ok = await this.router.navigateByUrl(step.route!);
       if (!ok) return 'missing';
-      found = await waitForTarget(step.tourId, 4000);
+      found = await waitForStep(step, 4000);
     }
     if (run !== this.runId) return 'cancelled';
     if (!found) return 'missing';
+    // Chỉ báo bước tìm bằng locator: để biết tour nào đang dựa vào manh mối yếu trước khi nó hỏng hẳn
+    if (found.matchedBy.startsWith('locator')) this.api.report({ event: 'tour_step', tourId: tour.id, stepKey: step.key ?? String(index), matchedBy: found.matchedBy, score: found.score, status: found.confident ? 'ok' : 'low_confidence' });
+    // Không chắc phần tử nào: hiện bước dạng popover giữa màn hình, KHÔNG tô sáng phần tử có thể sai
+    if (!found.confident) return this.showUnanchored(tour, index, run);
 
     const element = found.element;
     // Phần tử nhạy cảm: giữ nguyên chỉ-highlight; không có nhánh nào can thiệp vào nó

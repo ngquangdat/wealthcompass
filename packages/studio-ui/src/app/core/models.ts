@@ -121,13 +121,32 @@ export interface TourIdCandidate {
 }
 
 export interface TourStep {
+  // Khóa bước của tour ghi bằng locator (giữ locator khi sắp xếp lại)
+  key?: string;
+  // tourId ghim; rỗng = tìm phần tử theo locator đã ghi
   target: string;
+  // Mô tả phần tử đã ghi, vd. button "Bán" · app-bond-sell-panel
+  element?: string;
   advanceOn: 'click' | 'next';
   text: string;
   known?: boolean;
   label?: string;
   route?: string;
   sensitive?: boolean;
+  // Ngày locator được làm mới (tour:verify --heal hoặc ghi lại bước)
+  healedAt?: string;
+}
+
+// Locator đề xuất bởi tour:verify cho bước nhạy cảm, chờ người duyệt
+export interface TourProposal {
+  layout: 'desktop' | 'mobile';
+  key: string;
+  index: number;
+  text: string;
+  from: string;
+  to: string;
+  changed: string[];
+  at: string;
 }
 
 export interface TourDef {
@@ -137,6 +156,11 @@ export interface TourDef {
   feature?: string;
   startRoute?: string;
   steps: TourStep[];
+  // recorded: ghi bằng tour:record (compass.tours.json), không cần tourId
+  source?: 'recorded';
+  // Bố cục đã ghi (bản chính trước), vd. ['desktop', 'mobile']
+  layouts?: Array<'desktop' | 'mobile'>;
+  proposals?: TourProposal[];
   draft: boolean;
   valid: boolean;
   errors: string[];

@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
-import type { RunState, TourDef, TourStep } from '../core/models';
+import type { RunState, TourDef, TourProposal, TourStep } from '../core/models';
 import { ProjectStore } from '../core/project.store';
 import { ToastService } from '../core/toast.service';
 import { IconComponent } from '../shared/icon.component';
@@ -32,12 +32,13 @@ interface Editing {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ui-page-header title="Tour" subtitle="Hướng dẫn từng bước trên giao diện. Ghi bằng thao tác thật hoặc soạn tay, rồi chạy thử trên web.">
+      <button class="btn" (click)="openVerify()" [disabled]="!tours().length" title="Chạy lại mọi tour trên web đang chạy, ở desktop và mobile"><ui-icon name="check" /> Kiểm tra tour</button>
       <button class="btn" (click)="newBlank()"><ui-icon name="edit" /> Soạn tay</button>
       <button class="btn btn-primary" (click)="openRecord()"><ui-icon name="play" /> Ghi tour mới</button>
     </ui-page-header>
 
     @if (!targets().length && loaded()) {
-      <div class="alert warning"><ui-icon name="alert" /><span>Dự án chưa có tourId nào. Tour cần tourId để trỏ vào phần tử; <a routerLink="/tourids">gắn tourId</a> trước.</span></div>
+      <div class="alert info"><ui-icon name="alert" /><span>Dự án chưa có tourId nào. "Ghi tour mới" không cần tourId: trợ lý nhận ra phần tử theo vai trò, chữ, thuộc tính và component. Chỉ soạn tay mới cần <a routerLink="/tourids">gắn tourId</a>.</span></div>
     }
 
     <div class="list">
@@ -55,12 +56,27 @@ interface Editing {
               <span><b>{{ t.steps.length }}</b> bước</span>
               <span>bắt đầu ở <code>{{ t.startRoute }}</code></span>
               @if (featureTitle(t.feature); as f) { <span>dẫn tới <b>{{ f }}</b></span> }
+              @if (t.layouts?.length) { <span>bố cục: <b>{{ t.layouts!.join(' + ') }}</b></span> }
               <span class="mono muted">{{ t.id }}</span>
             </div>
             @for (e of t.errors; track e) { <div class="err small">{{ e }}</div> }
+            @for (p of t.proposals ?? []; track p.layout + p.key) {
+              <div class="proposal small">
+                <div><ui-icon name="sparkles" [size]="12" /> <b>Bước {{ p.index + 1 }}</b> ({{ p.layout }}) có manh mối đã đổi: {{ p.changed.join(', ') }}. Phần tử nhạy cảm nên cần bạn duyệt.</div>
+                <div class="mono muted">{{ p.from }} → {{ p.to }}</div>
+                <div class="row">
+                  <button class="btn btn-sm btn-primary" (click)="decide(t, p, true)">Dùng locator mới</button>
+                  <button class="btn btn-sm" (click)="decide(t, p, false)">Bỏ qua</button>
+                  <button class="btn btn-sm" (click)="rerecord(t.id, p.key, p.layout)">Ghi lại bước này</button>
+                </div>
+              </div>
+            }
           </div>
           <div class="t-actions">
             <button class="btn btn-sm" (click)="edit(t)"><ui-icon name="edit" [size]="13" /> {{ t.draft ? 'Duyệt' : 'Sửa' }}</button>
+            @if (t.source === 'recorded' && t.layouts && t.layouts.length < 2) {
+              <button class="btn btn-sm" (click)="openRecord(t)" [title]="'Ghi thêm bản cho bố cục ' + (t.layouts.includes('mobile') ? 'desktop' : 'mobile')"><ui-icon name="play" [size]="13" /> Ghi bản {{ t.layouts.includes('mobile') ? 'desktop' : 'mobile' }}</button>
+            }
             <button class="btn btn-sm" (click)="tryTour(t)" [disabled]="!t.valid" [title]="webUrl() ? '' : 'Bật web ở trang Chạy thử'"><ui-icon name="external" [size]="13" /> Chạy thử</button>
           </div>
         </div>
@@ -94,6 +110,7 @@ interface Editing {
               <span class="hint">AI dựa vào câu này để viết chữ cho từng bước và câu hỏi mẫu.</span>
             </div>
             <div class="field"><label>Địa chỉ web</label><input class="input mono" [(ngModel)]="rec.url" /></div>
+            <label class="small" style="display:flex;gap:8px;align-items:center;margin:4px 0 10px"><input type="checkbox" [(ngModel)]="rec.mobile" /> Ghi bằng khung nhìn điện thoại (bố cục mobile). Cùng id tour thì lưu thành bản mobile của tour đó.</label>
             <div class="alert info small"><ui-icon name="info" /><span>Chrome sẽ mở trên máy này. Đăng nhập, vào màn hình xuất phát, bấm <b>● Bắt đầu ghi</b> ở góc trái dưới, thao tác theo luồng, rồi bấm <b>■ Dừng & lưu</b>. Nút nhạy cảm (gửi, xác nhận...) bị chặn khi ghi nên không chạy thật.</span></div>
           } @else {
             <ui-log-console [lines]="recLogs()" height="260px" />
@@ -108,6 +125,34 @@ interface Editing {
             <span class="muted small"><span class="spinner"></span> Đang chờ bạn ghi trên Chrome...</span>
           } @else {
             <button class="btn btn-primary" (click)="recording.set(false)">Xong</button>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- Kiểm tra tour / ghi lại bước -->
+    @if (job(); as j) {
+      <div class="scrim"></div>
+      <div class="modal" role="dialog" [attr.aria-label]="j.title">
+        <div class="m-head"><h2 class="grow">{{ j.title }}</h2>@if (!jobBusy()) { <button class="btn btn-ghost btn-icon" (click)="job.set(null)"><ui-icon name="x" /></button> }</div>
+        <div class="m-body stack">
+          @if (j.kind === 'verify' && !jobBusy() && !jobLogs().length) {
+            <div class="field"><label>Địa chỉ web</label><input class="input mono" [(ngModel)]="verifyUrl" /></div>
+            <label class="small" style="display:flex;gap:8px;align-items:center"><input type="checkbox" [(ngModel)]="verifyHeal" /> Tự sửa locator khi phần tử vẫn tìm chắc nhưng manh mối đã đổi (bước nhạy cảm chỉ đề xuất, chờ bạn duyệt)</label>
+            <div class="alert info small"><ui-icon name="info" /><span>Chạy lại từng tour bằng Chromium không giao diện ở 1280px và 390px. Bước "chờ bấm" được bấm thật để đi tiếp; bước nhạy cảm không bao giờ bị bấm. Trang cần đăng nhập thì chạy <code>tour:verify --storage-state</code> từ dòng lệnh.</span></div>
+          } @else {
+            <ui-log-console [lines]="jobLogs()" height="300px" />
+          }
+        </div>
+        <div class="m-foot">
+          <span class="grow"></span>
+          @if (j.kind === 'verify' && !jobBusy() && !jobLogs().length) {
+            <button class="btn" (click)="job.set(null)">Hủy</button>
+            <button class="btn btn-primary" (click)="runVerify()" [disabled]="!verifyUrl.trim()"><ui-icon name="check" /> Kiểm tra</button>
+          } @else if (jobBusy()) {
+            <span class="muted small"><span class="spinner"></span> {{ j.kind === 'verify' ? 'Đang chạy lại tour...' : 'Đang chờ bạn bấm trên Chrome...' }}</span>
+          } @else {
+            <button class="btn btn-primary" (click)="job.set(null)">Xong</button>
           }
         </div>
       </div>
@@ -147,9 +192,16 @@ interface Editing {
             <div class="step">
               <div class="s-num">{{ i + 1 }}</div>
               <div class="grow stack s-body">
+                @if (s.element) {
+                  <div class="hint row">
+                    <span class="grow"><ui-icon name="play" [size]="12" /> Phần tử đã ghi: <code>{{ s.element }}</code>@if (s.healedAt) { <span class="muted"> · làm mới {{ s.healedAt }}</span> }</span>
+                    @if (s.key && !e.isNew) { <button class="btn btn-ghost btn-sm" (click)="rerecord(e.id, s.key)" title="Mở Chrome ở màn hình của bước, bấm vào phần tử mới; giữ nguyên chữ">Ghi lại phần tử</button> }
+                  </div>
+                }
                 <div class="row">
                   <select class="select grow" [ngModel]="s.target" (ngModelChange)="setTarget(s, $event)">
-                    @for (t of targets(); track t.tourId) { <option [value]="t.tourId">{{ t.label || t.tourId }} · {{ t.route }}</option> }
+                    @if (s.element) { <option value="">Tìm theo phần tử đã ghi (không cần tourId)</option> }
+                    @for (t of targets(); track t.tourId) { <option [value]="t.tourId">{{ s.element ? 'Ghim tourId: ' : '' }}{{ t.label || t.tourId }} · {{ t.route }}</option> }
                   </select>
                   <select class="select kind" [(ngModel)]="s.advanceOn" [disabled]="isSensitive(s.target)" title="Ô nhập và phần tử nhạy cảm nên dùng nút Tiếp">
                     <option value="click">Chờ người dùng bấm</option>
@@ -200,6 +252,7 @@ interface Editing {
     .s-tools { display: flex; flex-direction: column; gap: 2px; }
     .flip { transform: rotate(180deg); }
     .add { align-self: flex-start; }
+    .proposal { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; margin-top: 4px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
   `,
 })
 export class ToursPage implements OnInit {
@@ -218,7 +271,12 @@ export class ToursPage implements OnInit {
   protected readonly recBusy = signal(false);
   protected readonly recLogs = signal<string[]>([]);
   protected readonly webUrl = signal<string | null>(null);
-  protected rec = { id: '', about: '', feature: '', url: '' };
+  protected rec = { id: '', about: '', feature: '', url: '', mobile: false };
+  protected readonly job = signal<{ kind: 'verify' | 'rerecord'; title: string } | null>(null);
+  protected readonly jobBusy = signal(false);
+  protected readonly jobLogs = signal<string[]>([]);
+  protected verifyUrl = '';
+  protected verifyHeal = true;
   private readonly sensitive = computed(() => new Set(this.targets().filter((t) => t.sensitivity === 'user-only').map((t) => t.tourId)));
 
   async ngOnInit(): Promise<void> {
@@ -258,7 +316,7 @@ export class ToursPage implements OnInit {
       description: t.description ?? '',
       feature: t.feature ?? '',
       startRoute: t.startRoute ?? this.routes()[0] ?? '/',
-      steps: t.steps.map((s) => ({ target: s.target, advanceOn: s.advanceOn, text: s.text })),
+      steps: t.steps.map((s) => ({ key: s.key, element: s.element, target: s.target, advanceOn: s.advanceOn, text: s.text, healedAt: s.healedAt })),
     });
   }
 
@@ -293,7 +351,7 @@ export class ToursPage implements OnInit {
   protected async save(e: Editing): Promise<void> {
     this.saving.set(true);
     try {
-      const steps = e.steps.map((s) => ({ ...s, advanceOn: this.isSensitive(s.target) ? 'next' : s.advanceOn }));
+      const steps = e.steps.map(({ element: _element, healedAt: _healed, ...s }) => ({ ...s, advanceOn: this.isSensitive(s.target) ? 'next' : s.advanceOn }));
       await this.api.put(`/api/tours/${encodeURIComponent(e.id.trim())}`, { title: e.title, description: e.description, feature: e.feature || undefined, startRoute: e.startRoute, steps });
       this.editing.set(null);
       await this.load();
@@ -318,8 +376,10 @@ export class ToursPage implements OnInit {
     }
   }
 
-  protected openRecord(): void {
-    this.rec = { id: '', about: '', feature: '', url: this.rec.url };
+  // Có tour: ghi thêm bản cho bố cục còn thiếu, cùng id
+  protected openRecord(tour?: TourDef): void {
+    const mobile = tour ? !tour.layouts?.includes('mobile') : false;
+    this.rec = { id: tour?.id ?? '', about: '', feature: tour?.feature ?? '', url: this.rec.url, mobile };
     this.recLogs.set([]);
     this.recording.set(true);
   }
@@ -328,7 +388,7 @@ export class ToursPage implements OnInit {
     this.recBusy.set(true);
     this.recLogs.set([]);
     try {
-      const res = await this.api.stream<{ id: string }>('/api/tours/record', { id: this.rec.id.trim(), about: this.rec.about, feature: this.rec.feature, url: this.rec.url.trim() }, (l) => this.recLogs.update((x) => [...x, l]));
+      const res = await this.api.stream<{ id: string }>('/api/tours/record', { id: this.rec.id.trim(), about: this.rec.about, feature: this.rec.feature, url: this.rec.url.trim(), mobile: this.rec.mobile }, (l) => this.recLogs.update((x) => [...x, l]));
       await this.load();
       void this.store.refreshOverview();
       const t = this.tours().find((x) => x.id === res.id);
@@ -340,6 +400,48 @@ export class ToursPage implements OnInit {
       this.toast.error(e);
     } finally {
       this.recBusy.set(false);
+    }
+  }
+
+  protected openVerify(): void {
+    this.verifyUrl = this.webUrl() ?? this.rec.url;
+    this.jobLogs.set([]);
+    this.job.set({ kind: 'verify', title: 'Kiểm tra tour' });
+  }
+
+  protected async runVerify(): Promise<void> {
+    await this.runJob('/api/tours/verify', { url: this.verifyUrl.trim(), heal: this.verifyHeal });
+  }
+
+  // Ghi lại phần tử của một bước: Chrome mở ở màn hình của bước, lần bấm đầu tiên thay phần tử
+  protected async rerecord(id: string, key: string, layout?: 'desktop' | 'mobile'): Promise<void> {
+    this.editing.set(null);
+    this.jobLogs.set([]);
+    this.job.set({ kind: 'rerecord', title: `Ghi lại bước ${key}` });
+    await this.runJob(`/api/tours/${encodeURIComponent(id)}/steps/${encodeURIComponent(key)}/rerecord`, { url: (this.webUrl() ?? this.rec.url).trim(), layout });
+  }
+
+  private async runJob(path: string, body: unknown): Promise<void> {
+    this.jobBusy.set(true);
+    try {
+      await this.api.stream(path, body, (l) => this.jobLogs.update((x) => [...x, l]));
+      await this.load();
+      void this.store.refreshOverview();
+    } catch (e) {
+      this.jobLogs.update((x) => [...x, `Lỗi: ${(e as Error).message}`]);
+      this.toast.error(e);
+    } finally {
+      this.jobBusy.set(false);
+    }
+  }
+
+  protected async decide(t: TourDef, p: TourProposal, approve: boolean): Promise<void> {
+    try {
+      await this.api.post(`/api/tours/${encodeURIComponent(t.id)}/steps/${encodeURIComponent(p.key)}/proposal`, { approve, layout: p.layout });
+      await this.load();
+      this.toast.success(approve ? 'Đã dùng locator mới cho bước này.' : 'Đã bỏ đề xuất.');
+    } catch (e) {
+      this.toast.error(e);
     }
   }
 

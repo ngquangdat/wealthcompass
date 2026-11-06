@@ -15,7 +15,8 @@ import {
 import { scanRoutes, type ScannedLayout, type ScannedRoute } from './routes';
 import { scanMenu } from './menu';
 import { MENU_TARGETS } from './template';
-import { menuTourId } from '@wealthcompass/core';
+import { menuTourId, routeMatches } from '@wealthcompass/core';
+import { readToursFile } from './record/write';
 
 interface Overrides {
   features?: Record<
@@ -219,6 +220,52 @@ export function scan(configPath: string): ScanResult {
         const t = targetRoute.get(s.target)!;
         return { tourId: s.target, text: s.text, advanceOn: s.advanceOn ?? 'next', route: t.route, label: t.label };
       }),
+    });
+    const owner = features.find((f) => f.id === def.feature);
+    if (def.feature && !owner) warnings.push(`Tour "${tourId}": feature "${def.feature}" không tồn tại`);
+    owner?.tourIds.push(tourId);
+  }
+
+  // Tour ghi bằng `tour:record` (compass.tours.json): bước dùng locator không cần tourId trong template.
+  // Bước có tourId vẫn được kiểm như trên; locator thì chỉ kiểm màn hình của bước có trong Feature Map.
+  const recorded = readToursFile(join(root, config.discovery.tours));
+  for (const [tourId, def] of Object.entries(recorded.tours)) {
+    if (tours.some((t) => t.id === tourId)) {
+      warnings.push(`Tour "${tourId}" có ở cả overrides lẫn ${config.discovery.tours}; dùng bản trong overrides`);
+      continue;
+    }
+    const variants = Object.entries(def.variants ?? {}) as Array<['mobile' | 'desktop', typeof def.steps]>;
+    const allSteps = [...def.steps, ...variants.flatMap(([, steps]) => steps)];
+    const missing = [...new Set(allSteps.filter((s) => s.tourId && !s.locator && !targetRoute.has(s.tourId)).map((s) => s.tourId))];
+    if (missing.length) {
+      warnings.push(`Tour "${tourId}" bị loại: không tìm thấy tourId ${missing.join(', ')} trong template`);
+      continue;
+    }
+    const unmatched = allSteps.filter((s) => s.route && !features.some((f) => routeMatches(f.route.pattern, s.route!)));
+    for (const s of unmatched) warnings.push(`Tour "${tourId}" bước ${s.key ?? '?'}: màn hình ${s.route} không có trong Feature Map`);
+    if (def.draft) warnings.push(`Tour "${tourId}" là nháp (${def.draftSource === 'llm' ? 'LLM soạn' : 'dựng bằng mẫu'}), chưa duyệt: đọc lại chữ rồi xóa "draft" trong ${config.discovery.tours}`);
+    const mapSteps = (steps: typeof def.steps) =>
+      steps.map((s, i) => {
+        const t = s.tourId ? targetRoute.get(s.tourId) : undefined;
+        return {
+          key: s.key ?? `s${i + 1}`,
+          ...(s.tourId && t ? { tourId: s.tourId } : {}),
+          ...(s.locator ? { locator: s.locator } : {}),
+          text: s.text,
+          advanceOn: s.advanceOn,
+          route: t?.route ?? s.route,
+          label: t?.label ?? s.label ?? s.locator?.name ?? s.locator?.text,
+          ...(s.skipIfNextVisible ? { skipIfNextVisible: true } : {}),
+        };
+      });
+    tours.push({
+      id: tourId,
+      title: def.title,
+      description: def.description,
+      startRoute: def.startRoute,
+      steps: mapSteps(def.steps),
+      ...(def.layout ? { layout: def.layout } : {}),
+      ...(variants.length ? { variants: Object.fromEntries(variants.map(([layout, steps]) => [layout, mapSteps(steps)])) } : {}),
     });
     const owner = features.find((f) => f.id === def.feature);
     if (def.feature && !owner) warnings.push(`Tour "${tourId}": feature "${def.feature}" không tồn tại`);

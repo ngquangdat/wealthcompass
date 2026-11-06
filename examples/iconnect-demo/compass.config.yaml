@@ -15,3 +15,6 @@ safety:
   userOnly:
     - "[data-tour-role=user-only]"
   blockedRoutes: []
+  # Nút có chữ này chỉ được tô sáng, người dùng tự bấm (tour:record chặn lần bấm khi ghi). Widget nhận cùng danh sách
+  # qua provideCompass({ safety: { userOnlyText } }).
+  userOnlyText: [đặt lệnh, xác nhận lệnh, gửi lệnh]

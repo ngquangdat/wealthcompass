@@ -11,8 +11,9 @@
     "scan": "tsx packages/cli/src/main.ts scan --config examples/iconnect-demo/compass.config.yaml",
     "server": "npm run start -w server",
     "demo": "npm run start -w iconnect-demo -- --port 4200 --host 127.0.0.1",
-    "test": "tsx --test packages/core/src/resolver.test.ts packages/llm/src/config.test.ts server/src/agent.test.ts packages/cli/src/scan.test.ts packages/cli/src/template.test.ts packages/cli/src/enrich.test.ts packages/cli/src/annotate.test.ts packages/cli/src/setup/setup.test.ts packages/cli/src/studio/studio.test.ts packages/cli/src/studio/studio-phase2.test.ts packages/cli/src/studio/studio-phase3.test.ts packages/cli/src/record/record.test.ts",
-    "check": "tsc --noEmit -p server && tsc --noEmit -p packages/cli && npm run test",
+    "test": "tsx --test packages/core/src/resolver.test.ts packages/core/src/locator.test.ts packages/llm/src/config.test.ts server/src/agent.test.ts packages/cli/src/scan.test.ts packages/cli/src/template.test.ts packages/cli/src/enrich.test.ts packages/cli/src/annotate.test.ts packages/cli/src/setup/setup.test.ts packages/cli/src/studio/studio.test.ts packages/cli/src/studio/studio-phase2.test.ts packages/cli/src/studio/studio-phase3.test.ts packages/cli/src/record/record.test.ts packages/cli/src/verify/verify.test.ts server/src/tour-store.test.ts",
+    "check": "node scripts/build-capture.mjs --check && tsc --noEmit -p server && tsc --noEmit -p packages/cli && npm run test",
+    "build:capture": "node scripts/build-capture.mjs",
     "tour:record": "tsx packages/cli/src/main.ts tour:record --config examples/iconnect-demo/compass.config.yaml",
     "enrich": "tsx packages/cli/src/main.ts enrich --config examples/iconnect-demo/compass.config.yaml",
     "annotate": "tsx packages/cli/src/main.ts annotate --config examples/iconnect-demo/compass.config.yaml",
@@ -22,7 +23,9 @@
     "studio": "tsx packages/cli/src/main.ts studio"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^26.6.4",
+    "jsdom": "^31.0.0",
     "ng-packagr": "^22.2.4",
     "tsx": "^4.20.0",
     "typescript": "~6.0.2"

@@ -403,6 +403,7 @@ Web ngành khác: sao chép `packs/finance-vn`, sửa từ điển, chủ đề 
 - [ ] Tắt LLM (sai khóa): vẫn trả lời ở chế độ dự phòng, có ghi chú rõ.
 - [ ] Mở trên điện thoại và máy tính; widget không che nút quan trọng của web.
 - [ ] Bộ kiểm thử `compass.eval.yaml` (Studio > Kiểm thử) đạt hit@3 từ 90% trở lên, mọi câu phải chặn đều bị chặn.
+- [ ] Dùng kho tour ở backend thì đặt `COMPASS_ADMIN_TOKEN` (khóa dài, chỉ CI biết) và `COMPASS_TOUR_STORE` trên ổ bền; không đặt khóa thì `/admin/tours` tắt. `tour:verify` chạy trên staging, không trên bản thật (xem `docs/tour-record.md` mục 9b).
 - [ ] Máy chủ thật **không** đặt `COMPASS_DEBUG`; nếu cần thống kê thì đặt `COMPASS_LOG_FILE` (file JSONL, tự xoay vòng ở 20 MB, chỉ chứa câu hỏi đã che và mã người dùng đã băm).
 
 ## 9. Giới hạn hiện tại của scanner và widget

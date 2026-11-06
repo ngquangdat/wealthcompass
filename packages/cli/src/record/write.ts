@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { Document, YAMLMap, YAMLSeq, isMap, isSeq, parseDocument } from 'yaml';
+import { toursFileSchema, type Layout, type Locator, type RecordedTour, type ToursFile, type TourStep } from '@wealthcompass/contracts';
 import type { RecordedStep } from './recorder';
 import type { TourDraft } from './draft';
 
@@ -11,6 +12,8 @@ export interface MergeInput {
   featureId?: string;
   // Mô tả do người ghi nhập, ghi vào chú thích để người duyệt biết LLM đã dựa vào đâu
   purpose?: string;
+  // Bố cục lúc ghi (theo bề rộng khung nhìn)
+  layout?: Layout;
   force: boolean;
   today?: string;
 }
@@ -57,23 +60,118 @@ export function mergeTourIntoOverrides(file: string, input: MergeInput): MergeRe
   if (isMap(toursNode)) (toursNode as YAMLMap).flow = false;
   doc.setIn(['tours', input.id], node);
 
-  // Câu hỏi mẫu: hợp với câu đã có, không trùng, không xóa
-  let addedQuestions: string[] = [];
-  if (input.featureId && input.draft.sampleQuestions.length) {
-    const path = ['features', input.featureId, 'sampleQuestions'];
-    const seq = doc.getIn(path, true);
-    const current: string[] = isSeq(seq) ? ((seq as YAMLSeq).toJSON() as string[]) : [];
-    const have = new Set(current.map((q) => q.toLowerCase()));
-    addedQuestions = input.draft.sampleQuestions.filter((q) => !have.has(q.toLowerCase()));
-    if (isSeq(seq)) {
-      // Thêm vào dãy sẵn có để giữ nguyên chú thích của từng câu cũ
-      for (const q of addedQuestions) (seq as YAMLSeq).add(doc.createNode(q));
-    } else if (addedQuestions.length) {
-      doc.setIn(path, doc.createNode(addedQuestions));
-    }
-  }
+  const addedQuestions = input.featureId ? addSampleQuestions(doc, input.featureId, input.draft.sampleQuestions) : [];
 
   return { yaml: String(doc), replaced, addedQuestions };
+}
+
+// Câu hỏi mẫu: hợp với câu đã có, không trùng, không xóa
+function addSampleQuestions(doc: Document, featureId: string, questions: string[]): string[] {
+  if (!questions.length) return [];
+  const path = ['features', featureId, 'sampleQuestions'];
+  const seq = doc.getIn(path, true);
+  const current: string[] = isSeq(seq) ? ((seq as YAMLSeq).toJSON() as string[]) : [];
+  const have = new Set(current.map((q) => q.toLowerCase()));
+  const added = questions.filter((q) => !have.has(q.toLowerCase()));
+  if (isSeq(seq)) {
+    // Thêm vào dãy sẵn có để giữ nguyên chú thích của từng câu cũ
+    for (const q of added) (seq as YAMLSeq).add(doc.createNode(q));
+  } else if (added.length) {
+    doc.setIn(path, doc.createNode(added));
+  }
+  return added;
+}
+
+// Chỉ thêm câu hỏi mẫu vào overrides (tour ghi bằng locator nằm ở compass.tours.json)
+export function mergeSampleQuestionsIntoOverrides(file: string, featureId: string, questions: string[]): { yaml: string; added: string[] } {
+  const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const doc: Document = existing.trim() ? parseDocument(existing) : new Document({});
+  if (doc.errors.length) throw new Error(`${file} không phải YAML hợp lệ: ${doc.errors[0].message}`);
+  const added = addSampleQuestions(doc, featureId, questions);
+  return { yaml: String(doc), added };
+}
+
+export interface ToursMergeInput {
+  id: string;
+  draft: TourDraft;
+  // Bước đã lọc (có tourId hoặc locator dùng được); route đã đổi sang mẫu route của tính năng nếu khớp
+  steps: Array<RecordedStep & { routePattern?: string }>;
+  startRoute: string;
+  featureId?: string;
+  purpose?: string;
+  // Bố cục lúc ghi (theo bề rộng khung nhìn)
+  layout?: Layout;
+  force: boolean;
+  today?: string;
+}
+
+export function readToursFile(file: string): ToursFile {
+  if (!existsSync(file)) return { tours: {} };
+  const raw = readFileSync(file, 'utf8');
+  if (!raw.trim()) return { tours: {} };
+  try {
+    return toursFileSchema.parse(JSON.parse(raw));
+  } catch (e) {
+    throw new Error(`${file} không hợp lệ: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+// Bố cục của một lần ghi: bố cục ghi trên đa số locator (mỗi locator ghi bề rộng khung nhìn lúc bấm)
+export function layoutOfSteps(steps: Array<{ locator?: Locator | null }>): Layout | undefined {
+  const counts = { mobile: 0, desktop: 0 };
+  for (const s of steps) if (s.locator?.layout) counts[s.locator.layout]++;
+  if (!counts.mobile && !counts.desktop) return undefined;
+  return counts.mobile > counts.desktop ? 'mobile' : 'desktop';
+}
+
+// Gộp tour vào compass.tours.json. Không ghi đè tour đã có trừ khi --force; thứ tự khóa ổn định để diff gọn.
+// Cùng id nhưng ghi ở bố cục khác (tour bản desktop đã có, giờ ghi bằng --mobile): thêm vào `variants`, không cần --force.
+export function mergeTourIntoToursFile(file: string, input: ToursMergeInput): { json: string; replaced: boolean; variant?: Layout } {
+  const data = readToursFile(file);
+  const existing = data.tours[input.id];
+  const steps: TourStep[] = input.steps.map((s, i) => ({
+    key: `s${i + 1}`,
+    ...(s.tourId ? { tourId: s.tourId } : {}),
+    ...(s.locator ? { locator: s.locator } : {}),
+    route: s.routePattern ?? s.route,
+    advanceOn: s.advanceOn,
+    text: input.draft.steps[i].text,
+    ...(s.opensNext ? { skipIfNextVisible: true } : {}),
+  }));
+  const recordedAt = input.today ?? new Date().toISOString().slice(0, 10);
+
+  const existingLayout = existing ? (existing.layout ?? layoutOfSteps(existing.steps)) : undefined;
+  const otherLayout = existing && input.layout && existingLayout && existingLayout !== input.layout;
+  if (existing && otherLayout) {
+    const layout = input.layout!;
+    if (existing.variants?.[layout] && !input.force) {
+      throw new Error(`Tour "${input.id}" đã có bản ${layout} trong ${file}. Dùng --force để ghi đè bản này.`);
+    }
+    // Bản mới chưa duyệt: cả tour trở lại trạng thái nháp
+    data.tours[input.id] = { ...existing, layout: existingLayout, draft: true, draftSource: input.draft.source, recordedAt, variants: { ...existing.variants, [layout]: steps } };
+    return { json: JSON.stringify(data, null, 2) + '\n', replaced: Boolean(existing.variants?.[layout]), variant: layout };
+  }
+
+  if (existing && !input.force) {
+    throw new Error(`Tour "${input.id}" đã có trong ${file}. Dùng --force để ghi đè, đặt --id khác, hoặc ghi bản cho bố cục kia (--mobile).`);
+  }
+  const about = (input.purpose ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  const tour: RecordedTour = {
+    title: input.draft.title,
+    ...(input.draft.description ? { description: input.draft.description } : {}),
+    ...(input.featureId ? { feature: input.featureId } : {}),
+    startRoute: input.startRoute,
+    draft: true,
+    draftSource: input.draft.source,
+    recordedAt,
+    ...(about ? { purpose: about } : {}),
+    ...(input.layout ? { layout: input.layout } : {}),
+    steps,
+    // Ghi đè bản chính (--force) vẫn giữ bản của bố cục kia
+    ...(existing?.variants ? { variants: existing.variants } : {}),
+  };
+  data.tours[input.id] = tour;
+  return { json: JSON.stringify(data, null, 2) + '\n', replaced: Boolean(existing) };
 }
 
 export function writeOverrides(file: string, yaml: string): void {

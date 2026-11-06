@@ -49,6 +49,8 @@ export class FeatureStore {
   private idf = new Map<string, number>();
   private avgLength = 1;
   private mtime = 0;
+  // Tour từ kho backend (TourStore): thắng tour cùng id trong Feature Map
+  private overlay: () => Array<{ tour: Tour; feature?: string }> = () => [];
 
   constructor(
     private readonly file: string,
@@ -63,9 +65,19 @@ export class FeatureStore {
     if (mtime !== this.mtime) this.load();
   }
 
+  // Nguồn tour bổ sung (kho tour của backend); gọi lại reloadTours() sau mỗi lần kho đổi
+  useTours(source: () => Array<{ tour: Tour; feature?: string }>): void {
+    this.overlay = source;
+    this.load();
+  }
+
+  reloadTours(): void {
+    this.load();
+  }
+
   private load(): void {
     this.mtime = statSync(this.file).mtimeMs;
-    this.map = featureMapSchema.parse(JSON.parse(readFileSync(this.file, 'utf8')));
+    this.map = withTours(featureMapSchema.parse(JSON.parse(readFileSync(this.file, 'utf8'))), this.overlay());
     this.docs = this.map.features.map((feature) => this.index(feature));
     const df = new Map<string, number>();
     for (const d of this.docs) for (const t of d.tokens.keys()) df.set(t, (df.get(t) ?? 0) + 1);
@@ -194,4 +206,22 @@ export class FeatureStore {
       tours,
     };
   }
+}
+
+// Gộp tour của kho backend vào Feature Map: thay tour cùng id, gắn tour vào tính năng sở hữu để tìm kiếm và
+// kiểm quyền (offer_tour, /v1/tours/:id) dùng chung một đường như tour quét từ repo
+export function withTours(map: FeatureMap, extra: Array<{ tour: Tour; feature?: string }>): FeatureMap {
+  if (!extra.length) return map;
+  const ids = new Set(extra.map((e) => e.tour.id));
+  const owners = new Map(extra.filter((e) => e.feature).map((e) => [e.tour.id, e.feature!]));
+  return {
+    ...map,
+    tours: [...map.tours.filter((t) => !ids.has(t.id)), ...extra.map((e) => e.tour)],
+    features: map.features.map((f) => {
+      // Tour trong kho có ghi tính năng: chỉ tính năng đó sở hữu; không ghi thì giữ chủ sở hữu cũ trong Feature Map
+      const kept = f.tourIds.filter((id) => !owners.has(id) || owners.get(id) === f.id);
+      const added = [...owners].filter(([id, owner]) => owner === f.id && !kept.includes(id)).map(([id]) => id);
+      return kept.length === f.tourIds.length && !added.length ? f : { ...f, tourIds: [...kept, ...added] };
+    }),
+  };
 }

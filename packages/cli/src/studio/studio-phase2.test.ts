@@ -177,3 +177,50 @@ test('Studio: danh mục quyền — thêm có mô tả, liệt kê cả quyền
     await close();
   }
 });
+
+test('Studio: đề xuất sửa locator của tour:verify hiện ở danh sách, sửa chữ không mất đề xuất, duyệt thì thay locator', async () => {
+  const dir = await integratedApp();
+  const loc = (name: string) => ({ tag: 'button', role: 'button', name, attrs: {}, context: {} });
+  writeFileSync(
+    join(dir, 'compass.tours.json'),
+    JSON.stringify({
+      tours: {
+        'huy-don-loc': {
+          title: 'Hủy đơn',
+          startRoute: '/',
+          layout: 'desktop',
+          steps: [
+            { key: 's1', locator: loc('Mở đơn'), advanceOn: 'click', text: 'Mở đơn.', healedAt: '2026-11-01' },
+            { key: 's2', locator: loc('Hủy'), advanceOn: 'next', text: 'Bấm Hủy.', proposal: { locator: loc('Hủy đơn'), changed: ['name'], at: '2026-11-06' } },
+          ],
+        },
+      },
+    }),
+  );
+  const port = 5600 + Math.floor(Math.random() * 50);
+  const { url, close } = await startStudio({ port, tarballs: null, open: dir });
+  const api = client(port, new URL(url).searchParams.get('t')!);
+  try {
+    const find = async () => ((await api('GET', '/api/tours')).json.tours as Array<{ id: string; steps: Array<{ key: string; healedAt?: string }>; proposals: Array<{ key: string; layout: string; from: string; to: string; changed: string[] }> }>).find((t) => t.id === 'huy-don-loc')!;
+    let tour = await find();
+    assert.deepEqual(tour.proposals.map((p) => [p.key, p.layout, p.from, p.to, p.changed.join()]), [['s2', 'desktop', 'button "Hủy"', 'button "Hủy đơn"', 'name']]);
+    assert.equal(tour.steps[0].healedAt, '2026-11-01');
+
+    const saved = await api('PUT', '/api/tours/huy-don-loc', { title: 'Hủy đơn hàng', startRoute: '/', steps: [{ key: 's1', advanceOn: 'click', text: 'Mở đơn hàng.' }, { key: 's2', advanceOn: 'next', text: 'Bấm **Hủy**.' }] });
+    assert.equal(saved.status, 200);
+    tour = await find();
+    assert.equal(tour.proposals.length, 1, 'sửa chữ không làm mất đề xuất');
+    assert.equal(tour.steps[0].healedAt, '2026-11-01');
+
+    assert.equal((await api('POST', '/api/tours/huy-don-loc/steps/s2/proposal', { approve: true })).status, 200);
+    const file = JSON.parse(readFileSync(join(dir, 'compass.tours.json'), 'utf8')).tours['huy-don-loc'];
+    assert.equal(file.steps[1].locator.name, 'Hủy đơn');
+    assert.equal(file.steps[1].proposal, undefined);
+    assert.equal(file.steps[1].text, 'Bấm **Hủy**.');
+    assert.equal((await find()).proposals.length, 0);
+    assert.equal((await api('POST', '/api/tours/huy-don-loc/steps/s2/proposal', { approve: false })).status, 400, 'không còn đề xuất');
+    assert.equal((await api('POST', '/api/tours/khong-co/steps/s1/proposal', { approve: true })).status, 404);
+  } finally {
+    await close();
+  }
+});

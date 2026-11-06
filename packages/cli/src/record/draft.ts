@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { redactPii } from '@wealthcompass/core';
+import { redactPii, routeMatches } from '@wealthcompass/core';
 import { completeText, type LlmConfig } from '@wealthcompass/llm';
 import type { FeatureMap } from '@wealthcompass/contracts';
 import type { RecordedStep } from './recorder';
@@ -17,7 +17,7 @@ export interface TourDraft {
 export interface DraftInput {
   id: string;
   title?: string;
-  // Chỉ các bước đã có tourId
+  // Các bước đã lọc: mỗi bước có tourId hoặc locator dùng được
   steps: RecordedStep[];
   featureMap: FeatureMap | null;
   featureId?: string;
@@ -35,7 +35,8 @@ const draftSchema = z.object({
 
 interface StepContext {
   index: number;
-  tourId: string;
+  // tourId nếu phần tử có gắn, nếu không thì khóa bước (s1, s2...)
+  key: string;
   label: string | null;
   hint: string | null;
   screen: string | null;
@@ -47,20 +48,20 @@ interface StepContext {
 // vì nó có thể chứa số dư hay tên khách. Chữ trên trang chỉ dùng khi template chưa có nhãn, và đã qua lọc PII.
 function stepContexts(input: DraftInput): StepContext[] {
   const targets = new Map<string, { label?: string; hint?: string }>();
-  const screens = new Map<string, string>();
-  for (const f of input.featureMap?.features ?? []) {
-    screens.set(f.route.pattern, f.title);
+  const features = input.featureMap?.features ?? [];
+  for (const f of features) {
     for (const t of f.targets) if (!targets.has(t.tourId)) targets.set(t.tourId, { label: t.label, hint: t.hint });
   }
   return input.steps.map((s, index) => {
-    const meta = targets.get(s.tourId!);
-    const fallback = s.text ? redactPii(s.text).text : null;
+    const meta = s.tourId ? targets.get(s.tourId) : undefined;
+    // Tên truy cập trong locator đã lọc PII lúc ghi; chữ thô trên trang là phương án cuối
+    const fallback = s.locator?.name ?? s.locator?.text ?? (s.text ? redactPii(s.text).text : null);
     return {
       index: index + 1,
-      tourId: s.tourId!,
+      key: s.tourId ?? `s${index + 1}`,
       label: meta?.label ?? fallback,
       hint: meta?.hint ?? null,
-      screen: screens.get(s.route) ?? null,
+      screen: features.find((f) => routeMatches(f.route.pattern, s.route))?.title ?? null,
       advanceOn: s.advanceOn,
       sensitive: s.userOnly,
     };
@@ -78,7 +79,7 @@ function templateDraft(input: DraftInput, ctx: StepContext[], note?: string): To
     title: input.title ?? (purpose ? purpose.slice(0, 70) : input.id),
     description: purpose,
     steps: ctx.map((c) => ({
-      text: c.advanceOn === 'click' ? `Bấm **${c.label ?? c.tourId}**.` : `Đây là **${c.label ?? c.tourId}**. Bạn tự thao tác và xác nhận ở bước này.`,
+      text: c.advanceOn === 'click' ? `Bấm **${c.label ?? c.key}**.` : `Đây là **${c.label ?? c.key}**. Bạn tự thao tác và xác nhận ở bước này.`,
     })),
     sampleQuestions: [],
     source: 'template',
@@ -97,7 +98,7 @@ Quy tắc:
 - Bước advanceOn="click": nói rõ bấm vào đâu và (nếu biết) để làm gì. Bước advanceOn="next" hoặc sensitive=true: chỉ giải thích phần tử đó và nhắc người dùng TỰ nhập, TỰ xác nhận; tuyệt đối không bảo hệ thống hay trợ lý làm hộ.
 - "title": ngắn, dạng việc cần làm ("Bán trái phiếu trên iConnect"). "description": một câu nêu tour dẫn tới đâu.
 - "sampleQuestions": 4-6 câu hỏi người dùng thật sự sẽ gõ để tìm chức năng này; thêm 1-2 câu viết không dấu, ngắn; không câu nào xin tư vấn đầu tư.
-- Chỉ dùng thông tin trong đầu vào; không bịa tên nút hay menu. Không nhắc tên kỹ thuật như tourId hay đường dẫn.`;
+- Chỉ dùng thông tin trong đầu vào; không bịa tên nút hay menu. Không nhắc tên kỹ thuật như key, tourId hay đường dẫn.`;
 
 function parseJson(text: string): unknown {
   const cleaned = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();

@@ -45,6 +45,8 @@ export const PAGE_SCRIPT = `
   var body = root.getElementById('body');
   var purposeEl = root.getElementById('purpose');
   var confirmedEmpty = false;
+  // Ảnh các phần tử bấm được đang hiện ở lần bấm trước: để biết lần bấm này trúng phần tử vừa được mở ra
+  var lastSnapshot = null;
 
   function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
 
@@ -108,6 +110,11 @@ export const PAGE_SCRIPT = `
     // Ghi locator TRƯỚC khi app xử lý lần bấm (đang ở pha capture nên DOM chưa đổi)
     var locator = null;
     try { if (window.__compassCapture) locator = window.__compassCapture(source, { mobileBreakpoint: state.mobileBreakpoint }); } catch (err) { locator = null; }
+    var appeared = false;
+    try {
+      if (window.__compassAppeared) appeared = window.__compassAppeared(lastSnapshot, source);
+      if (window.__compassSnapshot) lastSnapshot = window.__compassSnapshot(document);
+    } catch (err) { appeared = false; }
     var keywords = state.userOnlyText || [];
     var byText = keywords.length > 0 && !!window.__compassUserOnlyText && window.__compassUserOnlyText(source, keywords);
     var userOnly = byText || USER_ONLY.some(function (sel) { return target.closest(sel); });
@@ -120,7 +127,8 @@ export const PAGE_SCRIPT = `
       userOnly: !!userOnly,
       tag: target.tagName.toLowerCase(),
       text: String(source.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 60),
-      locator: locator
+      locator: locator,
+      appeared: appeared
     });
     flash(source);
     setTimeout(sync, 50);

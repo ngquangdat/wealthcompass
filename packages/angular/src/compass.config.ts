@@ -1,5 +1,5 @@
 import { InjectionToken, makeEnvironmentProviders, EnvironmentProviders } from '@angular/core';
-import { buildSafetyPolicy, type SafetyPolicy } from '@wealthcompass/core';
+import { DEFAULT_BUSY_SELECTOR, buildSafetyPolicy, type SafetyPolicy } from '@wealthcompass/core';
 
 export interface CompassOptions {
   // Địa chỉ backend WealthCompass tự host, VD http://localhost:8890
@@ -13,10 +13,19 @@ export interface CompassOptions {
   subtitle?: string;
   suggestions?: string[];
   safety?: Partial<SafetyPolicy>;
+  tours?: TourOptions;
 }
 
-export interface ResolvedCompassConfig extends Required<Omit<CompassOptions, 'safety'>> {
+export interface TourOptions {
+  // Dưới bề rộng này (px) dùng bản mobile của tour; nên trùng tours.mobileBreakpoint trong compass.config.yaml
+  mobileBreakpoint?: number;
+  // Phần tử "đang tải" của app: engine chờ chúng biến mất rồi mới tìm phần tử của bước
+  busySelector?: string;
+}
+
+export interface ResolvedCompassConfig extends Required<Omit<CompassOptions, 'safety' | 'tours'>> {
   safety: SafetyPolicy;
+  tours: Required<TourOptions>;
 }
 
 export const COMPASS_CONFIG = new InjectionToken<ResolvedCompassConfig>('COMPASS_CONFIG');
@@ -37,6 +46,7 @@ export function provideCompass(options: CompassOptions | (() => CompassOptions))
           suggestions: [],
           ...o,
           safety: buildSafetyPolicy(o.safety),
+          tours: { mobileBreakpoint: 768, busySelector: DEFAULT_BUSY_SELECTOR, ...o.tours },
         };
       },
     },

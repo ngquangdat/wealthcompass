@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { Document, YAMLMap, YAMLSeq, isMap, isSeq, parseDocument } from 'yaml';
-import { toursFileSchema, type RecordedTour, type ToursFile } from '@wealthcompass/contracts';
+import { toursFileSchema, type Layout, type Locator, type RecordedTour, type ToursFile, type TourStep } from '@wealthcompass/contracts';
 import type { RecordedStep } from './recorder';
 import type { TourDraft } from './draft';
 
@@ -12,6 +12,8 @@ export interface MergeInput {
   featureId?: string;
   // Mô tả do người ghi nhập, ghi vào chú thích để người duyệt biết LLM đã dựa vào đâu
   purpose?: string;
+  // Bố cục lúc ghi (theo bề rộng khung nhìn)
+  layout?: Layout;
   force: boolean;
   today?: string;
 }
@@ -97,6 +99,8 @@ export interface ToursMergeInput {
   startRoute: string;
   featureId?: string;
   purpose?: string;
+  // Bố cục lúc ghi (theo bề rộng khung nhìn)
+  layout?: Layout;
   force: boolean;
   today?: string;
 }
@@ -112,12 +116,44 @@ export function readToursFile(file: string): ToursFile {
   }
 }
 
+// Bố cục của một lần ghi: bố cục ghi trên đa số locator (mỗi locator ghi bề rộng khung nhìn lúc bấm)
+export function layoutOfSteps(steps: Array<{ locator?: Locator | null }>): Layout | undefined {
+  const counts = { mobile: 0, desktop: 0 };
+  for (const s of steps) if (s.locator?.layout) counts[s.locator.layout]++;
+  if (!counts.mobile && !counts.desktop) return undefined;
+  return counts.mobile > counts.desktop ? 'mobile' : 'desktop';
+}
+
 // Gộp tour vào compass.tours.json. Không ghi đè tour đã có trừ khi --force; thứ tự khóa ổn định để diff gọn.
-export function mergeTourIntoToursFile(file: string, input: ToursMergeInput): { json: string; replaced: boolean } {
+// Cùng id nhưng ghi ở bố cục khác (tour bản desktop đã có, giờ ghi bằng --mobile): thêm vào `variants`, không cần --force.
+export function mergeTourIntoToursFile(file: string, input: ToursMergeInput): { json: string; replaced: boolean; variant?: Layout } {
   const data = readToursFile(file);
-  const replaced = Boolean(data.tours[input.id]);
-  if (replaced && !input.force) {
-    throw new Error(`Tour "${input.id}" đã có trong ${file}. Dùng --force để ghi đè hoặc đặt --id khác.`);
+  const existing = data.tours[input.id];
+  const steps: TourStep[] = input.steps.map((s, i) => ({
+    key: `s${i + 1}`,
+    ...(s.tourId ? { tourId: s.tourId } : {}),
+    ...(s.locator ? { locator: s.locator } : {}),
+    route: s.routePattern ?? s.route,
+    advanceOn: s.advanceOn,
+    text: input.draft.steps[i].text,
+    ...(s.opensNext ? { skipIfNextVisible: true } : {}),
+  }));
+  const recordedAt = input.today ?? new Date().toISOString().slice(0, 10);
+
+  const existingLayout = existing ? (existing.layout ?? layoutOfSteps(existing.steps)) : undefined;
+  const otherLayout = existing && input.layout && existingLayout && existingLayout !== input.layout;
+  if (existing && otherLayout) {
+    const layout = input.layout!;
+    if (existing.variants?.[layout] && !input.force) {
+      throw new Error(`Tour "${input.id}" đã có bản ${layout} trong ${file}. Dùng --force để ghi đè bản này.`);
+    }
+    // Bản mới chưa duyệt: cả tour trở lại trạng thái nháp
+    data.tours[input.id] = { ...existing, layout: existingLayout, draft: true, draftSource: input.draft.source, recordedAt, variants: { ...existing.variants, [layout]: steps } };
+    return { json: JSON.stringify(data, null, 2) + '\n', replaced: Boolean(existing.variants?.[layout]), variant: layout };
+  }
+
+  if (existing && !input.force) {
+    throw new Error(`Tour "${input.id}" đã có trong ${file}. Dùng --force để ghi đè, đặt --id khác, hoặc ghi bản cho bố cục kia (--mobile).`);
   }
   const about = (input.purpose ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
   const tour: RecordedTour = {
@@ -127,19 +163,15 @@ export function mergeTourIntoToursFile(file: string, input: ToursMergeInput): { 
     startRoute: input.startRoute,
     draft: true,
     draftSource: input.draft.source,
-    recordedAt: input.today ?? new Date().toISOString().slice(0, 10),
+    recordedAt,
     ...(about ? { purpose: about } : {}),
-    steps: input.steps.map((s, i) => ({
-      key: `s${i + 1}`,
-      ...(s.tourId ? { tourId: s.tourId } : {}),
-      ...(s.locator ? { locator: s.locator } : {}),
-      route: s.routePattern ?? s.route,
-      advanceOn: s.advanceOn,
-      text: input.draft.steps[i].text,
-    })),
+    ...(input.layout ? { layout: input.layout } : {}),
+    steps,
+    // Ghi đè bản chính (--force) vẫn giữ bản của bố cục kia
+    ...(existing?.variants ? { variants: existing.variants } : {}),
   };
   data.tours[input.id] = tour;
-  return { json: JSON.stringify(data, null, 2) + '\n', replaced };
+  return { json: JSON.stringify(data, null, 2) + '\n', replaced: Boolean(existing) };
 }
 
 export function writeOverrides(file: string, yaml: string): void {

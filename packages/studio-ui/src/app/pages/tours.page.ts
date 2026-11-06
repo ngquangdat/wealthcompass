@@ -55,12 +55,16 @@ interface Editing {
               <span><b>{{ t.steps.length }}</b> bước</span>
               <span>bắt đầu ở <code>{{ t.startRoute }}</code></span>
               @if (featureTitle(t.feature); as f) { <span>dẫn tới <b>{{ f }}</b></span> }
+              @if (t.layouts?.length) { <span>bố cục: <b>{{ t.layouts!.join(' + ') }}</b></span> }
               <span class="mono muted">{{ t.id }}</span>
             </div>
             @for (e of t.errors; track e) { <div class="err small">{{ e }}</div> }
           </div>
           <div class="t-actions">
             <button class="btn btn-sm" (click)="edit(t)"><ui-icon name="edit" [size]="13" /> {{ t.draft ? 'Duyệt' : 'Sửa' }}</button>
+            @if (t.source === 'recorded' && t.layouts && t.layouts.length < 2) {
+              <button class="btn btn-sm" (click)="openRecord(t)" [title]="'Ghi thêm bản cho bố cục ' + (t.layouts.includes('mobile') ? 'desktop' : 'mobile')"><ui-icon name="play" [size]="13" /> Ghi bản {{ t.layouts.includes('mobile') ? 'desktop' : 'mobile' }}</button>
+            }
             <button class="btn btn-sm" (click)="tryTour(t)" [disabled]="!t.valid" [title]="webUrl() ? '' : 'Bật web ở trang Chạy thử'"><ui-icon name="external" [size]="13" /> Chạy thử</button>
           </div>
         </div>
@@ -94,6 +98,7 @@ interface Editing {
               <span class="hint">AI dựa vào câu này để viết chữ cho từng bước và câu hỏi mẫu.</span>
             </div>
             <div class="field"><label>Địa chỉ web</label><input class="input mono" [(ngModel)]="rec.url" /></div>
+            <label class="small" style="display:flex;gap:8px;align-items:center;margin:4px 0 10px"><input type="checkbox" [(ngModel)]="rec.mobile" /> Ghi bằng khung nhìn điện thoại (bố cục mobile). Cùng id tour thì lưu thành bản mobile của tour đó.</label>
             <div class="alert info small"><ui-icon name="info" /><span>Chrome sẽ mở trên máy này. Đăng nhập, vào màn hình xuất phát, bấm <b>● Bắt đầu ghi</b> ở góc trái dưới, thao tác theo luồng, rồi bấm <b>■ Dừng & lưu</b>. Nút nhạy cảm (gửi, xác nhận...) bị chặn khi ghi nên không chạy thật.</span></div>
           } @else {
             <ui-log-console [lines]="recLogs()" height="260px" />
@@ -220,7 +225,7 @@ export class ToursPage implements OnInit {
   protected readonly recBusy = signal(false);
   protected readonly recLogs = signal<string[]>([]);
   protected readonly webUrl = signal<string | null>(null);
-  protected rec = { id: '', about: '', feature: '', url: '' };
+  protected rec = { id: '', about: '', feature: '', url: '', mobile: false };
   private readonly sensitive = computed(() => new Set(this.targets().filter((t) => t.sensitivity === 'user-only').map((t) => t.tourId)));
 
   async ngOnInit(): Promise<void> {
@@ -320,8 +325,10 @@ export class ToursPage implements OnInit {
     }
   }
 
-  protected openRecord(): void {
-    this.rec = { id: '', about: '', feature: '', url: this.rec.url };
+  // Có tour: ghi thêm bản cho bố cục còn thiếu, cùng id
+  protected openRecord(tour?: TourDef): void {
+    const mobile = tour ? !tour.layouts?.includes('mobile') : false;
+    this.rec = { id: tour?.id ?? '', about: '', feature: tour?.feature ?? '', url: this.rec.url, mobile };
     this.recLogs.set([]);
     this.recording.set(true);
   }
@@ -330,7 +337,7 @@ export class ToursPage implements OnInit {
     this.recBusy.set(true);
     this.recLogs.set([]);
     try {
-      const res = await this.api.stream<{ id: string }>('/api/tours/record', { id: this.rec.id.trim(), about: this.rec.about, feature: this.rec.feature, url: this.rec.url.trim() }, (l) => this.recLogs.update((x) => [...x, l]));
+      const res = await this.api.stream<{ id: string }>('/api/tours/record', { id: this.rec.id.trim(), about: this.rec.about, feature: this.rec.feature, url: this.rec.url.trim(), mobile: this.rec.mobile }, (l) => this.recLogs.update((x) => [...x, l]));
       await this.load();
       void this.store.refreshOverview();
       const t = this.tours().find((x) => x.id === res.id);

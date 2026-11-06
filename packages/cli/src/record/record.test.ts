@@ -9,7 +9,8 @@ import { draftTour } from './draft';
 import { finishRecording, loadFeatureMap } from './run';
 import { mergeTourIntoOverrides, mergeTourIntoToursFile } from './write';
 import { scan } from '../scan';
-import type { RecordedStep } from './recorder';
+import { Recorder, type RecordedStep } from './recorder';
+import type { Page } from 'playwright-core';
 import type { LlmConfig } from '@wealthcompass/llm';
 
 const demoDir = resolve(import.meta.dirname, '../../../../examples/iconnect-demo');
@@ -188,6 +189,65 @@ test('tour ghi bằng locator: route thật đổi sang mẫu route của tính 
   assert.equal(tour.steps[0].route, '/orders/:id');
   assert.equal(tour.recordedAt, '2026-11-06');
   assert.equal(tour.draftSource, 'template');
+});
+
+test('lần bấm trúng phần tử vừa được mở ra: bước trước được đánh dấu mở chỗ chứa', () => {
+  const recorder = new Recorder({} as Page);
+  recorder.recording = true;
+  const menu = { tag: 'button', role: 'button', name: 'Menu', attrs: {}, context: {}, layout: 'mobile' as const };
+  recorder.onEvent({ tourId: null, route: '/loans', advanceOn: 'click', userOnly: false, tag: 'button', text: 'Menu', locator: menu });
+  recorder.onEvent({ tourId: null, route: '/loans', advanceOn: 'next', userOnly: false, tag: 'button', text: 'Tất toán', locator: sellButton, appeared: true });
+  assert.equal(recorder.steps[0].opensNext, true);
+  // Khác màn hình hoặc bước trước chỉ tô sáng (không bấm thật) thì không đánh dấu
+  recorder.onEvent({ tourId: null, route: '/other', advanceOn: 'click', userOnly: false, tag: 'a', text: 'Khác', locator: { ...menu, name: 'Khác' }, appeared: true });
+  assert.equal(recorder.steps[1].opensNext, undefined);
+});
+
+test('cùng id ghi ở bố cục khác: lưu thành bản mobile, bước mở menu tự bỏ qua được, scanner đưa vào Feature Map', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'compass-layout-'));
+  cpSync(resolve(import.meta.dirname, '../../test-fixtures/mini-app'), dir, { recursive: true });
+  const config = join(dir, 'compass.config.yaml');
+  scan(config);
+  const desktop = { ...sellButton, layout: 'desktop' as const };
+  const mobile = { ...sellButton, layout: 'mobile' as const };
+  const menu = { tag: 'button', role: 'button', name: 'Menu', attrs: {}, context: {}, layout: 'mobile' as const };
+  const quiet = () => undefined;
+  await finishRecording(
+    { config, url: '', id: 'settle-loan', force: false, noLlm: true, dryRun: false },
+    { steps: [{ tourId: null, route: '/loans', advanceOn: 'next', userOnly: false, tag: 'button', text: 'Tất toán', locator: desktop }], startRoute: '/loans' },
+    quiet,
+  );
+  await finishRecording(
+    { config, url: '', id: 'settle-loan', force: false, noLlm: true, dryRun: false },
+    {
+      steps: [
+        { tourId: null, route: '/loans', advanceOn: 'click', userOnly: false, tag: 'button', text: 'Menu', locator: menu, opensNext: true },
+        { tourId: null, route: '/loans', advanceOn: 'next', userOnly: false, tag: 'button', text: 'Tất toán', locator: mobile },
+      ],
+      startRoute: '/loans',
+    },
+    quiet,
+  );
+  const tour = JSON.parse(readFileSync(join(dir, 'compass.tours.json'), 'utf8')).tours['settle-loan'];
+  assert.equal(tour.layout, 'desktop');
+  assert.equal(tour.steps.length, 1);
+  assert.equal(tour.variants.mobile.length, 2);
+  assert.equal(tour.variants.mobile[0].skipIfNextVisible, true);
+  assert.equal(tour.variants.mobile[1].skipIfNextVisible, undefined);
+
+  const inMap = JSON.parse(readFileSync(join(dir, 'feature-map.json'), 'utf8')).tours.find((t: { id: string }) => t.id === 'settle-loan');
+  assert.equal(inMap.layout, 'desktop');
+  assert.equal(inMap.variants.mobile[0].skipIfNextVisible, true);
+  assert.equal(inMap.variants.mobile[1].label, 'Tất toán');
+
+  // Bản mobile đã có: ghi lại cần --force; ghi lại bản chính cũng vậy
+  const again = (locator: typeof mobile, force = false) =>
+    finishRecording({ config, url: '', id: 'settle-loan', force, noLlm: true, dryRun: true }, { steps: [{ tourId: null, route: '/loans', advanceOn: 'next', userOnly: false, tag: 'button', text: 'Tất toán', locator }], startRoute: '/loans' }, quiet);
+  await assert.rejects(again(mobile), /bản mobile/);
+  await assert.rejects(again(desktop as never), /--force/);
+  // --force bản chính vẫn giữ bản mobile
+  const forced = JSON.parse((await again(desktop as never, true)).json).tours['settle-loan'];
+  assert.equal(forced.variants.mobile.length, 2);
 });
 
 // E2E với Chrome thật: bỏ qua nếu không đặt COMPASS_E2E_URL (cần dev server demo đang chạy)

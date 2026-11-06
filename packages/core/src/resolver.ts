@@ -1,8 +1,8 @@
 // TargetResolver: tìm phần tử theo tourId, thử lần lượt các chiến lược (plan mục 5.3).
 // Ở mức A, data-tour-id là nguồn chính; các chiến lược sau chỉ là lưới an toàn.
 
-import type { Locator } from '@wealthcompass/contracts';
-import { isVisible } from './locator-filters';
+import type { Layout, Locator, TourStep } from '@wealthcompass/contracts';
+import { DEFAULT_BUSY_SELECTOR, isVisible } from './locator-filters';
 import { findByLocator } from './locator';
 
 export type MatchedBy = 'tour-id' | 'testid' | 'id' | 'aria-label';
@@ -67,7 +67,7 @@ export function waitFor<T>(
   if (immediate && done(immediate)) return Promise.resolve(immediate);
 
   return new Promise((resolve) => {
-    const observeRoot = root instanceof Document ? root.documentElement : (root as Node);
+    const observeRoot = ((root as Document).documentElement ?? root) as Node;
     let pending = false;
     const finish = (value: T | null) => {
       observer.disconnect();
@@ -115,4 +115,45 @@ export function resumeStep(tour: { startRoute: string; steps: Array<{ route?: st
   if (routeMatches(tour.startRoute, path)) return 0;
   const index = tour.steps.findIndex((s, i) => i > 0 && s.route !== undefined && routeMatches(s.route, path));
   return index === -1 ? 0 : index;
+}
+
+// ---------------------------------------------------------------------------
+// Bố cục, bước điều kiện, chờ tải
+// ---------------------------------------------------------------------------
+
+// Cùng quy tắc với lúc ghi (locator.layout): hẹp hơn breakpoint là mobile
+export function currentLayout(mobileBreakpoint = 768, width = typeof window === 'undefined' ? 1280 : window.innerWidth): Layout {
+  return width < mobileBreakpoint ? 'mobile' : 'desktop';
+}
+
+// Bước cho bố cục hiện tại: bản ghi riêng cho bố cục đó nếu có, không thì bản chính
+export function stepsForLayout<S>(tour: { steps: S[]; variants?: Partial<Record<Layout, S[]>> }, layout: Layout): S[] {
+  return tour.variants?.[layout] ?? tour.steps;
+}
+
+// Bước mở chỗ chứa bước sau (nút menu mobile): bỏ qua khi phần tử của bước sau đã hiện chắc chắn
+export function shouldSkipStep(steps: Array<Pick<TourStep, 'tourId' | 'locator' | 'skipIfNextVisible'>>, index: number, root: ParentNode = document): boolean {
+  const next = steps[index + 1];
+  if (!steps[index]?.skipIfNextVisible || !next) return false;
+  return resolveStep(next, root)?.confident === true;
+}
+
+function busy(selector: string, root: ParentNode): boolean {
+  try {
+    return Array.from(root.querySelectorAll(selector)).some(isVisible);
+  } catch {
+    return false;
+  }
+}
+
+// Chờ spinner/khung "đang tải" biến mất (hết giờ thì đi tiếp: không để tour kẹt vì spinner không tắt)
+export async function waitForIdle(selector = DEFAULT_BUSY_SELECTOR, timeoutMs = 5000, root: ParentNode = document): Promise<boolean> {
+  const idle = await waitFor(() => (busy(selector, root) ? null : true), timeoutMs, root);
+  return idle === true;
+}
+
+// Chờ app tự chuyển tới màn hình của bước (lần bấm ở bước trước thường đổi route, router xử lý bất đồng bộ)
+export async function waitForRoute(pattern: string, currentPath: () => string, timeoutMs = 1500, root: ParentNode = document): Promise<boolean> {
+  const ok = await waitFor(() => (routeMatches(pattern, currentPath()) ? true : null), timeoutMs, root);
+  return ok === true;
 }

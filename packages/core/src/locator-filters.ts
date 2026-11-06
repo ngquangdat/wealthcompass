@@ -70,3 +70,60 @@ export function stripIconText(element: Element, text: string): string {
   }
   return out.replace(/\s+/g, ' ').trim();
 }
+
+// ---------------------------------------------------------------------------
+// Danh sách lặp (bảng, @for, virtual scroll): cùng một nút lặp lại trên mỗi dòng
+// ---------------------------------------------------------------------------
+
+const ROW_SELECTOR = 'tr,[role=row],mat-row,cdk-row,mat-list-item,[role=listitem],[role=option],[role=article],li';
+const STATE_CLASS = /^(ng-|mat-|cdk-|mdc-|active|selected|focus|hover|disabled|odd|even|first|last|expanded|collapsed)/;
+
+// Hình dạng của một dòng: thẻ + class ổn định (không có trạng thái như active/selected)
+export function rowSignature(element: Element): string {
+  const tag = element.tagName.toLowerCase();
+  const classes = Array.from(element.classList)
+    .filter((c) => isStableToken(c) && !STATE_CLASS.test(c))
+    .sort()
+    .slice(0, 3);
+  return [tag, ...classes.map((c) => CSS.escape(c))].join('.');
+}
+
+// Phần tử có ít nhất một anh em cùng hình dạng (dòng thứ hai của danh sách)
+function isRepeated(element: Element): boolean {
+  const parent = element.parentElement;
+  if (!parent || element === document.body || element === document.documentElement) return false;
+  const signature = rowSignature(element);
+  return Array.from(parent.children).some((c) => c !== element && rowSignature(c) === signature);
+}
+
+// Dòng chứa phần tử: thẻ dòng quen thuộc (tr, [role=row], mat-row...) hoặc tổ tiên gần nhất (≤6 cấp) lặp lại
+// cùng hình dạng với anh em của nó (thẻ card trong @for). Bản thân phần tử không tính là dòng.
+export function rowOf(element: Element): Element | null {
+  const explicit = element.parentElement?.closest(ROW_SELECTOR);
+  if (explicit && isRepeated(explicit)) return explicit;
+  let scope = element.parentElement;
+  for (let depth = 0; scope && depth < 6; depth++, scope = scope.parentElement) {
+    if (scope === document.body) break;
+    if (isRepeated(scope)) return scope;
+  }
+  return null;
+}
+
+// Cột của ô chứa phần tử: tên cột Angular Material (mat-column-ten) hoặc chữ tiêu đề cột của bảng HTML
+export function columnOf(element: Element): string | undefined {
+  const cell = element.closest('td,th,[role=cell],[role=gridcell],mat-cell,cdk-cell');
+  if (!cell) return undefined;
+  const named = Array.from(cell.classList).find((c) => /^(mat|cdk)-column-/.test(c));
+  if (named) return named.replace(/^(mat|cdk)-column-/, '');
+  if (cell.tagName === 'TD' || cell.tagName === 'TH') {
+    const table = cell.closest('table');
+    const headerRow = table?.tHead?.rows[0] ?? (table?.rows[0]?.querySelector('th') ? table.rows[0] : undefined);
+    const header = headerRow?.cells[(cell as HTMLTableCellElement).cellIndex];
+    const text = cleanText(header?.textContent, 40);
+    if (header && header !== cell && text && !mostlyDigits(text)) return text;
+  }
+  return undefined;
+}
+
+// Phần tử "đang tải" mặc định; app có spinner riêng thì khai báo tours.busySelector
+export const DEFAULT_BUSY_SELECTOR = '[aria-busy="true"],mat-spinner,mat-progress-spinner,.compass-busy';

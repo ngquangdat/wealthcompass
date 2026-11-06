@@ -11,7 +11,11 @@ import {
   LANDMARK_SELECTOR,
   LOCATOR_ATTRS,
   cleanText,
+  columnOf,
   isAppComponentTag,
+  isVisible,
+  rowOf,
+  rowSignature,
   stripIconText,
   isStableToken,
   mostlyDigits,
@@ -115,6 +119,58 @@ function cssOf(element: Element): string | undefined {
   }
 }
 
+// Khóa rẻ để so phần tử giữa hai lần bấm (tính được cho hàng nghìn phần tử, không cần tên truy cập)
+function quickKey(element: Element): string {
+  return `${element.tagName}|${cleanText(element.getAttribute('aria-label') || element.textContent, 40)}`;
+}
+
+// Khóa để nhận ra phần tử "y hệt" ở dòng khác: thẻ, chữ và các thuộc tính phân biệt (hai ô nhập khác formcontrolname là khác)
+function twinKey(element: Element): string {
+  const attrs = ['aria-label', 'formcontrolname', 'name', 'placeholder', 'type', 'routerlink'].map((a) => element.getAttribute(a) ?? '');
+  return [element.tagName, cleanText(element.textContent, 40), ...attrs].join('|');
+}
+
+// Phần tử bấm được nằm trong một dòng lặp, VÀ dòng anh em cũng có phần tử y hệt (nút "Bán" trên mỗi dòng):
+// ghi hình dạng dòng thay vì dòng cụ thể. Dòng lặp nhưng phần tử khác nhau (form-group) thì không phải danh sách.
+function listOf(element: Element): Locator['list'] {
+  const row = rowOf(element);
+  if (!row?.parentElement) return undefined;
+  const signature = rowSignature(row);
+  const key = twinKey(element);
+  const twin = Array.from(row.parentElement.children).some(
+    (other) => other !== row && rowSignature(other) === signature && Array.from(other.querySelectorAll(element.tagName)).some((e) => twinKey(e) === key),
+  );
+  if (!twin) return undefined;
+  const column = columnOf(element);
+  return { row: signature, ...(column ? { column } : {}) };
+}
+
+export interface VisibleSnapshot {
+  path: string;
+  elements: WeakSet<Element>;
+  keys: Set<string>;
+}
+
+// Chụp các phần tử bấm được đang hiện, ở pha capture của lần bấm (DOM chưa đổi). Lần bấm sau so với ảnh này
+// để biết phần tử của nó có phải do lần bấm trước mở ra không (nút menu, mở rộng mục).
+export function snapshotVisible(root: ParentNode = document): VisibleSnapshot {
+  const elements = new WeakSet<Element>();
+  const keys = new Set<string>();
+  for (const el of Array.from(root.querySelectorAll(INTERACTIVE_SELECTOR)).slice(0, 5000)) {
+    if (!isVisible(el)) continue;
+    elements.add(el);
+    keys.add(quickKey(el));
+  }
+  return { path: location.pathname, elements, keys };
+}
+
+// Phần tử vừa bấm chưa hiện lúc chụp ảnh (cùng màn hình): do lần bấm trước mở ra
+export function appearedSince(snapshot: VisibleSnapshot | null | undefined, clicked: Element): boolean {
+  if (!snapshot || snapshot.path !== location.pathname) return false;
+  const element = interactiveTarget(clicked);
+  return !snapshot.elements.has(element) && !snapshot.keys.has(quickKey(element));
+}
+
 export function captureLocator(clicked: Element, options: CaptureOptions = {}): Locator {
   const element = interactiveTarget(clicked);
   const role = getRole(element) ?? undefined;
@@ -126,7 +182,10 @@ export function captureLocator(clicked: Element, options: CaptureOptions = {}): 
   const round = (n: number) => Math.round(n * 1000) / 1000;
   const component = componentOf(element);
   const css = cssOf(element);
-  const context = { dialog: dialogOf(element), heading: headingOf(element), landmark: landmarkOf(element) };
+  const list = listOf(element);
+  // Trong danh sách: tiêu đề tìm từ NGOÀI vùng chứa các dòng (tiêu đề trong dòng là dữ liệu, vd. mã trái phiếu)
+  const headingFrom = list ? (rowOf(element)?.parentElement ?? element) : element;
+  const context = { dialog: dialogOf(element), heading: headingOf(headingFrom), landmark: landmarkOf(element) };
   return {
     tag: element.tagName.toLowerCase(),
     ...(role ? { role } : {}),
@@ -138,5 +197,6 @@ export function captureLocator(clicked: Element, options: CaptureOptions = {}): 
     ...(css ? { css } : {}),
     rect: { x: round(rect.left / vw), y: round(rect.top / vh), w: round(rect.width / vw), h: round(rect.height / vh) },
     layout: vw < (options.mobileBreakpoint ?? 768) ? 'mobile' : 'desktop',
+    ...(list ? { list } : {}),
   };
 }

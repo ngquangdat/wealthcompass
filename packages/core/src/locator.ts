@@ -4,7 +4,7 @@
 import { computeAccessibleName, getRole } from 'dom-accessibility-api';
 import type { Locator } from '@wealthcompass/contracts';
 import { normalizeVi } from './text';
-import { DIALOG_SELECTOR, HEADING_SELECTOR, LANDMARK_SELECTOR, cleanText, isVisible, stripIconText } from './locator-filters';
+import { DIALOG_SELECTOR, HEADING_SELECTOR, LANDMARK_SELECTOR, cleanText, columnOf, isVisible, stripIconText } from './locator-filters';
 
 export interface LocatorMatch {
   element: HTMLElement;
@@ -36,6 +36,8 @@ export const LOCATOR_WEIGHTS = {
   landmark: 1,
   css: 1.5,
   rect: 1,
+  listRow: 1,
+  column: 1.5,
 } as const;
 export const ACCEPT_SCORE = 6;
 export const ACCEPT_MARGIN = 2;
@@ -140,6 +142,11 @@ function score(element: Element, locator: Locator): { score: number; matchedBy: 
     if (landmark && (getRole(landmark) ?? landmark.tagName.toLowerCase()) === ctx.landmark) hit('landmark', w.landmark);
   }
 
+  if (locator.list) {
+    if (rowFor(element, locator)) hit('list', w.listRow);
+    if (locator.list.column && columnOf(element) === locator.list.column) hit('column', w.column);
+  }
+
   if (locator.css) {
     try {
       if (element.matches(locator.css)) hit('css', w.css);
@@ -163,6 +170,30 @@ function score(element: Element, locator: Locator): { score: number; matchedBy: 
   return { score: Math.round(total * 100) / 100, matchedBy };
 }
 
+function rowFor(element: Element, locator: Locator): Element | null {
+  if (!locator.list) return null;
+  try {
+    return element.closest(locator.list.row);
+  } catch {
+    return null;
+  }
+}
+
+// Hai ứng viên nằm ở hai dòng khác nhau của cùng một danh sách: cùng là "nút Bán của một dòng", không phải đối thủ
+function sameList(a: Element, b: Element, locator: Locator): boolean {
+  const ra = rowFor(a, locator);
+  const rb = rowFor(b, locator);
+  return Boolean(ra && rb && ra !== rb && ra.parentElement === rb.parentElement);
+}
+
+// Người duyệt ghim dòng (list.rowText): chỉ giữ ứng viên ở dòng chứa chữ đó
+function inPinnedRow(element: Element, locator: Locator): boolean {
+  const want = locator.list?.rowText;
+  if (!want) return true;
+  const row = rowFor(element, locator);
+  return Boolean(row && normalizeVi(cleanText((row as HTMLElement).innerText ?? row.textContent, 2000)).includes(norm(want)));
+}
+
 export function findByLocator(
   locator: Locator,
   root: ParentNode = document,
@@ -170,12 +201,16 @@ export function findByLocator(
 ): LocatorMatch | null {
   const ranked = candidatesFor(locator, root)
     .filter(visible)
+    .filter((element) => inPinnedRow(element, locator))
     .map((element) => ({ element, ...score(element, locator) }))
     .sort((a, b) => b.score - a.score);
   // Phần tử con và cha cùng khớp (span trong button): chỉ giữ phần tử điểm cao hơn khi tính người về nhì
   const best = ranked[0];
   if (!best || best.score < MIN_SCORE) return null;
-  const rival = ranked.find((r) => r !== best && !best.element.contains(r.element) && !r.element.contains(best.element));
+  // Danh sách: các dòng khác cùng danh sách không phải đối thủ; điểm bằng nhau thì giữ dòng đầu (thứ tự tài liệu)
+  const rival = ranked.find(
+    (r) => r !== best && !best.element.contains(r.element) && !r.element.contains(best.element) && !sameList(best.element, r.element, locator),
+  );
   const runnerUp = rival?.score ?? 0;
   return {
     element: best.element as HTMLElement,

@@ -11,7 +11,7 @@ import { loadConfig } from '../scan';
 import { analyzeGuards, refineGuardsWithLlm } from '../setup/guards';
 import { finishRecording } from '../record/run';
 import { recordSession } from '../record/recorder';
-import { readToursFile } from '../record/write';
+import { layoutOfSteps, readToursFile } from '../record/write';
 import { parsePatch } from './patch-hunks';
 import { updateEnvFile } from './env-file';
 import { readOverrides } from './overrides-edit';
@@ -339,6 +339,8 @@ export function registerPhase2(app: FastifyInstance): void {
         feature: def.feature,
         startRoute: def.startRoute,
         source: 'recorded',
+        // Bố cục đã ghi: bản chính + các bản thêm (Studio chỉ sửa chữ của bản chính)
+        layouts: [def.layout ?? layoutOfSteps(def.steps) ?? 'desktop', ...Object.keys(def.variants ?? {})],
         steps: def.steps.map((s) => ({
           key: s.key,
           target: s.tourId ?? '',
@@ -394,6 +396,7 @@ export function registerPhase2(app: FastifyInstance): void {
           ...(old?.route ? { route: old.route } : {}),
           advanceOn: s.advanceOn,
           text: s.text.trim(),
+          ...(old?.skipIfNextVisible ? { skipIfNextVisible: true } : {}),
         };
       });
       const { draft: _draft, draftSource: _source, ...rest } = existingRecorded;
@@ -449,14 +452,22 @@ export function registerPhase2(app: FastifyInstance): void {
   // Ghi tour bằng Chrome thật trên máy dev; chạy tới khi người bấm "Dừng & lưu" trong khung ghi
   app.post('/api/tours/record', async (req, reply) => {
     const dir = requireApp();
-    const body = req.body as { id: string; about?: string; feature?: string; url: string };
+    const body = req.body as { id: string; about?: string; feature?: string; url: string; mobile?: boolean };
     if (!TOUR_ID.test(body.id)) throw httpError(400, 'Id tour chỉ gồm chữ thường, số và gạch nối');
-    if (loadDoc(overridesPath(dir)).hasIn(['tours', body.id]) || readToursFile(toursPath(dir)).tours[body.id]) throw httpError(400, `Tour "${body.id}" đã có; chọn id khác`);
+    const layout = body.mobile ? 'mobile' : 'desktop';
+    const existing = readToursFile(toursPath(dir)).tours[body.id];
+    // Tour đã có chỉ được ghi thêm bản cho bố cục còn thiếu (vd. đã có desktop, giờ ghi mobile)
+    const canAddVariant = existing && (existing.layout ?? layoutOfSteps(existing.steps) ?? 'desktop') !== layout && !existing.variants?.[layout];
+    if (loadDoc(overridesPath(dir)).hasIn(['tours', body.id]) || (existing && !canAddVariant)) throw httpError(400, `Tour "${body.id}" đã có bản ${layout}; chọn id khác`);
     if (!/^https?:\/\//.test(body.url)) throw httpError(400, 'Địa chỉ web không hợp lệ');
     await stream(reply, async (log) => {
       log('Đang mở Chrome...');
       const { config } = loadConfig(configPath(dir));
-      const { recorder, browser } = await recordSession(body.url, body.about ?? '', { userOnlyText: config.safety.userOnlyText });
+      const { recorder, browser } = await recordSession(body.url, body.about ?? '', {
+        userOnlyText: config.safety.userOnlyText,
+        mobileBreakpoint: config.tours.mobileBreakpoint,
+        mobile: body.mobile,
+      });
       log('Đã mở Chrome. Đăng nhập, vào màn hình xuất phát, bấm "● Bắt đầu ghi" ở góc trái dưới, thao tác theo luồng, rồi bấm "■ Dừng & lưu".');
       const closed = new Promise<void>((r) => browser.on('disconnected', () => r()));
       await Promise.race([recorder.done, closed]);

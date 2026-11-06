@@ -13,10 +13,12 @@ const out = join(root, 'packages/cli/src/record/capture.bundle.ts');
 const result = await build({
   stdin: {
     contents: [
-      "import { captureLocator } from './packages/core/src/locator-capture';",
+      "import { appearedSince, captureLocator, snapshotVisible } from './packages/core/src/locator-capture';",
       "import { matchesUserOnlyText } from './packages/core/src/safety';",
       'window.__compassCapture = captureLocator;',
       'window.__compassUserOnlyText = matchesUserOnlyText;',
+      'window.__compassSnapshot = snapshotVisible;',
+      'window.__compassAppeared = appearedSince;',
     ].join('\n'),
     resolveDir: root,
     loader: 'ts',

@@ -234,20 +234,18 @@ export function scan(configPath: string): ScanResult {
       warnings.push(`Tour "${tourId}" có ở cả overrides lẫn ${config.discovery.tours}; dùng bản trong overrides`);
       continue;
     }
-    const missing = def.steps.filter((s) => s.tourId && !s.locator && !targetRoute.has(s.tourId)).map((s) => s.tourId);
+    const variants = Object.entries(def.variants ?? {}) as Array<['mobile' | 'desktop', typeof def.steps]>;
+    const allSteps = [...def.steps, ...variants.flatMap(([, steps]) => steps)];
+    const missing = [...new Set(allSteps.filter((s) => s.tourId && !s.locator && !targetRoute.has(s.tourId)).map((s) => s.tourId))];
     if (missing.length) {
       warnings.push(`Tour "${tourId}" bị loại: không tìm thấy tourId ${missing.join(', ')} trong template`);
       continue;
     }
-    const unmatched = def.steps.filter((s) => s.route && !features.some((f) => routeMatches(f.route.pattern, s.route!)));
+    const unmatched = allSteps.filter((s) => s.route && !features.some((f) => routeMatches(f.route.pattern, s.route!)));
     for (const s of unmatched) warnings.push(`Tour "${tourId}" bước ${s.key ?? '?'}: màn hình ${s.route} không có trong Feature Map`);
     if (def.draft) warnings.push(`Tour "${tourId}" là nháp (${def.draftSource === 'llm' ? 'LLM soạn' : 'dựng bằng mẫu'}), chưa duyệt: đọc lại chữ rồi xóa "draft" trong ${config.discovery.tours}`);
-    tours.push({
-      id: tourId,
-      title: def.title,
-      description: def.description,
-      startRoute: def.startRoute,
-      steps: def.steps.map((s, i) => {
+    const mapSteps = (steps: typeof def.steps) =>
+      steps.map((s, i) => {
         const t = s.tourId ? targetRoute.get(s.tourId) : undefined;
         return {
           key: s.key ?? `s${i + 1}`,
@@ -257,8 +255,17 @@ export function scan(configPath: string): ScanResult {
           advanceOn: s.advanceOn,
           route: t?.route ?? s.route,
           label: t?.label ?? s.label ?? s.locator?.name ?? s.locator?.text,
+          ...(s.skipIfNextVisible ? { skipIfNextVisible: true } : {}),
         };
-      }),
+      });
+    tours.push({
+      id: tourId,
+      title: def.title,
+      description: def.description,
+      startRoute: def.startRoute,
+      steps: mapSteps(def.steps),
+      ...(def.layout ? { layout: def.layout } : {}),
+      ...(variants.length ? { variants: Object.fromEntries(variants.map(([layout, steps]) => [layout, mapSteps(steps)])) } : {}),
     });
     const owner = features.find((f) => f.id === def.feature);
     if (def.feature && !owner) warnings.push(`Tour "${tourId}": feature "${def.feature}" không tồn tại`);

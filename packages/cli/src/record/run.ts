@@ -7,7 +7,7 @@ import { writeFileSync } from 'node:fs';
 import { loadConfig, scan } from '../scan';
 import { draftTour } from './draft';
 import { recordSession, type RecordedStep } from './recorder';
-import { mergeSampleQuestionsIntoOverrides, mergeTourIntoToursFile, writeOverrides } from './write';
+import { layoutOfSteps, mergeSampleQuestionsIntoOverrides, mergeTourIntoToursFile, writeOverrides } from './write';
 
 export interface RecordOptions {
   config: string;
@@ -22,8 +22,8 @@ export interface RecordOptions {
   dryRun: boolean;
   // Cấu hình LLM truyền sẵn (Studio có thể ghi đè trong phiên); không có thì đọc biến môi trường
   llm?: import('@wealthcompass/llm').LlmConfig | null;
-  // Dưới bề rộng này (px) coi là bố cục mobile
-  mobileBreakpoint?: number;
+  // Ghi bản mobile: mở Chrome với khung nhìn điện thoại (--mobile)
+  mobile?: boolean;
 }
 
 // Mẫu route của tính năng khớp với đường dẫn thật (/orders/42 -> /orders/:id); ưu tiên khớp chính xác, rồi ít tham số nhất
@@ -91,8 +91,13 @@ export async function finishRecording(
   const draft = await draftTour({ id: opts.id, title: opts.title, steps: mapped, featureMap, featureId, purpose, llm });
   if (draft.note) log(`! ${draft.note}`);
 
+  const layout = layoutOfSteps(mapped);
+  const opened = mapped.filter((s) => s.opensNext).length;
+  if (opened) log(`  · ${opened} bước chỉ mở chỗ chứa bước sau (menu, mở rộng): khi chạy sẽ tự bỏ qua nếu bước sau đã hiện.`);
+
   const toursFile = join(root, config.discovery.tours);
   const merged = mergeTourIntoToursFile(toursFile, {
+    layout,
     id: opts.id,
     draft,
     steps: mapped,
@@ -110,7 +115,7 @@ export async function finishRecording(
   }
   writeFileSync(toursFile, merged.json);
   if (questions.added.length) writeOverrides(overridesFile, questions.yaml);
-  log(`Đã ghi tour "${opts.id}" (${mapped.length} bước) vào ${toursFile}${questions.added.length ? `, thêm ${questions.added.length} câu hỏi mẫu vào ${overridesFile}` : ''}`);
+  log(`Đã ghi tour "${opts.id}"${merged.variant ? ` bản ${merged.variant}` : layout ? ` (${layout})` : ''} (${mapped.length} bước) vào ${toursFile}${questions.added.length ? `, thêm ${questions.added.length} câu hỏi mẫu vào ${overridesFile}` : ''}`);
 
   // Quét lại để chắc tour vào được Feature Map
   const result = scan(opts.config);
@@ -124,7 +129,11 @@ export async function finishRecording(
 
 export async function recordTour(opts: RecordOptions): Promise<void> {
   const { config } = loadConfig(opts.config);
-  const { recorder, browser } = await recordSession(opts.url, opts.about, { userOnlyText: config.safety.userOnlyText, mobileBreakpoint: opts.mobileBreakpoint });
+  const { recorder, browser } = await recordSession(opts.url, opts.about, {
+    userOnlyText: config.safety.userOnlyText,
+    mobileBreakpoint: config.tours.mobileBreakpoint,
+    mobile: opts.mobile,
+  });
   console.log('Đã mở Chrome. Đăng nhập, vào màn hình xuất phát, bấm "● Bắt đầu ghi" ở góc trái dưới, thao tác theo đúng luồng, rồi bấm "■ Dừng & lưu".');
   const closed = new Promise<void>((resolve) => browser.on('disconnected', () => resolve()));
   await Promise.race([recorder.done, closed]);

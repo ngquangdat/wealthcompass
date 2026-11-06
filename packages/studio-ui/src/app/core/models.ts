@@ -144,6 +144,8 @@ export interface TourDef {
   steps: TourStep[];
   // recorded: ghi bằng tour:record (compass.tours.json), không cần tourId
   source?: 'recorded';
+  // Bố cục đã ghi (bản chính trước), vd. ['desktop', 'mobile']
+  layouts?: Array<'desktop' | 'mobile'>;
   draft: boolean;
   valid: boolean;
   errors: string[];

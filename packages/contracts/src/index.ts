@@ -45,6 +45,18 @@ export const locatorSchema = z.object({
   // Vị trí theo tỉ lệ khung nhìn; chỉ dùng để phân xử khi hòa điểm
   rect: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional(),
   layout: z.enum(['mobile', 'desktop']).optional(),
+  // Phần tử nằm trong một dòng của danh sách lặp (bảng, @for, virtual scroll): mọi dòng có phần tử giống hệt
+  // đều đúng, nên không coi các dòng khác là "đối thủ". Ghi hình dạng dòng, không ghi dòng cụ thể.
+  list: z
+    .object({
+      // Selector của dòng (vd. "tr", "[role=row]", "mat-row", "div.bond-card")
+      row: z.string(),
+      // Tiêu đề cột chứa phần tử (bảng): thêm điểm cho ô đúng cột
+      column: z.string().optional(),
+      // Người duyệt có thể ghim một dòng cụ thể: chỉ chọn dòng chứa chữ này (không tự ghi vì có thể là dữ liệu khách)
+      rowText: z.string().optional(),
+    })
+    .optional(),
 });
 export type Locator = z.infer<typeof locatorSchema>;
 
@@ -63,9 +75,18 @@ export const tourStepSchema = z
     route: z.string().optional(),
     // Tiêu đề ngắn của popover (lấy từ nhãn của target)
     label: z.string().optional(),
+    // Bước chỉ để mở chỗ chứa bước sau (nút menu trên mobile, mở rộng mục): bỏ qua khi phần tử của bước sau đã hiện
+    skipIfNextVisible: z.boolean().optional(),
   })
   .refine((s) => Boolean(s.tourId || s.locator), { message: 'Bước tour cần tourId hoặc locator' });
 export type TourStep = z.infer<typeof tourStepSchema>;
+
+export const layoutSchema = z.enum(['mobile', 'desktop']);
+export type Layout = z.infer<typeof layoutSchema>;
+
+// Cùng một tour ghi riêng cho từng bố cục: bố cục mobile thường có thêm bước mở menu, phần tử khác chỗ.
+// `steps` là bản chính; `variants` là bản cho bố cục khác. Widget chọn theo bề rộng màn hình, thiếu thì dùng `steps`.
+const tourVariantsSchema = z.object({ mobile: z.array(tourStepSchema).min(1).optional(), desktop: z.array(tourStepSchema).min(1).optional() });
 
 export const tourSchema = z.object({
   id: z.string(),
@@ -74,6 +95,9 @@ export const tourSchema = z.object({
   // Màn hình bắt đầu luồng; engine điều hướng về đây trước bước đầu tiên
   startRoute: z.string(),
   steps: z.array(tourStepSchema).min(1),
+  // Bố cục của `steps` (khi tour được ghi ở một bố cục cụ thể)
+  layout: layoutSchema.optional(),
+  variants: tourVariantsSchema.optional(),
 });
 export type Tour = z.infer<typeof tourSchema>;
 
@@ -92,6 +116,8 @@ export const recordedTourSchema = z.object({
   // Lời người ghi mô tả tính năng, để người duyệt biết nội dung dựa vào đâu
   purpose: z.string().optional(),
   steps: z.array(tourStepSchema).min(1),
+  layout: layoutSchema.optional(),
+  variants: tourVariantsSchema.optional(),
 });
 export type RecordedTour = z.infer<typeof recordedTourSchema>;
 
@@ -231,5 +257,14 @@ export const compassConfigSchema = z.object({
       userOnlyText: z.array(z.string()).default([]),
     })
     .default({ userOnly: [], blockedRoutes: [], userOnlyText: [] }),
+  // Bố cục và chờ tải khi ghi/chạy tour
+  tours: z
+    .object({
+      // Dưới bề rộng này (px) là bố cục mobile; widget dùng cùng giá trị qua provideCompass({ tours })
+      mobileBreakpoint: z.number().int().positive().default(768),
+      // Phần tử "đang tải" của app; engine chờ chúng biến mất rồi mới tìm phần tử của bước
+      busySelector: z.string().optional(),
+    })
+    .default({ mobileBreakpoint: 768 }),
 });
 export type CompassConfig = z.infer<typeof compassConfigSchema>;

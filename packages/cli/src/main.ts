@@ -120,7 +120,7 @@ if (command === 'doctor' && arg('app')) {
   const url = arg('url');
   const id = arg('id');
   if (!url || !id) {
-    console.error('Cách dùng: compass tour:record --config <yaml> --url <địa chỉ web> --id <tour-id> [--title "..."] [--about "mô tả tính năng"] [--feature <id>] [--force] [--no-llm] [--dry-run]');
+    console.error('Cách dùng: compass tour:record --config <yaml> --url <địa chỉ web> --id <tour-id> [--title "..."] [--about "mô tả tính năng"] [--feature <id>] [--mobile] [--force] [--no-llm] [--dry-run]');
     process.exit(1);
   }
   await recordTour({
@@ -133,6 +133,7 @@ if (command === 'doctor' && arg('app')) {
     force: process.argv.includes('--force'),
     noLlm: process.argv.includes('--no-llm'),
     dryRun: process.argv.includes('--dry-run'),
+    mobile: process.argv.includes('--mobile'),
   });
 } else {
   console.log('Cách dùng: wealthcompass studio [--app <dir>] | setup --app <dir> | doctor --app <dir> | scan --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--dry-run] | annotate --config <yaml> [--only ...] [--out file] [--print] | tour:record ...');

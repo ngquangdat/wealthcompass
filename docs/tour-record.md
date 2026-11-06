@@ -51,6 +51,7 @@ npx tsx packages/cli/src/main.ts tour:record --config duong/dan/compass.config.y
 | `--dry-run` | không | In YAML ra màn hình, **không ghi file** |
 | `--force` | không | Cho phép ghi đè tour trùng `--id` |
 | `--no-llm` | không | Không gọi LLM, chữ theo mẫu |
+| `--mobile` | không | Mở Chrome với khung nhìn điện thoại (390×844) để ghi bản mobile. Cùng `--id` với tour đã có bản desktop thì lưu thành `variants.mobile` của tour đó, không cần `--force` |
 
 ## 4. Quy trình từng bước
 
@@ -89,8 +90,44 @@ Mỗi bước chấm điểm các ứng viên trên trang: tên truy cập khớ
 | --- | --- |
 | Có `tourId` và tìm thấy | Tô sáng, như trước |
 | Điểm ≥ 6 và hơn ứng viên thứ hai ≥ 2 | Tô sáng phần tử |
-| Có ứng viên nhưng không đủ chắc (vd. mỗi dòng bảng có một nút **BÁN** giống hệt nhau) | Hiện popover giữa màn hình kèm "Tìm trên màn hình: …", **không tô sáng** phần tử có thể sai; báo `low_confidence` |
+| Có ứng viên nhưng không đủ chắc (vd. hai nút **Xác nhận** ở hai vùng khác nhau, không phân biệt được) | Hiện popover giữa màn hình kèm "Tìm trên màn hình: …", **không tô sáng** phần tử có thể sai; báo `low_confidence` |
 | Không có ứng viên | Dừng tour, báo `target_missing` như trước |
+
+### Danh sách, bảng, thẻ lặp
+
+Nút lặp trên mỗi dòng (mỗi dòng bảng có một nút **BÁN**, mỗi thẻ trong `@for` có một nút) được nhận ra lúc ghi: phần tử nằm trong một dòng lặp và dòng anh em có phần tử y hệt. Locator khi đó có `list`:
+
+```json
+"list": { "row": "tr", "column": "Thao tác" }
+```
+
+- Ghi **hình dạng dòng**, không ghi dòng cụ thể; không ghi chữ trong dòng (mã trái phiếu, số dư). Tiêu đề mục lấy từ ngoài vùng danh sách.
+- Lúc chạy, các dòng khác của cùng danh sách không bị coi là đối thủ: widget tô sáng nút ở dòng cùng vị trí nếu còn, không thì dòng đầu tiên. Dữ liệu đổi, ít dòng hơn, virtual scroll đều chạy.
+- `column` (tiêu đề cột hoặc tên cột `mat-column-*`) cộng điểm cho ô đúng cột.
+- Muốn trỏ vào một dòng cụ thể thì người duyệt thêm `"rowText": "VIC2025"`: chỉ chọn dòng chứa chữ đó. Công cụ không tự ghi vì chữ trong dòng có thể là dữ liệu khách.
+
+### Bố cục web và mobile
+
+- Mỗi locator ghi `layout` theo bề rộng khung nhìn lúc bấm (dưới `tours.mobileBreakpoint`, mặc định 768px, là mobile).
+- Ghi bản chính như thường, rồi ghi lại **cùng `--id`** với `--mobile` (hoặc nút "Ghi bản mobile" trong Studio): tour có thêm `variants.mobile`. Widget chọn bản theo bề rộng màn hình; bố cục chưa ghi thì dùng bản chính.
+- Widget cần cùng breakpoint: `provideCompass({ ..., tours: { mobileBreakpoint: 768 } })`.
+
+### Bước mở chỗ chứa (`skipIfNextVisible`)
+
+Lúc ghi, nếu phần tử bạn bấm **chưa hiện** ở lần bấm trước (cùng màn hình), lần bấm trước được coi là bước mở chỗ chứa (nút ☰ menu, mở rộng mục) và có `"skipIfNextVisible": true`. Lúc chạy, nếu phần tử của bước sau đã hiện chắc chắn (menu đang mở, hoặc màn hình rộng không có nút ☰) thì bước đó được bỏ qua và báo `tour_step` với `status: skipped`. Xóa cờ này nếu bước đó luôn cần làm.
+
+### Chờ màn hình sẵn sàng
+
+Trước mỗi bước widget chờ theo thứ tự: route của bước (lần bấm ở bước trước đổi màn hình bất đồng bộ, tối đa 1,5 giây) → phần tử "đang tải" biến mất (tối đa 5 giây) → phần tử của bước. Phần tử "đang tải" mặc định là `[aria-busy="true"], mat-spinner, mat-progress-spinner, .compass-busy`; app dùng spinner riêng thì khai báo:
+
+```yaml
+# compass.config.yaml
+tours:
+  mobileBreakpoint: 768
+  busySelector: "app-loading, .page-spinner"
+```
+
+và truyền cùng giá trị cho widget: `provideCompass({ ..., tours: { busySelector: 'app-loading, .page-spinner' } })`.
 
 Bước tìm bằng locator gửi telemetry `tour_step` (khóa bước, manh mối đã khớp, điểm) để thấy tour nào đang yếu trước khi nó hỏng hẳn. Ứng dụng có nhiều nút trùng chữ thì ghim `tourId` cho riêng phần tử đó.
 
@@ -197,8 +234,9 @@ Nếu LLM trả sai định dạng hoặc sai số bước, công cụ thử l�
 
 ## 10. Giới hạn hiện tại
 
-- Danh sách/bảng có nhiều phần tử giống hệt nhau (mỗi dòng một nút) chưa có cách nói "dòng nào cũng được": bước đó hiện dạng popover không gắn phần tử. Sẽ có `scope`/`match: any` ở đợt sau.
-- Mỗi tour ghi ở một bố cục (desktop hoặc mobile, ghi trong `locator.layout`); chưa gộp hai bố cục thành biến thể của cùng tour. Thường vẫn chạy được ở bố cục kia nếu tên và thuộc tính phần tử giống nhau.
+- Danh sách chỉ được nhận ra khi lúc ghi có **ít nhất hai dòng**; danh sách chỉ có một dòng thì ghi như phần tử thường (vẫn tìm được, nhưng lúc chạy gặp nhiều dòng sẽ báo không chắc). Ghi lại khi có dữ liệu nhiều dòng.
+- Bước mở chỗ chứa chỉ nhận ra trong cùng một màn hình (cùng route); mở menu rồi chuyển trang thì không đánh dấu.
+- Studio chỉ sửa chữ của bản chính; chữ của `variants.mobile` sửa trực tiếp trong `compass.tours.json`.
 
 - Chỉ ghi **lần bấm** (chuột); chưa ghi hover, kéo thả, nhập liệu, phím tắt.
 - Cần Chrome cài trên máy; chưa hỗ trợ Firefox/Safari.

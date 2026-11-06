@@ -17,6 +17,10 @@ export interface RecordedStep {
   text: string;
   // Manh mối để tìm lại phần tử lúc chạy, không cần tourId trong HTML (null khi trang không ghi được)
   locator?: Locator | null;
+  // Phần tử của lần bấm này chưa hiện ở lần bấm trước (cùng màn hình): lần bấm trước đã mở nó ra
+  appeared?: boolean;
+  // Bước này chỉ mở chỗ chứa bước sau (nút menu, mở rộng): chạy tour thì bỏ qua khi bước sau đã hiện
+  opensNext?: boolean;
 }
 
 export interface RecorderOptions {
@@ -24,6 +28,8 @@ export interface RecorderOptions {
   userOnlyText?: string[];
   // Dưới bề rộng này (px) coi là bố cục mobile
   mobileBreakpoint?: number;
+  // Mở trình duyệt với khung nhìn điện thoại để ghi bản mobile của tour
+  mobile?: boolean;
 }
 
 export interface RecorderState {
@@ -111,6 +117,8 @@ export class Recorder {
       if (prev.tourId !== null && prev.tourId === step.tourId) return;
       if (prev.tourId === null && step.tourId === null && prev.locator && JSON.stringify({ ...prev.locator, rect: 0 }) === JSON.stringify({ ...step.locator, rect: 0 })) return;
     }
+    // Lần bấm trước (bấm thật, cùng màn hình) đã mở ra phần tử này: đánh dấu là bước có thể bỏ qua
+    if (step.appeared && prev && prev.advanceOn === 'click' && prev.route === step.route) prev.opensNext = true;
     this.steps.push(step);
   }
 
@@ -143,7 +151,10 @@ export async function launchRecorderBrowser(): Promise<Browser> {
 
 export async function recordSession(startUrl: string, about = '', options: RecorderOptions = {}): Promise<{ recorder: Recorder; browser: Browser }> {
   const browser = await launchRecorderBrowser();
-  const context = await browser.newContext({ viewport: null });
+  // Khung nhìn điện thoại: bố cục mobile của app (menu thu gọn, thẻ thay bảng) và locator ghi layout "mobile"
+  const context = await browser.newContext(
+    options.mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : { viewport: null },
+  );
   const page = await context.newPage();
   const recorder = new Recorder(page, options);
   recorder.setPurpose(about);

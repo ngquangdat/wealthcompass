@@ -19,7 +19,7 @@ export const PAGE_SCRIPT = `
 
   // Cùng quy tắc nền với SafetyPolicy ở client: những phần tử này không bao giờ để lần bấm chạy thật
   var USER_ONLY = ['input[type=password]', 'input[autocomplete=one-time-code]', '[data-sensitive]', '[data-tour-role=user-only]'];
-  var state = { recording: false, highlight: false, count: 0, last: '' };
+  var state = { recording: false, highlight: false, count: 0, last: '', userOnlyText: [], mobileBreakpoint: 768 };
 
   var host = document.createElement('div');
   host.id = '__compass-recorder';
@@ -56,7 +56,7 @@ export const PAGE_SCRIPT = `
       body.innerHTML = '<button class="stop" data-cmd="stop">' + (confirmedEmpty ? '■ Vẫn dừng, không mô tả' : '■ Dừng &amp; lưu') + '</button>' +
         '<button class="' + (state.highlight ? 'on' : '') + '" data-cmd="toggleHighlight">Tô sáng (không bấm): ' + (state.highlight ? 'BẬT' : 'tắt') + '</button>' +
         '<small>Đã ghi ' + state.count + ' bước' + (state.last ? ' · gần nhất: ' + esc(state.last) : '') +
-        '.' + (confirmedEmpty ? '<br><span class="warn-text">Chưa có mô tả: LLM sẽ phải đoán tính năng từ tên nút.</span>' : '') + '<br>Bấm vào từng phần tử theo thứ tự muốn dẫn. Nút nhạy cảm (BÁN, xác nhận) tự được ghi là bước tô sáng và không chạy thật.</small>';
+        '.' + (confirmedEmpty ? '<br><span class="warn-text">Chưa có mô tả: LLM sẽ phải đoán tính năng từ tên nút.</span>' : '') + '<br>Bấm vào từng phần tử theo thứ tự muốn dẫn; không cần tourId trong HTML. Nút nhạy cảm (BÁN, xác nhận) tự được ghi là bước tô sáng và không chạy thật.</small>';
     }
   }
 
@@ -104,17 +104,23 @@ export const PAGE_SCRIPT = `
     var target = e.target instanceof Element ? e.target : null;
     if (!target) return;
     var marked = target.closest('[data-tour-id]');
-    var userOnly = USER_ONLY.some(function (sel) { return target.closest(sel); });
+    var source = marked || target;
+    // Ghi locator TRƯỚC khi app xử lý lần bấm (đang ở pha capture nên DOM chưa đổi)
+    var locator = null;
+    try { if (window.__compassCapture) locator = window.__compassCapture(source, { mobileBreakpoint: state.mobileBreakpoint }); } catch (err) { locator = null; }
+    var keywords = state.userOnlyText || [];
+    var byText = keywords.length > 0 && !!window.__compassUserOnlyText && window.__compassUserOnlyText(source, keywords);
+    var userOnly = byText || USER_ONLY.some(function (sel) { return target.closest(sel); });
     var block = userOnly || state.highlight;
     if (block) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); }
-    var source = marked || target;
     window.__compassRecorderEvent({
       tourId: marked ? marked.getAttribute('data-tour-id') : null,
       route: location.pathname,
       advanceOn: block ? 'next' : 'click',
       userOnly: !!userOnly,
       tag: target.tagName.toLowerCase(),
-      text: String(source.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 60)
+      text: String(source.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 60),
+      locator: locator
     });
     flash(source);
     setTimeout(sync, 50);

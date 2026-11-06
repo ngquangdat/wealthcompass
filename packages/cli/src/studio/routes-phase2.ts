@@ -3,7 +3,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { YAMLMap, isMap, isScalar } from 'yaml';
 import { z } from 'zod';
-import { normalizeVi, redactPii } from '@wealthcompass/core';
+import { describeLocator, normalizeVi, redactPii } from '@wealthcompass/core';
 import { completeText, resolvePackDir } from '@wealthcompass/llm';
 import { annotate, annotationEdits, type AnnotateResult, type Candidate } from '../annotate';
 import { buildGitPatch } from '../codemod';
@@ -11,6 +11,7 @@ import { loadConfig } from '../scan';
 import { analyzeGuards, refineGuardsWithLlm } from '../setup/guards';
 import { finishRecording } from '../record/run';
 import { recordSession } from '../record/recorder';
+import { readToursFile } from '../record/write';
 import { parsePatch } from './patch-hunks';
 import { updateEnvFile } from './env-file';
 import { readOverrides } from './overrides-edit';
@@ -21,6 +22,12 @@ import { cachedScan, configPath, httpError, invalidateScan, llm, loadDoc, parseJ
 const today = () => new Date().toISOString().slice(0, 10);
 const ROLE = /^[\w:.-]{1,60}$/;
 const TOUR_ID = /^[a-z0-9][a-z0-9-]{1,60}$/;
+
+// File tour ghi bằng locator (compass.tours.json) của dự án
+function toursPath(app: string): string {
+  const { config, root } = loadConfig(configPath(app));
+  return join(root, config.discovery.tours);
+}
 
 function overridesPath(app: string): string {
   const { config, root } = loadConfig(configPath(app));
@@ -184,7 +191,7 @@ export function registerPhase2(app: FastifyInstance): void {
     const { featureMap } = cachedScan(dir);
     const { config, root } = loadConfig(configPath(dir));
     const usedBy = new Map<string, string[]>();
-    for (const t of featureMap.tours) for (const st of t.steps) usedBy.set(st.tourId, [...new Set([...(usedBy.get(st.tourId) ?? []), t.title])]);
+    for (const t of featureMap.tours) for (const st of t.steps) if (st.tourId) usedBy.set(st.tourId, [...new Set([...(usedBy.get(st.tourId) ?? []), t.title])]);
     const items = new Map<string, { tourId: string; label: string | null; hint: string | null; userOnly: boolean; screens: Array<{ route: string; title: string }>; menu: boolean }>();
     for (const f of featureMap.features) {
       for (const t of f.targets) {
@@ -322,6 +329,32 @@ export function registerPhase2(app: FastifyInstance): void {
         });
       }
     }
+    // Tour ghi bằng locator: phần tử mô tả bằng manh mối đã ghi, không cần tourId
+    for (const [id, def] of Object.entries(readToursFile(toursPath(dir)).tours)) {
+      if (list.some((t) => t.id === id)) continue;
+      list.push({
+        id,
+        title: def.title,
+        description: def.description,
+        feature: def.feature,
+        startRoute: def.startRoute,
+        source: 'recorded',
+        steps: def.steps.map((s) => ({
+          key: s.key,
+          target: s.tourId ?? '',
+          advanceOn: s.advanceOn,
+          text: s.text,
+          known: s.tourId ? targets.has(s.tourId) : Boolean(s.locator),
+          element: s.locator ? describeLocator(s.locator) : undefined,
+          label: (s.tourId && targets.get(s.tourId)?.label) || s.locator?.name || s.locator?.text,
+          route: s.route,
+          sensitive: s.tourId ? targets.get(s.tourId)?.sensitivity === 'user-only' : s.advanceOn === 'next' && !!s.locator,
+        })),
+        draft: Boolean(def.draft),
+        valid: valid.has(id),
+        errors: scanned.featureMap.coverage.warnings.filter((w) => w.includes(`"${id}"`)),
+      });
+    }
     return {
       tours: list,
       targets: [...targets.values()].sort((a, b) => a.tourId.localeCompare(b.tourId)),
@@ -340,9 +373,44 @@ export function registerPhase2(app: FastifyInstance): void {
         description: z.string().optional(),
         feature: z.string().optional(),
         startRoute: z.string().startsWith('/'),
-        steps: z.array(z.object({ target: z.string().min(1), advanceOn: z.enum(['click', 'next']).default('next'), text: z.string().min(1) })).min(1),
+        steps: z.array(z.object({ key: z.string().optional(), target: z.string().default(''), advanceOn: z.enum(['click', 'next']).default('next'), text: z.string().min(1) })).min(1),
       })
       .parse(req.body);
+
+    // Tour ghi bằng locator: sửa trong compass.tours.json, giữ locator của từng bước theo key; lưu = đã duyệt
+    const recordedFile = toursPath(dir);
+    const recorded = readToursFile(recordedFile);
+    const existingRecorded = recorded.tours[id];
+    if (existingRecorded) {
+      const byKey = new Map(existingRecorded.steps.map((s) => [s.key, s]));
+      const steps = body.steps.map((s, i) => {
+        const old = s.key ? byKey.get(s.key) : undefined;
+        const tourId = s.target.trim() || undefined;
+        if (!old?.locator && !tourId) throw httpError(400, `Bước ${i + 1} chưa trỏ vào phần tử nào`);
+        return {
+          key: old?.key ?? `s${i + 1}`,
+          ...(tourId ? { tourId } : {}),
+          ...(old?.locator ? { locator: old.locator } : {}),
+          ...(old?.route ? { route: old.route } : {}),
+          advanceOn: s.advanceOn,
+          text: s.text.trim(),
+        };
+      });
+      const { draft: _draft, draftSource: _source, ...rest } = existingRecorded;
+      recorded.tours[id] = {
+        ...rest,
+        title: body.title.trim(),
+        description: body.description?.trim() || undefined,
+        feature: body.feature || undefined,
+        startRoute: body.startRoute,
+        steps,
+      };
+      writeFileSync(recordedFile, JSON.stringify(recorded, null, 2) + '\n');
+      invalidateScan();
+      return { ok: true };
+    }
+    if (body.steps.some((s) => !s.target.trim())) throw httpError(400, 'Tour soạn tay cần chọn tourId cho mọi bước');
+
     const file = overridesPath(dir);
     const doc = loadDoc(file);
     const tours = doc.get('tours', true);
@@ -368,6 +436,12 @@ export function registerPhase2(app: FastifyInstance): void {
     const doc = loadDoc(file);
     doc.deleteIn(['tours', id]);
     writeFileSync(file, String(doc));
+    const recordedFile = toursPath(dir);
+    const recorded = readToursFile(recordedFile);
+    if (recorded.tours[id]) {
+      delete recorded.tours[id];
+      writeFileSync(recordedFile, JSON.stringify(recorded, null, 2) + '\n');
+    }
     invalidateScan();
     return { ok: true };
   });
@@ -377,11 +451,12 @@ export function registerPhase2(app: FastifyInstance): void {
     const dir = requireApp();
     const body = req.body as { id: string; about?: string; feature?: string; url: string };
     if (!TOUR_ID.test(body.id)) throw httpError(400, 'Id tour chỉ gồm chữ thường, số và gạch nối');
-    if (loadDoc(overridesPath(dir)).hasIn(['tours', body.id])) throw httpError(400, `Tour "${body.id}" đã có; chọn id khác`);
+    if (loadDoc(overridesPath(dir)).hasIn(['tours', body.id]) || readToursFile(toursPath(dir)).tours[body.id]) throw httpError(400, `Tour "${body.id}" đã có; chọn id khác`);
     if (!/^https?:\/\//.test(body.url)) throw httpError(400, 'Địa chỉ web không hợp lệ');
     await stream(reply, async (log) => {
       log('Đang mở Chrome...');
-      const { recorder, browser } = await recordSession(body.url, body.about ?? '');
+      const { config } = loadConfig(configPath(dir));
+      const { recorder, browser } = await recordSession(body.url, body.about ?? '', { userOnlyText: config.safety.userOnlyText });
       log('Đã mở Chrome. Đăng nhập, vào màn hình xuất phát, bấm "● Bắt đầu ghi" ở góc trái dưới, thao tác theo luồng, rồi bấm "■ Dừng & lưu".');
       const closed = new Promise<void>((r) => browser.on('disconnected', () => r()));
       await Promise.race([recorder.done, closed]);

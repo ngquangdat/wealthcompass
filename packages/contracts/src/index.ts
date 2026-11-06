@@ -22,18 +22,49 @@ export const targetSchema = z.object({
 });
 export type Target = z.infer<typeof targetSchema>;
 
-// Một bước trong luồng hướng dẫn. Bước tham chiếu tourId, route lấy từ target.
-export const tourStepSchema = z.object({
-  tourId: z.string(),
-  text: z.string(),
-  // click: chờ người dùng tự bấm vào phần tử rồi mới tiến (engine không bao giờ tự click)
-  // next: người dùng bấm nút "Tiếp" của popover
-  advanceOn: z.enum(['next', 'click']).default('next'),
-  // Route chứa phần tử; scanner điền từ target. Engine chỉ điều hướng khi phần tử chưa hiện.
-  route: z.string().optional(),
-  // Tiêu đề ngắn của popover (lấy từ nhãn của target)
-  label: z.string().optional(),
+// Locator: nhiều manh mối về một phần tử, ghi lúc `tour:record` để tìm lại phần tử KHÔNG cần tourId trong HTML.
+// Lúc chạy, widget chấm điểm các ứng viên theo các manh mối này (core/locator.ts). Không chứa dữ liệu cá nhân:
+// chữ đã qua redactPii, bỏ chữ trong vùng nhạy cảm và chuỗi gần như toàn số.
+export const locatorSchema = z.object({
+  tag: z.string(),
+  // Vai trò và tên truy cập (như trình đọc màn hình thấy): bền khi đổi CSS, đổi cấu trúc HTML
+  role: z.string().optional(),
+  name: z.string().optional(),
+  // Chữ hiển thị, đã cắt ngắn
+  text: z.string().optional(),
+  // Thuộc tính ổn định (formcontrolname, routerlink, href, name, placeholder, type, aria-label, data-testid, id ổn định)
+  attrs: z.record(z.string(), z.string()).default({}),
+  // Thẻ component Angular gần nhất chứa phần tử (vd. app-bond-sell-panel)
+  component: z.string().optional(),
+  // Vùng chứa: tiêu đề hộp thoại, tiêu đề mục gần nhất, landmark (nav, main, header...)
+  context: z
+    .object({ dialog: z.string().optional(), heading: z.string().optional(), landmark: z.string().optional() })
+    .default({}),
+  // Selector CSS dự phòng (đã bỏ class/id sinh tự động)
+  css: z.string().optional(),
+  // Vị trí theo tỉ lệ khung nhìn; chỉ dùng để phân xử khi hòa điểm
+  rect: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional(),
+  layout: z.enum(['mobile', 'desktop']).optional(),
 });
+export type Locator = z.infer<typeof locatorSchema>;
+
+// Một bước trong luồng hướng dẫn. Bước trỏ vào phần tử bằng tourId (ghim, luôn thắng) và/hoặc locator.
+export const tourStepSchema = z
+  .object({
+    // Khóa ổn định của bước trong tour (s1, s2...), dùng cho telemetry
+    key: z.string().optional(),
+    tourId: z.string().optional(),
+    locator: locatorSchema.optional(),
+    text: z.string(),
+    // click: chờ người dùng tự bấm vào phần tử rồi mới tiến (engine không bao giờ tự click)
+    // next: người dùng bấm nút "Tiếp" của popover
+    advanceOn: z.enum(['next', 'click']).default('next'),
+    // Route chứa phần tử; scanner điền từ target. Engine chỉ điều hướng khi phần tử chưa hiện.
+    route: z.string().optional(),
+    // Tiêu đề ngắn của popover (lấy từ nhãn của target)
+    label: z.string().optional(),
+  })
+  .refine((s) => Boolean(s.tourId || s.locator), { message: 'Bước tour cần tourId hoặc locator' });
 export type TourStep = z.infer<typeof tourStepSchema>;
 
 export const tourSchema = z.object({
@@ -45,6 +76,29 @@ export const tourSchema = z.object({
   steps: z.array(tourStepSchema).min(1),
 });
 export type Tour = z.infer<typeof tourSchema>;
+
+// File tour do `tour:record` ghi (compass.tours.json): dữ liệu nằm cạnh cấu hình, không sửa template.
+// Scanner gộp vào Feature Map; bước dùng locator không cần tourId tồn tại trong HTML.
+export const recordedTourSchema = z.object({
+  title: z.string(),
+  description: z.string().optional(),
+  // Id tính năng đích (tour được đề xuất khi người dùng hỏi về tính năng này)
+  feature: z.string().optional(),
+  startRoute: z.string(),
+  // Nháp chưa duyệt: `scan --strict` báo lỗi tới khi người duyệt xóa cờ này
+  draft: z.boolean().optional(),
+  draftSource: z.enum(['llm', 'template']).optional(),
+  recordedAt: z.string().optional(),
+  // Lời người ghi mô tả tính năng, để người duyệt biết nội dung dựa vào đâu
+  purpose: z.string().optional(),
+  steps: z.array(tourStepSchema).min(1),
+});
+export type RecordedTour = z.infer<typeof recordedTourSchema>;
+
+export const toursFileSchema = z.object({
+  tours: z.record(z.string(), recordedTourSchema).default({}),
+});
+export type ToursFile = z.infer<typeof toursFileSchema>;
 
 export const featureSchema = z.object({
   id: z.string(),
@@ -140,7 +194,9 @@ export type ToolResultStatus =
   | 'blocked_user_only'
   | 'route_denied'
   | 'timeout'
-  | 'cancelled';
+  | 'cancelled'
+  // Có ứng viên nhưng không đủ chắc phần tử nào: hiện bước dạng popover không gắn phần tử
+  | 'low_confidence';
 
 // ---------------------------------------------------------------------------
 // 3.4 App config (compass.config.ts / compass.config.yaml)
@@ -156,6 +212,8 @@ export const compassConfigSchema = z.object({
     menu: z.string().optional(),
     srcRoot: z.string().default('src'),
     overrides: z.string().default('compass.overrides.yaml'),
+    // Tour ghi bằng `tour:record` (dữ liệu, không phải mã nguồn)
+    tours: z.string().default('compass.tours.json'),
     out: z.string().default('feature-map.json'),
   }),
   access: z
@@ -169,7 +227,9 @@ export const compassConfigSchema = z.object({
     .object({
       userOnly: z.array(z.string()).default([]),
       blockedRoutes: z.array(z.string()).default([]),
+      // Từ khóa trên nút nhạy cảm (so khớp không dấu), vd. "bán", "xác nhận": phần tử khớp chỉ được tô sáng
+      userOnlyText: z.array(z.string()).default([]),
     })
-    .default({ userOnly: [], blockedRoutes: [] }),
+    .default({ userOnly: [], blockedRoutes: [], userOnlyText: [] }),
 });
 export type CompassConfig = z.infer<typeof compassConfigSchema>;

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { Document, YAMLMap, YAMLSeq, isMap, isSeq, parseDocument } from 'yaml';
+import { toursFileSchema, type RecordedTour, type ToursFile } from '@wealthcompass/contracts';
 import type { RecordedStep } from './recorder';
 import type { TourDraft } from './draft';
 
@@ -57,23 +58,88 @@ export function mergeTourIntoOverrides(file: string, input: MergeInput): MergeRe
   if (isMap(toursNode)) (toursNode as YAMLMap).flow = false;
   doc.setIn(['tours', input.id], node);
 
-  // Câu hỏi mẫu: hợp với câu đã có, không trùng, không xóa
-  let addedQuestions: string[] = [];
-  if (input.featureId && input.draft.sampleQuestions.length) {
-    const path = ['features', input.featureId, 'sampleQuestions'];
-    const seq = doc.getIn(path, true);
-    const current: string[] = isSeq(seq) ? ((seq as YAMLSeq).toJSON() as string[]) : [];
-    const have = new Set(current.map((q) => q.toLowerCase()));
-    addedQuestions = input.draft.sampleQuestions.filter((q) => !have.has(q.toLowerCase()));
-    if (isSeq(seq)) {
-      // Thêm vào dãy sẵn có để giữ nguyên chú thích của từng câu cũ
-      for (const q of addedQuestions) (seq as YAMLSeq).add(doc.createNode(q));
-    } else if (addedQuestions.length) {
-      doc.setIn(path, doc.createNode(addedQuestions));
-    }
-  }
+  const addedQuestions = input.featureId ? addSampleQuestions(doc, input.featureId, input.draft.sampleQuestions) : [];
 
   return { yaml: String(doc), replaced, addedQuestions };
+}
+
+// Câu hỏi mẫu: hợp với câu đã có, không trùng, không xóa
+function addSampleQuestions(doc: Document, featureId: string, questions: string[]): string[] {
+  if (!questions.length) return [];
+  const path = ['features', featureId, 'sampleQuestions'];
+  const seq = doc.getIn(path, true);
+  const current: string[] = isSeq(seq) ? ((seq as YAMLSeq).toJSON() as string[]) : [];
+  const have = new Set(current.map((q) => q.toLowerCase()));
+  const added = questions.filter((q) => !have.has(q.toLowerCase()));
+  if (isSeq(seq)) {
+    // Thêm vào dãy sẵn có để giữ nguyên chú thích của từng câu cũ
+    for (const q of added) (seq as YAMLSeq).add(doc.createNode(q));
+  } else if (added.length) {
+    doc.setIn(path, doc.createNode(added));
+  }
+  return added;
+}
+
+// Chỉ thêm câu hỏi mẫu vào overrides (tour ghi bằng locator nằm ở compass.tours.json)
+export function mergeSampleQuestionsIntoOverrides(file: string, featureId: string, questions: string[]): { yaml: string; added: string[] } {
+  const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const doc: Document = existing.trim() ? parseDocument(existing) : new Document({});
+  if (doc.errors.length) throw new Error(`${file} không phải YAML hợp lệ: ${doc.errors[0].message}`);
+  const added = addSampleQuestions(doc, featureId, questions);
+  return { yaml: String(doc), added };
+}
+
+export interface ToursMergeInput {
+  id: string;
+  draft: TourDraft;
+  // Bước đã lọc (có tourId hoặc locator dùng được); route đã đổi sang mẫu route của tính năng nếu khớp
+  steps: Array<RecordedStep & { routePattern?: string }>;
+  startRoute: string;
+  featureId?: string;
+  purpose?: string;
+  force: boolean;
+  today?: string;
+}
+
+export function readToursFile(file: string): ToursFile {
+  if (!existsSync(file)) return { tours: {} };
+  const raw = readFileSync(file, 'utf8');
+  if (!raw.trim()) return { tours: {} };
+  try {
+    return toursFileSchema.parse(JSON.parse(raw));
+  } catch (e) {
+    throw new Error(`${file} không hợp lệ: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+// Gộp tour vào compass.tours.json. Không ghi đè tour đã có trừ khi --force; thứ tự khóa ổn định để diff gọn.
+export function mergeTourIntoToursFile(file: string, input: ToursMergeInput): { json: string; replaced: boolean } {
+  const data = readToursFile(file);
+  const replaced = Boolean(data.tours[input.id]);
+  if (replaced && !input.force) {
+    throw new Error(`Tour "${input.id}" đã có trong ${file}. Dùng --force để ghi đè hoặc đặt --id khác.`);
+  }
+  const about = (input.purpose ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  const tour: RecordedTour = {
+    title: input.draft.title,
+    ...(input.draft.description ? { description: input.draft.description } : {}),
+    ...(input.featureId ? { feature: input.featureId } : {}),
+    startRoute: input.startRoute,
+    draft: true,
+    draftSource: input.draft.source,
+    recordedAt: input.today ?? new Date().toISOString().slice(0, 10),
+    ...(about ? { purpose: about } : {}),
+    steps: input.steps.map((s, i) => ({
+      key: `s${i + 1}`,
+      ...(s.tourId ? { tourId: s.tourId } : {}),
+      ...(s.locator ? { locator: s.locator } : {}),
+      route: s.routePattern ?? s.route,
+      advanceOn: s.advanceOn,
+      text: input.draft.steps[i].text,
+    })),
+  };
+  data.tours[input.id] = tour;
+  return { json: JSON.stringify(data, null, 2) + '\n', replaced };
 }
 
 export function writeOverrides(file: string, yaml: string): void {

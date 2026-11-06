@@ -147,3 +147,29 @@ test('đang ở đúng màn hình đích: vẫn có nút tour, không có nút "
   assert.ok(events.some((e) => e.type === 'offer_tour'));
   assert.equal(events.some((e) => e.type === 'offer_navigate'), false);
 });
+
+test('tour chỉ có locator (web chưa gắn tourId): vẫn được đề xuất và lọc quyền theo tính năng chứa nó', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const map = structuredClone(store.featureMap);
+  map.tours.push({
+    id: 'sell-bond-loc',
+    title: 'Bán trái phiếu (ghi bằng locator)',
+    startRoute: '/home',
+    steps: [{ key: 's1', locator: { tag: 'button', role: 'button', name: 'BÁN', attrs: {}, context: {} }, text: 'Đây là nút **BÁN**.', advanceOn: 'next', route: '/iconnect/assets' }],
+  });
+  map.features.find((f) => f.id === 'iconnect.assets')!.tourIds.push('sell-bond-loc');
+  const file = join(mkdtempSync(join(tmpdir(), 'compass-agent-')), 'feature-map.json');
+  writeFileSync(file, JSON.stringify(map));
+  const locStore = new FeatureStore(file, pack);
+  const llm = await startMockLlm([{ toolCalls: [{ name: 'offer_tour', args: { tour_id: 'sell-bond-loc' } }] }, { text: 'Bấm nút bên dưới.' }]);
+  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store: locStore, pack, log: () => undefined };
+  const collect = async (roles: string[]) => {
+    const events: ChatEvent[] = [];
+    for await (const e of runAgent(deps, { id: 't', name: 't', roles }, request('bán trái phiếu'), new AbortController().signal)) events.push(e);
+    return events;
+  };
+  assert.ok((await collect(['bond_account'])).some((e) => e.type === 'offer_tour' && e.tourId === 'sell-bond-loc'));
+  await llm.close();
+});

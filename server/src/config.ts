@@ -25,15 +25,20 @@ export interface ServerConfig {
   debug: boolean;
   // COMPASS_LOG_FILE: ghi nhật ký hỏi đáp JSONL để thống kê
   logFile?: string;
+  // Kho tour của backend (phiên bản + ảnh chụp); COMPASS_TOUR_STORE, mặc định <dataDir>/tours
+  tourStoreDir: string;
+  // COMPASS_ADMIN_TOKEN: bật API quản trị tour (/admin/tours). Không đặt thì API tắt.
+  adminToken?: string;
 }
 
 export function loadConfig(): ServerConfig {
   const port = Number(process.env['PORT'] ?? 8890);
+  const dataDir = process.env['COMPASS_DATA_DIR'] ?? resolve(inRepo ? repoRoot : process.cwd(), '.wealthcompass');
   return {
     port,
     host: process.env['HOST'] ?? '127.0.0.1',
     repoRoot,
-    dataDir: process.env['COMPASS_DATA_DIR'] ?? resolve(inRepo ? repoRoot : process.cwd(), '.wealthcompass'),
+    dataDir,
     featureMapPath: featureMapPath(),
     packDir: packDir(),
     allowedOrigins: (process.env['COMPASS_ORIGINS'] ?? 'http://localhost:4200,http://127.0.0.1:4200').split(','),
@@ -48,6 +53,8 @@ export function loadConfig(): ServerConfig {
     rateLimit: { max: Number(process.env['COMPASS_RATE_MAX'] ?? 30), windowMs: 10 * 60_000 },
     debug: process.env['COMPASS_DEBUG'] === '1',
     logFile: process.env['COMPASS_LOG_FILE'] ? resolve(process.env['COMPASS_LOG_FILE']) : undefined,
+    tourStoreDir: resolve(process.env['COMPASS_TOUR_STORE'] ?? resolve(dataDir, 'tours')),
+    adminToken: process.env['COMPASS_ADMIN_TOKEN'] || undefined,
   };
 }
 

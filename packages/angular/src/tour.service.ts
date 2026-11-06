@@ -119,16 +119,23 @@ export class TourService {
   }
 
   // Bước không chắc phần tử: popover không gắn phần tử, nói rõ cần tìm gì, người dùng bấm "Tiếp" để đi tiếp
-  private showUnanchored(tour: Tour, index: number, run: number): Promise<'next' | 'cancelled'> {
+  private async showUnanchored(tour: Tour, index: number, run: number): Promise<'next' | 'cancelled'> {
     const step = tour.steps[index];
     const isLast = index === tour.steps.length - 1;
     const hint = step.locator ? describeLocator(step.locator).split(' · ')[0] : step.label ?? '';
+    // Ảnh chụp phần tử lúc tour:verify chạy được: cho người dùng thấy cần tìm gì trên màn hình
+    const shot = step.shot ? await this.api.shotUrl(step.shot) : null;
+    if (run !== this.runId) {
+      if (shot) URL.revokeObjectURL(shot);
+      return 'cancelled';
+    }
     return new Promise((resolve) => {
       let settled = false;
       const settle = (value: 'next' | 'cancelled') => {
         if (settled) return;
         settled = true;
         this.teardown();
+        if (shot) URL.revokeObjectURL(shot);
         resolve(run === this.runId ? value : 'cancelled');
       };
       this.current = driver({
@@ -141,7 +148,10 @@ export class TourService {
       this.current.highlight({
         popover: {
           title: step.label ?? `Bước ${index + 1}/${tour.steps.length}`,
-          description: renderLiteMarkdown(step.text) + (hint ? `<br><small>Tìm trên màn hình: ${renderLiteMarkdown(hint)}</small>` : ''),
+          description:
+            renderLiteMarkdown(step.text) +
+            (hint ? `<br><small>Tìm trên màn hình: ${renderLiteMarkdown(hint)}</small>` : '') +
+            (shot ? `<br><img class="compass-shot" src="${shot}" alt="" style="display:block;max-width:100%;max-height:120px;margin-top:8px;border-radius:4px;border:1px solid #ddd">` : ''),
           showButtons: ['next', 'close'],
           nextBtnText: isLast ? 'Xong' : 'Tiếp',
           onNextClick: () => settle('next'),

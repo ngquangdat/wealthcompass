@@ -12,6 +12,9 @@ import { analyzeGuards, refineGuardsWithLlm } from '../setup/guards';
 import { finishRecording } from '../record/run';
 import { recordSession } from '../record/recorder';
 import { layoutOfSteps, readToursFile } from '../record/write';
+import { rerecordStep } from '../record/rerecord';
+import { mainLayout, resolveProposal } from '../verify/heal';
+import { verifyTours } from '../verify/verify';
 import { parsePatch } from './patch-hunks';
 import { updateEnvFile } from './env-file';
 import { readOverrides } from './overrides-edit';
@@ -351,7 +354,18 @@ export function registerPhase2(app: FastifyInstance): void {
           label: (s.tourId && targets.get(s.tourId)?.label) || s.locator?.name || s.locator?.text,
           route: s.route,
           sensitive: s.tourId ? targets.get(s.tourId)?.sensitivity === 'user-only' : s.advanceOn === 'next' && !!s.locator,
+          ...(s.healedAt ? { healedAt: s.healedAt } : {}),
         })),
+        // Đề xuất sửa locator của tour:verify cho bước nhạy cảm, ở mọi bố cục: chờ người duyệt
+        proposals: (
+          [[mainLayout(def), def.steps], ...Object.entries(def.variants ?? {})] as Array<[string, typeof def.steps | undefined]>
+        ).flatMap(([layout, steps]) =>
+          (steps ?? []).flatMap((s, i) =>
+            s.proposal && s.key
+              ? [{ layout, key: s.key, index: i, text: s.text, from: s.locator ? describeLocator(s.locator) : (s.tourId ?? ''), to: describeLocator(s.proposal.locator), changed: s.proposal.changed, at: s.proposal.at }]
+              : [],
+          ),
+        ),
         draft: Boolean(def.draft),
         valid: valid.has(id),
         errors: scanned.featureMap.coverage.warnings.filter((w) => w.includes(`"${id}"`)),
@@ -397,6 +411,9 @@ export function registerPhase2(app: FastifyInstance): void {
           advanceOn: s.advanceOn,
           text: s.text.trim(),
           ...(old?.skipIfNextVisible ? { skipIfNextVisible: true } : {}),
+          // Sửa chữ không làm mất dấu vết sửa locator và đề xuất đang chờ duyệt
+          ...(old?.healedAt ? { healedAt: old.healedAt } : {}),
+          ...(old?.proposal ? { proposal: old.proposal } : {}),
         };
       });
       const { draft: _draft, draftSource: _source, ...rest } = existingRecorded;
@@ -483,6 +500,53 @@ export function registerPhase2(app: FastifyInstance): void {
       );
       invalidateScan();
       return { id: body.id };
+    });
+  });
+
+  // Chạy lại tour trên web đang chạy (Playwright, không giao diện), sửa locator đã lệch nếu heal
+  app.post('/api/tours/verify', async (req, reply) => {
+    const dir = requireApp();
+    const body = z.object({ url: z.string().regex(/^https?:\/\//), only: z.array(z.string()).optional(), heal: z.boolean().default(false) }).parse(req.body);
+    cachedScan(dir);
+    await stream(reply, async (log) => {
+      log('Đang chạy lại tour bằng Chromium không giao diện (desktop 1280px và mobile 390px)...');
+      const report = await verifyTours({ config: configPath(dir), url: body.url, only: body.only, heal: body.heal }, log);
+      invalidateScan();
+      return report;
+    });
+  });
+
+  // Người duyệt chấp nhận hoặc bỏ locator đề xuất cho bước nhạy cảm
+  app.post('/api/tours/:id/steps/:key/proposal', async (req) => {
+    const dir = requireApp();
+    const { id, key } = req.params as { id: string; key: string };
+    const body = z.object({ approve: z.boolean(), layout: z.enum(['desktop', 'mobile']).optional() }).parse(req.body);
+    const file = toursPath(dir);
+    const data = readToursFile(file);
+    const tour = data.tours[id];
+    if (!tour) throw httpError(404, `Không có tour "${id}"`);
+    try {
+      resolveProposal(data, id, key, body.layout ?? mainLayout(tour), body.approve, today());
+    } catch (e) {
+      throw httpError(400, (e as Error).message);
+    }
+    writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+    invalidateScan();
+    return { ok: true };
+  });
+
+  // Ghi lại phần tử của một bước: Chrome mở ở màn hình của bước, lần bấm đầu tiên thay phần tử, giữ chữ
+  app.post('/api/tours/:id/steps/:key/rerecord', async (req, reply) => {
+    const dir = requireApp();
+    const { id, key } = req.params as { id: string; key: string };
+    const body = z.object({ url: z.string().regex(/^https?:\/\//), layout: z.enum(['desktop', 'mobile']).optional() }).parse(req.body);
+    const tour = readToursFile(toursPath(dir)).tours[id];
+    if (!tour) throw httpError(404, `Không có tour "${id}"`);
+    await stream(reply, async (log) => {
+      log('Đang mở Chrome...');
+      await rerecordStep({ config: configPath(dir), url: body.url, id, key, layout: body.layout ?? mainLayout(tour) }, log);
+      invalidateScan();
+      return { id, key };
     });
   });
 

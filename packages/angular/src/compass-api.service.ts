@@ -44,6 +44,18 @@ export class CompassApiService {
     return (await response.json()) as Tour;
   }
 
+  // Ảnh chụp phần tử của bước (kho tour của backend). Cần JWT nên tải bằng fetch rồi đổi thành object URL;
+  // lỗi hoặc quá lâu thì bỏ qua, popover vẫn hiện chữ
+  async shotUrl(path: string, timeoutMs = 1500): Promise<string | null> {
+    try {
+      const response = await fetch(`${this.config.apiBaseUrl}${path}`, { headers: this.headers(), signal: AbortSignal.timeout(timeoutMs) });
+      if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) return null;
+      return URL.createObjectURL(await response.blob());
+    } catch {
+      return null;
+    }
+  }
+
   // Báo kết quả bước tour về backend để đo tỷ lệ hoàn thành; lỗi mạng bỏ qua, không ảnh hưởng tour
   report(event: Record<string, unknown>): void {
     void fetch(`${this.config.apiBaseUrl}/v1/telemetry`, {

@@ -30,6 +30,8 @@ export interface RecorderOptions {
   mobileBreakpoint?: number;
   // Mở trình duyệt với khung nhìn điện thoại để ghi bản mobile của tour
   mobile?: boolean;
+  // Gọi sau mỗi lần bấm được ghi (ghi lại riêng một bước chỉ cần lần bấm đầu tiên)
+  onStep?: (step: RecordedStep) => void;
 }
 
 export interface RecorderState {
@@ -120,6 +122,7 @@ export class Recorder {
     // Lần bấm trước (bấm thật, cùng màn hình) đã mở ra phần tử này: đánh dấu là bước có thể bỏ qua
     if (step.appeared && prev && prev.advanceOn === 'click' && prev.route === step.route) prev.opensNext = true;
     this.steps.push(step);
+    this.options.onStep?.(step);
   }
 
   async command(cmd: Command): Promise<void> {

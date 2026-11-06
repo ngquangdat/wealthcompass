@@ -77,6 +77,19 @@ export const tourStepSchema = z
     label: z.string().optional(),
     // Bước chỉ để mở chỗ chứa bước sau (nút menu trên mobile, mở rộng mục): bỏ qua khi phần tử của bước sau đã hiện
     skipIfNextVisible: z.boolean().optional(),
+    // Ngày locator được làm mới (tour:verify --heal tự sửa, hoặc ghi lại riêng bước này)
+    healedAt: z.string().optional(),
+    // Locator đề xuất bởi tour:verify cho bước cần người duyệt (phần tử nhạy cảm): chưa dùng tới khi được duyệt
+    proposal: z
+      .object({
+        locator: locatorSchema,
+        // Manh mối đã đổi so với locator đang dùng (name, text, attrs.routerlink, tourId...)
+        changed: z.array(z.string()),
+        at: z.string(),
+      })
+      .optional(),
+    // Đường dẫn ảnh chụp phần tử (backend điền khi có ảnh), widget hiện trong popover lúc không chắc phần tử
+    shot: z.string().optional(),
   })
   .refine((s) => Boolean(s.tourId || s.locator), { message: 'Bước tour cần tourId hoặc locator' });
 export type TourStep = z.infer<typeof tourStepSchema>;

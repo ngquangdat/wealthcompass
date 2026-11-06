@@ -232,6 +232,94 @@ Nếu LLM trả sai định dạng hoặc sai số bước, công cụ thử l�
 | `! Bước N là phần tử nhạy cảm (user-only) nhưng còn M bước sau nó` | Thường là bấm nhầm sau bước nhạy cảm; ghi lại sao cho bước nhạy cảm là bước cuối |
 | Tour gắn nhầm tính năng | Dừng ghi khi chưa tới màn hình đích, hoặc đóng cửa sổ thay vì bấm Dừng. Sửa `feature:` trong YAML hoặc ghi lại với `--feature` |
 
+## 9b. Giữ tour không hỏng: kiểm tra, tự sửa, ghi lại một bước, kho tour
+
+Web đổi liên tục (đổi chữ nút, migration component, đổi route). Bốn công cụ dưới đây giữ tour chạy đúng mà không phải ghi lại cả tour.
+
+### `tour:verify`: chạy lại mọi tour trên một bản web thật
+
+```bash
+# Trang cần đăng nhập: lưu phiên một lần (mở Chrome, đăng nhập tài khoản kiểm thử, đóng Chrome)
+npx tsx packages/cli/src/main.ts tour:auth --url https://staging.example.vn/login --out compass.auth.json
+
+npx tsx packages/cli/src/main.ts tour:verify --config compass.config.yaml \
+  --url https://staging.example.vn --storage-state compass.auth.json \
+  --report verify-report.json --screenshots .compass-shots
+```
+
+- Chạy Chromium không giao diện, mỗi tour hai lượt: desktop 1280px và mobile 390px. Mỗi lượt dùng bản tour của bố cục đó (`variants`), thiếu thì dùng bản chính (báo `dùng bản chính`), đúng như widget.
+- Trang trình duyệt được tiêm đúng bộ tìm phần tử của widget (`resolveStep`, `findByLocator`, chờ spinner, `skipIfNextVisible`), nên kết quả là điều người dùng sẽ thấy.
+- Bước "chờ bấm" được **bấm thật** để đi tiếp như người dùng. Bước "Tiếp" và mọi phần tử nhạy cảm (theo `safety` hiện tại, kể cả `userOnlyText` và nút gửi form) **không bao giờ bị bấm**, nên không có lệnh nào được đặt trên staging.
+- Kết quả từng bước: `ok`, `low_confidence` (widget sẽ hiện popover không gắn phần tử), `missing` (các bước sau báo `not_reached`), `skipped`. Bước có manh mối đã đổi ghi `đổi: name, attrs.routerlink...`.
+- Mã thoát khác 0 khi có tour hỏng (`missing`), hoặc khi có bước không chắc nếu thêm `--strict`: dùng được trong CI và lịch chạy hằng đêm.
+- `tour:auth` lưu cả cookie, localStorage và **sessionStorage** (nhiều web ngân hàng giữ phiên ở đó). File phiên là phiên thật: đã có trong `.gitignore`, không commit, dùng tài khoản kiểm thử.
+- Mở trang xuất phát mà bị chuyển trang (thường là `/login`), lệnh báo rõ là cần `--storage-state` thay vì báo không thấy phần tử.
+
+| Cờ | Ý nghĩa |
+|---|---|
+| `--only id1,id2` | Chỉ kiểm các tour này |
+| `--layout desktop\|mobile` | Chỉ kiểm một bố cục |
+| `--heal` | Ghi locator đã sửa vào `compass.tours.json` (xem dưới) |
+| `--storage-state <file>` | Phiên đăng nhập do `tour:auth` lưu |
+| `--screenshots <thư mục>` | Chụp phần tử của từng bước tìm được (`<tour>/<bố cục>-<bước>.png`) cho `tour:push` |
+| `--report <file>` | Báo cáo JSON: từng bước, điểm, manh mối khớp, manh mối đổi, locator đề xuất |
+| `--strict` | Coi bước `low_confidence` là lỗi |
+| `--headed` | Hiện trình duyệt để xem nó chạy |
+
+### Tự sửa locator (`--heal`)
+
+Khi phần tử vẫn được tìm **chắc chắn** bằng các manh mối còn lại nhưng manh mối chính đã đổi, verify ghi lại locator từ chính phần tử tìm được:
+
+- Manh mối được so: tên truy cập, chữ, vai trò, thuộc tính danh tính (`data-testid`, `formcontrolname`, `routerlink`, `href`, `name`, `id`), component, tiêu đề hộp thoại/mục, hình dạng dòng danh sách. CSS và vị trí không tính (thay đổi giữa các lần là bình thường). Chữ hoa/thường và dấu không tính.
+- `tourId` ghim không còn tìm thấy nhưng locator tìm chắc: báo `đổi: tourId`; khi sửa thì bỏ ghim để locator làm nguồn chính.
+- **Bước thường**: áp luôn, ghi `"healedAt": "<ngày>"` vào bước. Giữ dòng người duyệt đã ghim (`list.rowText`) và bố cục của bản ghi.
+- **Bước nhạy cảm**: chỉ ghi `"proposal": { locator, changed, at }`; locator đang dùng giữ nguyên tới khi người duyệt bấm **Dùng locator mới** (hoặc **Bỏ qua**) ở trang Tour của Studio.
+- Lượt chạy bản chính ở bố cục kia (`dùng bản chính`) không ghi đè bản sửa của lượt chạy đúng bố cục.
+- Chỉ tour ghi bằng `tour:record` (`compass.tours.json`) được sửa; tour soạn tay bằng tourId trong YAML chỉ được báo cáo.
+- Sau khi sửa: chạy `scan`, xem diff của `compass.tours.json` rồi commit (hoặc `tour:push` lên kho tour).
+
+### Ghi lại riêng một bước
+
+Phần tử của một bước đổi hẳn (không còn manh mối nào khớp) thì không cần ghi lại cả tour:
+
+```bash
+npx tsx packages/cli/src/main.ts tour:rerecord --config compass.config.yaml --url http://localhost:4200 --id sell-bond --step s3 [--mobile]
+```
+
+Chrome mở ở màn hình của bước và **đang ghi sẵn**: lần bấm đầu tiên trở thành phần tử mới của bước, rồi Chrome tự đóng. Chữ, khóa bước và thứ tự giữ nguyên; `healedAt` được ghi; phần tử mới nhạy cảm thì bước chuyển sang chỉ tô sáng. Bước ở route có tham số (`/orders/:id`) thì bạn tự mở tới màn hình đó và bấm **● Bắt đầu ghi** trước. Trong Studio: nút **Ghi lại phần tử** cạnh mỗi bước trong ngăn sửa tour, và nút **Ghi lại bước này** trong đề xuất.
+
+Studio cũng có nút **Kiểm tra tour** (chạy `tour:verify` trên web đang chạy, có tùy chọn tự sửa).
+
+### Kho tour ở backend (`tour:push`)
+
+Sửa tour không cần build lại web: tour lưu ở backend thắng tour cùng id trong `feature-map.json`, và được dùng cho cả tìm kiếm, `offer_tour` lẫn `/v1/tours/:id`.
+
+```bash
+# Backend: bật API quản trị bằng một khóa riêng (không phải JWT người dùng)
+COMPASS_ADMIN_TOKEN=<khóa dài, ngẫu nhiên> COMPASS_TOUR_STORE=/var/lib/compass/tours npm run server
+
+# CI sau tour:verify: đẩy tour đã quét kèm ảnh từng bước
+COMPASS_ADMIN_TOKEN=<khóa> npx tsx packages/cli/src/main.ts tour:push --config compass.config.yaml \
+  --server https://compass.example.vn --shots .compass-shots --note "verify hằng đêm"
+```
+
+- Mỗi lần lưu là một **phiên bản mới** (người lưu, thời điểm, ghi chú); nội dung không đổi thì không tạo bản. Quay về bản cũ cũng tạo bản mới, lịch sử không bị viết lại.
+- API (cần `Authorization: Bearer <COMPASS_ADMIN_TOKEN>`; không đặt biến này thì API tắt):
+
+  | Đường | Việc |
+  |---|---|
+  | `GET /admin/tours` | Danh sách: phiên bản hiện tại, số phiên bản, ai sửa cuối |
+  | `GET /admin/tours/:id` | Bản hiện tại kèm lịch sử |
+  | `GET /admin/tours/:id/versions/:n` | Một phiên bản |
+  | `PUT /admin/tours/:id` | `{ tour, feature?, note?, by? }`: lưu bản mới |
+  | `POST /admin/tours/:id/rollback` | `{ version }`: quay về bản đó (thành bản mới) |
+  | `DELETE /admin/tours/:id` | Xóa tour và ảnh |
+  | `PUT /admin/tours/:id/shots/:layout/:key` | Ảnh PNG của một bước (tối đa 2 MB) |
+
+- `feature` là tính năng sở hữu tour: quyền xem tour (`/v1/tours/:id`, `offer_tour`) theo quyền của tính năng đó.
+- **Ảnh chụp phần tử**: tour phục vụ cho widget kèm `shot` ở bước có ảnh; khi widget không chắc phần tử (popover không gắn phần tử), nó tải ảnh bằng JWT của người dùng (`GET /v1/tours/:id/shots/:layout/:key`, cùng kiểm quyền) và hiện ngay dưới dòng "Tìm trên màn hình", để người dùng biết cần tìm gì. Tải lỗi hoặc quá 1,5 giây thì chỉ hiện chữ.
+- Kho lưu dạng file JSON + thư mục ảnh trong `COMPASS_TOUR_STORE` (mặc định `.wealthcompass/tours`), ghi qua file tạm rồi đổi tên. Đủ cho một bản tự host; chạy nhiều instance thì cần ổ dùng chung hoặc thay lớp `TourStore` bằng DB.
+
 ## 10. Giới hạn hiện tại
 
 - Danh sách chỉ được nhận ra khi lúc ghi có **ít nhất hai dòng**; danh sách chỉ có một dòng thì ghi như phần tử thường (vẫn tìm được, nhưng lúc chạy gặp nhiều dòng sẽ báo không chắc). Ghi lại khi có dữ liệu nhiều dòng.
@@ -242,13 +330,15 @@ Nếu LLM trả sai định dạng hoặc sai số bước, công cụ thử l�
 - Cần Chrome cài trên máy; chưa hỗ trợ Firefox/Safari.
 - Phần tử trong iframe khác origin hoặc shadow DOM đóng không bắt được; `tourId` sinh động (`[tourId]="item.id"`) không được quét nên cũng không dùng được.
 - Câu hỏi mẫu LLM sinh ra chưa được kiểm tra tự động với bộ test truy xuất; hãy đọc lại và thử vài câu thật.
-- Chưa có chế độ ghi không giao diện (headless) cho CI; ghi tour là việc của người vận hành.
+- Ghi tour vẫn là việc của người vận hành (cần Chrome có giao diện); CI chỉ **kiểm** và **tự sửa** tour (`tour:verify`).
+- `tour:verify` bấm thật các bước "chờ bấm" trên bản web được chỉ định: chạy trên staging với tài khoản kiểm thử, không chạy trên bản thật.
+- Kho tour chưa có giao diện quản trị riêng trong Studio; dùng `tour:push` và API `/admin/tours`.
 
 ## 11. Kiểm thử công cụ
 
 ```bash
 cd ~/wealthcompass
-npm run check                                              # typecheck và toàn bộ test (không cần Chrome)
+npm run check                                              # typecheck và toàn bộ test (không cần Chrome; tour:verify, kho tour dùng trình duyệt/máy chủ giả)
 COMPASS_E2E_URL=http://localhost:4200 npm run test         # thêm bài E2E dùng Chrome thật, cần web demo đang chạy
 ```
 

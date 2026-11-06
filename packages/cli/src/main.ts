@@ -1,5 +1,8 @@
 import { scan } from './scan';
 import { recordTour } from './record/run';
+import { rerecordStep } from './record/rerecord';
+import { verifyTours } from './verify/verify';
+import { pushTours } from './verify/push';
 import { enrich, resolveOnly } from './enrich';
 import { annotate, formatReport } from './annotate';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -135,7 +138,70 @@ if (command === 'doctor' && arg('app')) {
     dryRun: process.argv.includes('--dry-run'),
     mobile: process.argv.includes('--mobile'),
   });
+} else if (command === 'tour:verify') {
+  // Chạy lại mọi tour trên một bản web thật (staging), báo bước hỏng; --heal sửa locator đã lệch
+  const url = arg('url');
+  if (!url) {
+    console.error('Cách dùng: compass tour:verify --config <yaml> --url <gốc web> [--only id1,id2] [--layout desktop|mobile] [--heal] [--storage-state auth.json] [--screenshots <thư mục>] [--report report.json] [--strict] [--headed]');
+    process.exit(1);
+  }
+  const layout = arg('layout');
+  if (layout && layout !== 'desktop' && layout !== 'mobile') {
+    console.error('--layout chỉ nhận desktop hoặc mobile');
+    process.exit(1);
+  }
+  const report = await verifyTours({
+    config: arg('config', 'compass.config.yaml')!,
+    url,
+    only: arg('only')?.split(',').map((s) => s.trim()).filter(Boolean),
+    layouts: layout ? [layout as 'desktop' | 'mobile'] : undefined,
+    heal: process.argv.includes('--heal'),
+    storageState: arg('storage-state'),
+    screenshots: arg('screenshots'),
+    report: arg('report'),
+    strict: process.argv.includes('--strict'),
+    headed: process.argv.includes('--headed'),
+  });
+  process.exit(report.summary.failed ? 1 : 0);
+} else if (command === 'tour:auth') {
+  // Lưu phiên đăng nhập để tour:verify chạy được trên trang cần đăng nhập
+  const url = arg('url');
+  if (!url) {
+    console.error('Cách dùng: compass tour:auth --url <trang đăng nhập> [--out compass.auth.json]');
+    process.exit(1);
+  }
+  const { saveLoginState } = await import('./verify/driver');
+  await saveLoginState(url, resolve(arg('out', 'compass.auth.json')!));
+} else if (command === 'tour:rerecord') {
+  // Ghi lại phần tử của một bước (giữ chữ, giữ khóa bước)
+  const url = arg('url');
+  const id = arg('id');
+  const key = arg('step');
+  if (!url || !id || !key) {
+    console.error('Cách dùng: compass tour:rerecord --config <yaml> --url <gốc web> --id <tour-id> --step <s1|s2...> [--mobile | --desktop]  (mặc định: bản chính của tour)');
+    process.exit(1);
+  }
+  const layout = process.argv.includes('--mobile') ? 'mobile' : process.argv.includes('--desktop') ? 'desktop' : undefined;
+  await rerecordStep({ config: arg('config', 'compass.config.yaml')!, url, id, key, layout });
+} else if (command === 'tour:push') {
+  // Đưa tour lên kho tour của backend (có phiên bản); widget lấy tour từ đó, không cần deploy lại web
+  const server = arg('server');
+  const token = arg('token') ?? process.env['COMPASS_ADMIN_TOKEN'];
+  if (!server || !token) {
+    console.error('Cách dùng: compass tour:push --config <yaml> --server <gốc backend> [--token <khóa> | COMPASS_ADMIN_TOKEN] [--only id1,id2] [--shots <thư mục ảnh của tour:verify>] [--note "..."] [--dry-run]');
+    process.exit(1);
+  }
+  await pushTours({
+    config: arg('config', 'compass.config.yaml')!,
+    server,
+    token,
+    only: arg('only')?.split(',').map((s) => s.trim()).filter(Boolean),
+    shots: arg('shots'),
+    note: arg('note'),
+    by: arg('by'),
+    dryRun: process.argv.includes('--dry-run'),
+  });
 } else {
-  console.log('Cách dùng: wealthcompass studio [--app <dir>] | setup --app <dir> | doctor --app <dir> | scan --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--dry-run] | annotate --config <yaml> [--only ...] [--out file] [--print] | tour:record ...');
+  console.log('Cách dùng: wealthcompass studio [--app <dir>] | setup --app <dir> | doctor --app <dir> | scan --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--dry-run] | annotate --config <yaml> [--only ...] [--out file] [--print] | tour:record ... | tour:verify ... | tour:auth ... | tour:rerecord ... | tour:push ...');
   process.exit(command ? 1 : 0);
 }

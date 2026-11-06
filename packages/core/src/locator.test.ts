@@ -240,3 +240,73 @@ test('chờ spinner biến mất rồi mới tìm phần tử', async () => {
     Element.prototype.getBoundingClientRect = original;
   }
 });
+
+// ---------------------------------------------------------------------------
+// Giai đoạn 3: tour:verify thử từng bước và tự sửa locator
+// ---------------------------------------------------------------------------
+
+const { locatorDrift, healLocator } = await import('./locator-heal');
+const { probeStep } = await import('./locator-probe');
+
+async function withLayoutAsync<T>(fn: () => Promise<T>): Promise<T> {
+  const original = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = function () {
+    return { width: 10, height: 10, left: 0, top: 0, right: 10, bottom: 10 } as DOMRect;
+  };
+  try {
+    return await fn();
+  } finally {
+    Element.prototype.getBoundingClientRect = original;
+  }
+}
+
+test('manh mối đã đổi: tên, thuộc tính danh tính, component; không tính css, vị trí, chữ hoa/dấu', () => {
+  const stored = { tag: 'button', role: 'button', name: 'Bán', attrs: { routerlink: '/bond/sell', type: 'button' }, component: 'app-bond-portfolio', context: { heading: 'Trái phiếu' }, css: 'button.a', rect: { x: 0, y: 0, w: 0.1, h: 0.1 } };
+  assert.deepEqual(locatorDrift(stored, { ...stored, name: 'BÁN', css: 'div > button', rect: { x: 0.5, y: 0.5, w: 0.1, h: 0.1 } }), []);
+  assert.deepEqual(
+    locatorDrift(stored, { ...stored, name: 'Bán ngay', attrs: { routerlink: '/bonds/sell', type: 'submit' }, component: 'app-bond-list' }),
+    ['name', 'attrs.routerlink', 'component'],
+  );
+  // Chữ trùng tên không được lưu riêng: so với tên của bản mới
+  assert.deepEqual(locatorDrift({ tag: 'a', text: 'Tài sản', attrs: {}, context: {} }, { tag: 'a', name: 'Tài sản', attrs: {}, context: {} }), []);
+
+  const healed = healLocator(
+    { ...stored, layout: 'mobile', list: { row: 'tr', rowText: 'VIC2401' } },
+    { ...stored, name: 'Bán ngay', layout: 'desktop', list: { row: 'mat-row', column: 'Thao tác' } },
+  );
+  assert.equal(healed.name, 'Bán ngay');
+  assert.equal(healed.layout, 'mobile', 'giữ bố cục của bản ghi');
+  assert.deepEqual(healed.list, { row: 'mat-row', column: 'Thao tác', rowText: 'VIC2401' }, 'giữ dòng người duyệt đã ghim');
+});
+
+test('probeStep: tìm chắc nhưng chữ nút đã đổi thì đề xuất locator mới và báo phần tử nhạy cảm', async () => {
+  await withLayoutAsync(async () => {
+    page(`<app-bond-sell-panel><h2>Bán trái phiếu</h2><button data-testid="sell-submit">Đặt lệnh bán</button></app-bond-sell-panel>`);
+    const steps = [{ key: 's1', locator: { tag: 'button', role: 'button', name: 'Bán', attrs: { 'data-testid': 'sell-submit' }, component: 'app-bond-sell-panel', context: {} } }];
+    const r = await probeStep(steps, 0, { userOnlyText: ['đặt lệnh'], timeoutMs: 50 });
+    assert.equal(r.status, 'ok');
+    assert.equal(r.userOnly, true);
+    assert.deepEqual(r.drift, ['name']);
+    assert.equal(r.proposed?.name, 'Đặt lệnh bán');
+    assert.equal(r.proposed?.attrs['data-testid'], 'sell-submit');
+    assert.equal((window as unknown as { __compassFound: Element }).__compassFound, document.querySelector('button'), 'phần tử tìm được để phía Node bấm/chụp');
+
+    // Không đổi gì: không có đề xuất
+    const same = await probeStep([{ key: 's1', locator: { ...steps[0].locator, name: 'Đặt lệnh bán' } }], 0, { timeoutMs: 50 });
+    assert.equal(same.status, 'ok');
+    assert.equal(same.drift, undefined);
+    assert.equal(same.userOnly, false);
+  });
+});
+
+test('probeStep: tourId ghim mất nhưng locator tìm chắc thì báo đổi tourId; không thấy thì missing', async () => {
+  await withLayoutAsync(async () => {
+    page(`<nav><a href="/iconnect/assets">Tài sản</a></nav>`);
+    const r = await probeStep([{ key: 's1', tourId: 'assets-tab', locator: { tag: 'a', role: 'link', name: 'Tài sản', attrs: { href: '/iconnect/assets' }, context: {} } }], 0, { timeoutMs: 50 });
+    assert.equal(r.status, 'ok');
+    assert.ok(r.drift?.includes('tourId'));
+    assert.ok(r.matchedBy?.startsWith('locator:'));
+    const gone = await probeStep([{ key: 's1', locator: { tag: 'button', role: 'button', name: 'Không có', attrs: {}, context: {} } }], 0, { timeoutMs: 50 });
+    assert.equal(gone.status, 'missing');
+  });
+});

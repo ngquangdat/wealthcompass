@@ -11,6 +11,8 @@ import { loadConfig } from './config.js';
 import { FeatureStore } from './feature-store.js';
 import { registerMockIdp } from './idp.js';
 import { loadPack } from './pack.js';
+import { TourStore } from './tour-store.js';
+import { registerTourAdmin } from './tour-admin.js';
 
 // --env-file <file>: nạp cấu hình do `wealthcompass setup` sinh ra (file của chính dự án, không phải .env chứa bí mật khác)
 const envFlag = process.argv.indexOf('--env-file');
@@ -19,6 +21,9 @@ if (envFlag !== -1 && process.argv[envFlag + 1]) process.loadEnvFile(process.arg
 const config = loadConfig();
 const pack = loadPack(config.packDir);
 const store = new FeatureStore(config.featureMapPath, pack);
+// Kho tour của backend: tour lưu ở đây thắng tour cùng id trong Feature Map (sửa tour không cần deploy web)
+const tourStore = new TourStore(config.tourStoreDir);
+store.useTours(() => tourStore.list().map((t) => tourStore.current(t.id)!).map((v) => ({ tour: v.tour, feature: v.feature })));
 
 const app = Fastify({ logger: { level: 'info' } });
 await app.register(cors, {
@@ -53,20 +58,37 @@ app.get('/v1/health', async () => ({
   pack: pack.name,
   features: store.featureMap.features.length,
   tours: store.featureMap.tours.length,
+  storedTours: tourStore.list().length,
   llmConfigured: Boolean(config.llm.apiKey),
   provider: config.llm.provider, model: config.llm.model,
   debug: config.debug,
 }));
 
+// Quyền xem tour = quyền vào tính năng sở hữu tour
+function canSeeTour(id: string, roles: string[]): boolean {
+  const owner = store.featureMap.features.find((f) => f.tourIds.includes(id));
+  return !owner || owner.access.requires.every((r) => roles.includes(r));
+}
+
 app.get('/v1/tours/:id', { preHandler: authenticate }, async (request, reply) => {
   const { id } = request.params as { id: string };
   const tour = store.getTour(id);
   if (!tour) return reply.code(404).send({ error: 'not_found' });
-  const owner = store.featureMap.features.find((f) => f.tourIds.includes(id));
-  const roles = request.principal!.roles;
-  if (owner && !owner.access.requires.every((r) => roles.includes(r))) return reply.code(403).send({ error: 'forbidden' });
-  return tour;
+  if (!canSeeTour(id, request.principal!.roles)) return reply.code(403).send({ error: 'forbidden' });
+  // Bước có ảnh chụp trong kho: kèm đường dẫn để widget hiện khi không chắc phần tử
+  return tourStore.withShots(tour);
 });
+
+app.get('/v1/tours/:id/shots/:layout/:key', { preHandler: authenticate }, async (request, reply) => {
+  const { id, layout, key } = request.params as { id: string; layout: string; key: string };
+  if (!store.getTour(id)) return reply.code(404).send({ error: 'not_found' });
+  if (!canSeeTour(id, request.principal!.roles)) return reply.code(403).send({ error: 'forbidden' });
+  const png = tourStore.readShot(id, layout, key);
+  if (!png) return reply.code(404).send({ error: 'not_found' });
+  return reply.header('Content-Type', 'image/png').header('Cache-Control', 'private, max-age=300').send(png);
+});
+
+if (config.adminToken) await registerTourAdmin(app, { tours: tourStore, adminToken: config.adminToken, onChange: () => store.reloadTours() });
 
 app.post('/v1/telemetry', { preHandler: authenticate }, async (request, reply) => {
   // Chỉ ghi các trường đã biết, không ghi nguyên body
@@ -149,4 +171,4 @@ if (config.debug) {
 }
 
 await app.listen({ port: config.port, host: config.host });
-app.log.info(`WealthCompass server: http://${config.host}:${config.port} (pack ${pack.name}, model ${config.llm.model}, llm ${config.llm.apiKey ? 'ok' : 'THIẾU KHÓA'}${config.debug ? ', DEBUG: /debug/* chỉ nhận từ máy này' : ''}${config.logFile ? `, nhật ký: ${config.logFile}` : ''})`);
+app.log.info(`WealthCompass server: http://${config.host}:${config.port} (pack ${pack.name}, model ${config.llm.model}, llm ${config.llm.apiKey ? 'ok' : 'THIẾU KHÓA'}${config.debug ? ', DEBUG: /debug/* chỉ nhận từ máy này' : ''}${config.logFile ? `, nhật ký: ${config.logFile}` : ''}${config.adminToken ? ', API quản trị tour: /admin/tours' : ''})`);

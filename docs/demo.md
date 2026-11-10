@@ -12,7 +12,7 @@ Demo chạy local, không cần Docker hay Helm. Gồm 3 phần chạy cùng nha
 
 ```bash
 npm install
-npm run scan      # quét source Angular -> examples/iconnect-demo/feature-map.json (đã commit sẵn)
+npm run scan      # quét source Angular -> bản đồ tính năng trong kho dự án của demo (kho tự dựng từ examples/iconnect-demo.compass lần đầu)
 npm run server    # terminal 1
 npm run demo      # terminal 2, rồi mở http://localhost:4200
 ```

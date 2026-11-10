@@ -1,6 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import type { RunState, TourDef, TourProposal, TourStep } from '../core/models';
 import { ProjectStore } from '../core/project.store';
@@ -28,7 +27,7 @@ interface Editing {
 
 @Component({
   selector: 'page-tours',
-  imports: [FormsModule, RouterLink, IconComponent, PageHeaderComponent, LogConsoleComponent],
+  imports: [FormsModule, IconComponent, PageHeaderComponent, LogConsoleComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ui-page-header title="Tour" subtitle="Hướng dẫn từng bước trên giao diện. Ghi bằng thao tác thật hoặc soạn tay, rồi chạy thử trên web.">
@@ -38,7 +37,7 @@ interface Editing {
     </ui-page-header>
 
     @if (!targets().length && loaded()) {
-      <div class="alert info"><ui-icon name="alert" /><span>Dự án chưa có tourId nào. "Ghi tour mới" không cần tourId: trợ lý nhận ra phần tử theo vai trò, chữ, thuộc tính và component. Chỉ soạn tay mới cần <a routerLink="/tourids">gắn tourId</a>.</span></div>
+      <div class="alert info"><ui-icon name="alert" /><span>Dự án chưa có tourId nào. "Ghi tour mới" không cần tourId: trợ lý nhận ra phần tử theo vai trò, chữ, thuộc tính và component. Soạn tay thì cần tourId do dev gắn sẵn trong source (thuộc tính <code>tourId</code> trên phần tử).</span></div>
     }
 
     <div class="list">

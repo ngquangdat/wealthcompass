@@ -5,7 +5,10 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { readToursFile } from '../record/write';
+import { toursFileSchema } from '@wealthcompass/contracts';
+import { readText } from '@wealthcompass/tourdb';
+import { dataRoot } from '../project';
+import { readToursFile, writeTours } from '../record/write';
 import { setup } from '../setup/setup';
 import { startStudio } from './server';
 
@@ -23,7 +26,7 @@ async function integratedApp(): Promise<string> {
   mkdirSync(tgz, { recursive: true });
   for (const n of ['angular', 'core', 'contracts', 'cli', 'server']) writeFileSync(join(tgz, `wealthcompass-${n}-0.1.0.tgz`), '');
   const result = await setup(
-    { app: dir, backendUrl: 'http://localhost:8890', tarballs: tgz, version: '0.1.0', llm: null, aiCode: false, annotate: null, force: false, today: '2026-10-03' },
+    { app: dir, backendUrl: 'http://localhost:8890', tarballs: tgz, version: '0.1.0', llm: null, aiCode: false, force: false, today: '2026-10-03' },
     () => undefined,
   );
   git('apply', result.patchFile!);
@@ -47,10 +50,10 @@ function client(port: number) {
     });
 }
 
-test('Studio đợt 2: quyền, gắn tourId, tour qua API', async () => {
+test('Studio đợt 2: quyền, tour qua API', async () => {
   const dir = await integratedApp();
   const port = 5440 + Math.floor(Math.random() * 50);
-  const { close } = await startStudio({ port, tarballs: null, open: dir });
+  const { close } = await startStudio({ port, open: dir });
   const api = client(port);
   try {
     // --- Quyền: mặc định chỉ cần đăng nhập (không guard nào được tự gán quyền); chuỗi quyền trong code chỉ là gợi ý; khai xong ghi chú "đã duyệt"
@@ -62,27 +65,18 @@ test('Studio đợt 2: quyền, gắn tourId, tour qua API', async () => {
     guards = (await api('GET', '/api/guards')).json;
     const reports = guards.find((g) => g.name === 'reportsGuard')!;
     assert.deepEqual([reports.status, reports.requires], ['reviewed', ['reports_viewer']]);
-    assert.match(readFileSync(join(dir, 'compass.config.yaml'), 'utf8'), /reportsGuard: \{ requires: \[ reports_viewer \] \} # đã duyệt trong Studio/);
+    assert.match(readText(join(dataRoot(dir), 'compass.config.yaml')), /reportsGuard: \{ requires: \[ reports_viewer \] \} # đã duyệt trong Studio/);
 
-    // --- Gắn tourId: tên sai/trùng bị từ chối; nhạy cảm "chắc chắn" không bỏ được dù gửi userOnly=false
-    const scan = (await api('GET', '/api/tourids')).json as { candidates: Array<{ key: string; label: string; sensitive: { level: string } | null }> };
-    const cancel = scan.candidates.find((c) => c.label === 'Hủy đơn')!;
-    const submit = scan.candidates.find((c) => c.label === 'Gửi yêu cầu')!;
-    assert.equal(submit.sensitive?.level, 'sure');
-    assert.equal((await api('POST', '/api/tourids/patch', { items: [{ key: cancel.key, tourId: 'Sai Ten', userOnly: false }] })).status, 400);
-    assert.equal((await api('POST', '/api/tourids/patch', { items: [{ key: cancel.key, tourId: 'trung', userOnly: false }, { key: submit.key, tourId: 'trung', userOnly: false }] })).status, 400);
-    const patch = await api('POST', '/api/tourids/patch', {
-      items: [
-        { key: cancel.key, tourId: 'orders-cancel', userOnly: true, hint: 'Hủy đơn chưa giao' },
-        { key: submit.key, tourId: 'returns-submit', userOnly: false },
-      ],
-    });
-    assert.equal(patch.status, 200);
-    const hunks = (patch.json.files as Array<{ hunks: Array<{ id: string }> }>).flatMap((f) => f.hunks.map((h) => h.id));
-    assert.equal((await api('POST', '/api/patch/apply', { name: 'tourid', hunks })).status, 200);
-    const routes = readFileSync(join(dir, 'src/app/app.routes.ts'), 'utf8');
-    assert.match(routes, /<button tourId="orders-cancel"[^>]*tourHint="Hủy đơn chưa giao"[^>]*tourRole="user-only"/);
-    assert.match(routes, /<button tourId="returns-submit"[^>]*tourRole="user-only"/, 'submit vẫn là user-only');
+    // --- tourId do dev tự gắn trong source: Studio thấy ngay (không còn công cụ gắn hộ)
+    const routesFile = join(dir, 'src/app/app.routes.ts');
+    writeFileSync(
+      routesFile,
+      readFileSync(routesFile, 'utf8')
+        .replace('<button>Hủy đơn</button>', '<button tourId="orders-cancel" tourRole="user-only">Hủy đơn</button>')
+        .replace('<button type="submit">Gửi yêu cầu</button>', '<button type="submit" tourId="returns-submit" tourRole="user-only">Gửi yêu cầu</button>'),
+    );
+    assert.equal((await api('GET', '/api/tourids')).status, 404, 'API gắn tourId đã bỏ');
+    assert.equal((await api('GET', '/api/patch')).status, 404);
 
     // --- Tour: lưu từ Studio là bản đã duyệt; tour trỏ tới tourId thật thì hợp lệ; xóa được
     assert.equal((await api('PUT', '/api/tours/Bad%20Id', { title: 'x', startRoute: '/', steps: [] })).status, 400);
@@ -108,7 +102,7 @@ test('Studio đợt 2: quyền, gắn tourId, tour qua API', async () => {
 test('Studio: ghi đè quyền cho riêng màn hình, bỏ ghi đè quay về guard; API chỉ nhận trường sửa được', async () => {
   const dir = await integratedApp();
   const port = 5500 + Math.floor(Math.random() * 50);
-  const { close } = await startStudio({ port, tarballs: null, open: dir });
+  const { close } = await startStudio({ port, open: dir });
   const api = client(port);
   try {
     type Row = { id: string; requires: string[]; guardRequires: string[]; guards: string[]; requiresOverride: boolean };
@@ -118,7 +112,7 @@ test('Studio: ghi đè quyền cho riêng màn hình, bỏ ghi đè quay về gu
 
     let put = await api('PUT', '/api/features/reports', { requires: ['finance', 'finance', ' '] });
     assert.deepEqual([put.json.requires, put.json.requiresOverride, put.json.guardRequires], [['finance'], true, reports.guardRequires]);
-    assert.match(readFileSync(join(dir, 'compass.overrides.yaml'), 'utf8'), /reports:[\s\S]*requires:[\s\S]*finance/);
+    assert.match(readText(join(dataRoot(dir), 'compass.overrides.yaml')), /reports:[\s\S]*requires:[\s\S]*finance/);
     // [] = không cần quyền riêng (khác với bỏ ghi đè)
     put = await api('PUT', '/api/features/reports', { requires: [] });
     assert.deepEqual([put.json.requires, put.json.requiresOverride], [[], true]);
@@ -135,7 +129,7 @@ test('Studio: ghi đè quyền cho riêng màn hình, bỏ ghi đè quay về gu
 test('Studio: danh mục quyền — thêm có mô tả, liệt kê cả quyền đang dùng chưa khai, không xóa quyền đang dùng', async () => {
   const dir = await integratedApp();
   const port = 5550 + Math.floor(Math.random() * 50);
-  const { close } = await startStudio({ port, tarballs: null, open: dir });
+  const { close } = await startStudio({ port, open: dir });
   const api = client(port);
   try {
     type Role = { name: string; description: string; inCatalog: boolean; guards: string[]; screens: string[] };
@@ -151,7 +145,7 @@ test('Studio: danh mục quyền — thêm có mô tả, liệt kê cả quyền
     assert.equal((await api('PUT', '/api/roles/shop_admin', { description: 'Quản trị cửa hàng' })).status, 200);
     const list = await roles();
     assert.deepEqual(list.find((r) => r.name === 'employee'), { name: 'employee', description: 'Mọi nhân viên', inCatalog: true, guards: [], screens: [] });
-    assert.match(readFileSync(join(dir, 'compass.config.yaml'), 'utf8'), /roles:\n\s+employee: \{ description: Mọi nhân viên \}/);
+    assert.match(readText(join(dataRoot(dir), 'compass.config.yaml')), /roles:\n\s+employee: \{ description: Mọi nhân viên \}/);
     // Thử trợ lý gợi ý cả quyền chưa màn hình nào dùng
     assert.ok(((await api('GET', '/api/assistant/meta')).json as { roles: string[] }).roles.includes('employee'));
 
@@ -166,9 +160,9 @@ test('Studio: danh mục quyền — thêm có mô tả, liệt kê cả quyền
 test('Studio: đề xuất sửa locator của tour:verify hiện ở danh sách, sửa chữ không mất đề xuất, duyệt thì thay locator', async () => {
   const dir = await integratedApp();
   const loc = (name: string) => ({ tag: 'button', role: 'button', name, attrs: {}, context: {} });
-  writeFileSync(
-    join(dir, 'compass.tours.json'),
-    JSON.stringify({
+  writeTours(
+    join(dataRoot(dir), 'compass.tours.db'),
+    toursFileSchema.parse({
       tours: {
         'huy-don-loc': {
           title: 'Hủy đơn',
@@ -181,9 +175,10 @@ test('Studio: đề xuất sửa locator của tour:verify hiện ở danh sách
         },
       },
     }),
+    'test',
   );
   const port = 5600 + Math.floor(Math.random() * 50);
-  const { close } = await startStudio({ port, tarballs: null, open: dir });
+  const { close } = await startStudio({ port, open: dir });
   const api = client(port);
   try {
     const find = async () => ((await api('GET', '/api/tours')).json.tours as Array<{ id: string; steps: Array<{ key: string; healedAt?: string }>; proposals: Array<{ key: string; layout: string; from: string; to: string; changed: string[] }> }>).find((t) => t.id === 'huy-don-loc')!;
@@ -198,8 +193,7 @@ test('Studio: đề xuất sửa locator của tour:verify hiện ở danh sách
     assert.equal(tour.steps[0].healedAt, '2026-11-01');
 
     assert.equal((await api('POST', '/api/tours/huy-don-loc/steps/s2/proposal', { approve: true })).status, 200);
-    const file = JSON.parse(JSON.stringify(readToursFile(join(dir, 'compass.tours.db')))).tours['huy-don-loc'];
-    assert.equal(existsSync(join(dir, 'compass.tours.json')), false, 'file JSON của bản trước đã được chuyển vào kho SQLite');
+    const file = JSON.parse(JSON.stringify(readToursFile(join(dataRoot(dir), 'compass.tours.db')))).tours['huy-don-loc'];
     assert.equal(file.steps[1].locator.name, 'Hủy đơn');
     assert.equal(file.steps[1].proposal, undefined);
     assert.equal(file.steps[1].text, 'Bấm **Hủy**.');

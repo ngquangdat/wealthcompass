@@ -24,12 +24,12 @@ export interface ScannedRoute {
   // Chữ tĩnh của chính màn hình (component của route và component con), KHÔNG gồm layout cha
   // vì chữ của layout (thanh tab...) chung cho mọi màn hình và làm loãng ngữ cảnh
   uiText: string[];
-  // Các component có template thuộc màn hình này (component của route và component con); annotate dùng để sửa template
+  // Các component có template thuộc màn hình này (component của route và component con)
   classes: ClassDeclaration[];
 }
 
 export interface ScannedLayout {
-  // Route khung (có children) và các component của nó; annotate cần để gắn tourId cho thanh tab, header chung...
+  // Route khung (có children) và các component của nó
   path: string;
   classes: ClassDeclaration[];
 }
@@ -185,10 +185,6 @@ export function collectComponent(cls: ClassDeclaration, seen = new Set<string>()
     }
   }
   return { targets, uiText, classes };
-}
-
-export function collectComponentTargets(cls: ClassDeclaration): TemplateTarget[] {
-  return collectComponent(cls).targets;
 }
 
 function readRoutes(

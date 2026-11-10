@@ -2,83 +2,41 @@
 
 ## Quy trình
 
-Ba phần tách rời, nối với nhau bằng **một kho tour** (`compass.tours.db` trong thư mục web):
+Ba phần tách rời, nối với nhau bằng **một kho dự án**: một file SQLite cho mỗi web, nằm ngoài source (`~/.wealthcompass/projects/<tên web>-<mã>.db`). Kho chứa mọi dữ liệu của WealthCompass cho web đó: cấu hình, mô tả màn hình, bản đồ tính năng, tour, bộ câu kiểm thử, cấu hình backend. **Source của web không có file nào của WealthCompass**, chỉ có lib, `provideCompass` và thẻ widget.
 
 | Bước | Làm ở đâu | Việc |
 | --- | --- | --- |
-| 1. Cài lib vào source web | Dòng lệnh, **một lần** | `wealthcompass setup` sinh patch gắn lib giao diện (`@wealthcompass/angular`), provider, widget; bạn duyệt rồi `git apply` và `npm install`. Web **không** cài backend hay CLI |
-| 2. Chạy backend | Dòng lệnh, **tiến trình riêng** | Backend chạy độc lập với Studio (trên máy dev hoặc máy chủ), đọc `feature-map.json` và kho tour của web |
-| 3. Soạn và ghi tour | Studio | Studio ghi tour vào cùng kho tour đó; backend đang chạy dùng ngay, không cần khởi động lại |
+| 1. Cài lib vào source web | Dòng lệnh, **một lần** | `wealthcompass setup` đọc source, ghi dữ liệu vào kho dự án và sinh một patch gắn lib giao diện (`@wealthcompass/angular`), provider, widget; bạn duyệt rồi `git apply` và `npm install`. Web **không** cài backend hay CLI |
+| 2. Chạy backend | Dòng lệnh, **tiến trình riêng** | Backend chạy độc lập với Studio, chỉ cần biết file kho: `COMPASS_PROJECT=<file kho>` |
+| 3. Soạn và ghi tour | Studio | Studio đọc source của web và ghi vào cùng kho đó; backend đang chạy dùng ngay, không cần khởi động lại |
 
 ```bash
 # 1. Cài lib vào source web (một lần)
 cd ~/wealthcompass && npm install && npm run pack
-npm run setup -- --app ~/du-an/my-web
+npm run setup -- --app ~/du-an/my-web          # in ra đường dẫn kho dự án
 cd ~/du-an/my-web && git apply wealthcompass-setup.patch && npm install
 
 # 2. Backend: tiến trình riêng, không do Studio bật và không cài trong web
-cd ~/wealthcompass && npm run server -- --env-file ~/du-an/my-web/wealthcompass.env
+cd ~/wealthcompass && COMPASS_PROJECT=~/du-an/my-web npm run server     # nhận thư mục web hoặc file kho .db
 
 # 3. Studio: soạn dữ liệu, ghi và kiểm tour
 cd ~/wealthcompass && npm run studio -- --app ~/du-an/my-web
 ```
 
+- **Kho dự án ở đâu:** `~/.wealthcompass/projects/`, đổi thư mục gốc bằng `COMPASS_HOME`. Tên file suy từ đường dẫn source nên mọi lệnh chỉ cần `--app <thư mục web>`. Studio hiện đường dẫn kho ở trang Tổng quan và liệt kê các kho đã có ở trang Mở dự án.
+- **Không còn trong git của web:** dữ liệu nằm ngoài source nên không được git của web theo dõi. Sao lưu hoặc chuyển máy bằng cách chép file `.db`; máy chủ thật thì chép file kho sang và trỏ `COMPASS_PROJECT` vào đó.
+- **Dự án kiểu cũ** (còn `compass.config.yaml`, `feature-map.json`... cạnh source) vẫn chạy như trước. Chuyển vào kho: `wealthcompass migrate --app <thư mục web>` (chuyển xong xóa các file đó khỏi source).
 - **Xác thực:** mặc định backend tin API gateway đứng trước nó đã xác minh JWT (`COMPASS_AUTH=gateway`), không cần JWKS; backend chỉ được nhận yêu cầu qua gateway. Không có gateway thì đặt `COMPASS_AUTH=jwks` và khai JWKS.
-- Studio **không bật, không tắt backend**. Trang Chạy thử chỉ cho biết backend có đang chạy không, in sẵn lệnh chạy, và báo backend có đọc đúng kho tour của dự án không.
-- Backend tìm kho tour ở `compass.tours.db` cạnh `feature-map.json` (`COMPASS_FEATURE_MAP`); đổi bằng `COMPASS_TOUR_DB`. Tắt Studio không ảnh hưởng backend.
+- Studio **không bật, không tắt backend**. Trang Chạy thử chỉ cho biết backend có đang chạy không, in sẵn lệnh chạy, và báo backend có đọc đúng kho của dự án không. Tắt Studio không ảnh hưởng backend.
 - Trang Thử trợ lý, Kiểm thử, Nhật ký của Studio cần backend chạy thêm `COMPASS_DEBUG=1` và `COMPASS_LOG_FILE=...` (lệnh đầy đủ có ở trang Chạy thử). Không bật `COMPASS_DEBUG` trên máy chủ thật.
-- Web demo trong repo này: backend chạy bằng `npm run server` (đọc sẵn feature map và kho tour của `examples/iconnect-demo`).
+- **Sửa tay, sao lưu, đưa vào git:** `wealthcompass project:export --app <thư mục web>` xuất cả kho ra thư mục file văn bản (`compass.config.yaml`, `compass.overrides.yaml`, `feature-map.json`, `tours.json`...), mặc định là `<thư mục web>.compass` nằm **cạnh** (không nằm trong) source. Sửa xong nhập lại bằng `wealthcompass project:import --app <thư mục web>`.
+- **Bản mẫu đi kèm web:** nếu cạnh thư mục web có `<thư mục web>.compass` mà máy chưa có kho cho web đó, kho được dựng tự động từ thư mục này ở lần chạy đầu. Web demo của repo dùng cách này: `examples/iconnect-demo.compass` được commit, nên clone về là `npm run scan`, `npm run server`, `npm run studio -- --app examples/iconnect-demo` chạy được ngay. Sau khi sửa dữ liệu demo trong Studio, chạy `npx tsx packages/cli/src/main.ts project:export --app examples/iconnect-demo` rồi commit thư mục bản mẫu.
 
-**Chưa có source của web** (chỉ có địa chỉ, vd. bản staging): tạo một dự án tour rồi mở bằng Studio. Màn hình được dựng từ chính các tour đã ghi; khi có source thì chạy `setup` và chép `compass.tours.db`, `compass.overrides.yaml` sang.
-
-```bash
-npx tsx packages/cli/src/main.ts init --url https://staging.example.vn --dir ~/tours/my-web
-npm run studio -- --app ~/tours/my-web
-```
-
-Web đã cài gói `@wealthcompass/cli` thì mở bằng `npx wealthcompass studio` ngay trong thư mục web.
-
-Studio chạy trên máy của bạn (chỉ nghe `127.0.0.1`, không cần token; trang web khác trong trình duyệt không gọi được API của Studio, nhưng chương trình khác trên cùng máy thì gọi được) và làm mọi bước bằng chuột:
-
-| Trang | Làm gì |
-| --- | --- |
-| **Mở dự án** | Duyệt thư mục; thư mục là web Angular, hoặc dự án tour chưa có source (tạo bằng `init`), được đánh dấu |
-| **Tổng quan** | Số màn hình, số nội dung AI chờ duyệt, checklist tích hợp xanh/vàng/đỏ (chỉ xem; sửa bằng lệnh `setup`), cảnh báo của trình quét. Web chưa tích hợp thì hiện lệnh cần chạy |
-| **Màn hình** | Bảng mọi màn hình, lọc *chờ duyệt / thiếu mô tả / đã ẩn*; bấm một dòng để sửa tiêu đề, mô tả, từ khóa, câu hỏi mẫu, ẩn khỏi trợ lý; **Duyệt** nội dung AI; **AI soạn** phần còn trống |
-| **Quyền** | Mặc định mọi màn hình **chỉ cần đăng nhập**, không cần làm gì. Muốn trợ lý lọc theo quyền thì bấm **Khai quyền** cho guard (Studio gợi ý chuỗi quyền thấy trong code) hoặc ghi đè theo màn hình ở trang Màn hình |
-| **Gắn tourId** | Chọn màn hình → quét phần tử chưa có tourId → (tùy chọn) mô tả luồng cần dẫn để **AI gợi ý** chọn phần tử thuộc luồng, đánh dấu thêm phần tử nhạy cảm, viết `tourHint` → sửa tên, bỏ chọn → xem diff → áp. Phần tử nhạy cảm chắc chắn (submit, Xác nhận, nút đổi mật khẩu, nút cùng khối với ô mật khẩu...) luôn là user-only. Menu sinh từ dữ liệu được gắn `[tourMenu]`: mỗi mục có mốc `menu-<route>`. Phần tử AI cho là không thuộc luồng nằm ở nhóm riêng để tích lại |
-| **Tour** | Danh sách tour (nháp AI / sẵn sàng / bị loại kèm lý do). **Ghi tour mới**: mô tả tính năng, Chrome mở ra (giữ phiên đăng nhập giữa các lần ghi), thao tác thật, AI soạn chữ từng bước; menu mở bằng hover ghi bằng Alt+H. **Soạn tay** hoặc sửa: chọn màn hình đích, bước bắt đầu, từng bước (phần tử, chờ bấm / nút Tiếp / di chuột, chữ). **Chạy thử** mở web với `?compassTour=<id>` |
-| **Chạy thử** | Trạng thái backend (chạy độc lập), lệnh để chạy nó, backend có dùng chung kho tour với Studio không; bật/tắt web của dự án, xem log, mở web; sửa `wealthcompass.env` bằng form |
-| **Thử trợ lý** | Hỏi như người dùng, chọn quyền của người hỏi và màn hình đang đứng; bên phải là từng bước trợ lý đã làm (tra cứu ban đầu kèm điểm, các vòng AI, công cụ được gọi và kết quả). Nút tour/màn hình mở thẳng web để thử |
-| **Kiểm thử** | Bộ câu hỏi mẫu + màn hình đúng trong `compass.eval.yaml` (commit cùng code). **AI viết câu hỏi** cho từng màn hình; **Chạy kiểm thử** cho hit@1, hit@3, MRR, và lý do từng câu trượt (thiếu quyền, dưới ngưỡng điểm, xếp thứ mấy). Chạy lại sau mỗi lần sửa mô tả hay từ đồng nghĩa |
-| **Nhật ký** | Số câu hỏi, tỷ lệ tìm được, câu **không tìm thấy** (gom câu giống nhau, thêm thẳng vào Kiểm thử), phễu tour (đề xuất → bắt đầu → đi hết), thời gian trả lời |
-| **Cài đặt AI** | Nhà cung cấp, model, đang dùng khóa từ đâu, nhập khóa cho riêng phiên Studio, thử kết nối, công tắc cho AI đọc mã nguồn |
-
-Nguyên tắc vẫn như dòng lệnh: code của web chỉ đổi khi bạn xem diff rồi bấm **Áp**; khóa AI không bao giờ ghi vào file. Sửa quyền, màn hình, tour thì trợ lý dùng ngay (backend tự nạp lại bản đồ tính năng).
-
-Chạy backend với `COMPASS_DEBUG=1` (các đường `/debug/*` chỉ nhận kết nối từ chính máy đó) để trang Thử trợ lý và Kiểm thử dùng được, và `COMPASS_LOG_FILE` trỏ vào `~/.wealthcompass/logs/` (ngoài dự án) cho trang Nhật ký. Nhật ký chỉ có câu hỏi đã che thông tin cá nhân và mã người dùng đã băm. **Không bật `COMPASS_DEBUG` trên máy chủ thật**; muốn có trang Nhật ký cho bản thật thì đặt `COMPASS_LOG_FILE` rồi chép file về máy.
-
-## Cách dòng lệnh (3 bước)
-
-Điều kiện: web Angular **20 trở lên**, có source và sửa được, đăng nhập bằng **JWT**. Đã chạy thật trên hai web khác ngành: web đầu tư mô phỏng TCInvest (`examples/iconnect-demo`) và cổng nhân sự tạo mới từ `ng new` (`examples/hr-portal`).
+**Chưa có source của web** (chỉ có địa chỉ, vd. bản staging): tạo một kho dự án rồi mở bằng Studio. Màn hình được dựng từ chính các tour đã ghi; khi có source thì chạy `setup`.
 
 ```bash
-# 1. Đóng gói (một lần, trong repo WealthCompass)
-cd ~/wealthcompass && npm install && npm run pack
-
-# 2. Setup: dò dự án, sinh cấu hình, AI soạn nháp, xuất MỘT patch (không sửa code)
-npm run setup -- --app ~/du-an/my-web
-
-# 3. Duyệt, áp, chạy
-cd ~/du-an/my-web
-cat WEALTHCOMPASS_SETUP.md                 # báo cáo: đã dò được gì, cần bạn xem gì
-git apply wealthcompass-setup.patch && npm install
-npm start
-
-# Backend và doctor chạy từ repo WealthCompass (không cài trong web)
-cd ~/wealthcompass
-npm run server -- --env-file ~/du-an/my-web/wealthcompass.env &
-npx tsx packages/cli/src/main.ts doctor --app ~/du-an/my-web   # kiểm tra mọi thứ đã nối đúng
+npx tsx packages/cli/src/main.ts init --url https://staging.example.vn      # tạo ~/.wealthcompass/projects/staging.example.vn.db
+npm run studio -- --app ~/.wealthcompass/projects/staging.example.vn.db
 ```
 
 ## Bước 1: đóng gói
@@ -89,7 +47,7 @@ npx tsx packages/cli/src/main.ts doctor --app ~/du-an/my-web   # kiểm tra mọ
 | --- | --- | --- |
 | `@wealthcompass/angular` | Widget chat, `[tourId]`, tour (biên dịch partial, chạy Angular 20-23) | `dependencies` |
 | `@wealthcompass/core`, `@wealthcompass/contracts` | Logic dùng chung, kiểu dữ liệu | `dependencies` |
-| `@wealthcompass/cli` | Lệnh `wealthcompass` (setup, scan, enrich, annotate, tour:record, doctor, studio) | **Không cài vào web**: chạy từ repo WealthCompass hoặc cài riêng |
+| `@wealthcompass/cli` | Lệnh `wealthcompass` (setup, scan, enrich, tour:record, doctor, studio) | **Không cài vào web**: chạy từ repo WealthCompass hoặc cài riêng |
 | `@wealthcompass/server` | Backend `wealthcompass-server` | **Không cài vào web**: tiến trình riêng |
 
 Không publish đi đâu. Muốn đưa lên registry nội bộ thì `npm publish dist/build/<gói>` là việc làm riêng, có chủ đích.
@@ -104,19 +62,18 @@ npm run setup -- --app <thư mục web> [tùy chọn]
 | --- | --- | --- |
 | `--backend-url <url>` | `http://localhost:8890` | Địa chỉ backend ghi vào `provideCompass` và `wealthcompass.env` |
 | `--tarballs <thư mục>` / `--registry` | `dist/tarballs` của repo | Cài gói từ file `.tgz`, hoặc theo phiên bản từ registry |
-| `--annotate all\|/route1,/route2` | tắt | Gộp luôn gợi ý `tourId` (xem [integration-guide.md](integration-guide.md) mục 5.1) vào patch |
 | `--ai-code` | **tắt** | Cho AI đọc trích đoạn code service đăng nhập và guard khi phân tích tĩnh không đoán được |
 | `--no-llm` | (có LLM nếu có khóa) | Không gọi LLM chút nào |
-| `--force` | | Tạo lại `compass.config.yaml`, `wealthcompass.env` |
+| `--force` | | Tạo lại cấu hình và cấu hình backend trong kho dự án |
 | `--project <tên>` | app đầu tiên | Chọn app khi `angular.json` có nhiều app |
 
 Sáu việc `setup` làm, theo thứ tự:
 
 1. **Dò dự án (tĩnh, không AI):** app trong `angular.json`, phiên bản Angular, cổng dev; file route (theo `provideRouter(...)` / `RouterModule.forRoot(...)`); file menu (mảng literal giống menu nhất, hiểu các khóa `label/title/name`, `route/path/link/url/routerLink`, `children/items/submenu`); cách khởi động (standalone hay NgModule) và component gốc; service đăng nhập (tên `@Injectable` có `token`/`getAccessToken`/`jwt`..., và `roles`/`permissions`).
-2. **Sinh `compass.config.yaml`** và `compass.overrides.yaml` (file của WealthCompass, không phải code của web).
+2. **Sinh cấu hình** (`compass.config.yaml`) và `compass.overrides.yaml` dưới dạng tài liệu trong kho dự án, không ghi vào source của web.
 3. **Quét route.** Quyền mặc định là chỉ cần đăng nhập: `setup` không ghi quyền nào vào cấu hình. Chuỗi quyền thấy trong code guard (`hasRole('manager')`, `.includes('x')`) được nêu trong báo cáo làm gợi ý, chưa áp.
 4. **AI soạn nháp** `description`/`keywords`/`sampleQuestions` cho màn hình còn trống, từ chữ tĩnh trên giao diện (như `enrich`), đánh dấu `llmDraft`.
-5. **Dựng một patch** gồm: gói trong `package.json`, style trong `angular.json`, `provideCompass(...)` với `getToken`/`getCapabilities` nối vào service đăng nhập đã dò, câu gợi ý của widget lấy từ câu hỏi mẫu vừa soạn, `ChatWidgetComponent` và thẻ `<compass-chat-widget />` ở component gốc (và gợi ý `tourId` nếu `--annotate`).
+5. **Dựng một patch** gồm: gói trong `package.json`, style trong `angular.json`, `provideCompass(...)` với `getToken`/`getCapabilities` nối vào service đăng nhập đã dò, câu gợi ý của widget lấy từ câu hỏi mẫu vừa soạn, `ChatWidgetComponent` và thẻ `<compass-chat-widget />` ở component gốc.
 6. **Viết `wealthcompass.env`** cho backend và báo cáo **`WEALTHCOMPASS_SETUP.md`**.
 
 Chạy lại `setup` sau khi đã áp patch thì không còn gì để sửa (chỉ thêm, không lặp).
@@ -154,8 +111,8 @@ Thứ tự tìm khóa: `COMPASS_LLM_API_KEY` → `DEEPSEEK_API_KEY` (hoặc `GOO
 
 ## Sau setup (tùy chọn)
 
-- Gắn `tourId` hàng loạt: `npx wealthcompass annotate --config compass.config.yaml --only /route` ([integration-guide.md](integration-guide.md) mục 5.1).
-- Ghi tour bằng thao tác thật: `npx wealthcompass tour:record --config compass.config.yaml --url http://localhost:4200 --id ten-tour` ([tour-record.md](tour-record.md)).
+- `tourId`: dev tự gắn trong source khi cần ghim phần tử ([integration-guide.md](integration-guide.md) mục 5); tour ghi bằng `tour:record` không cần.
+- Ghi tour bằng thao tác thật: `wealthcompass tour:record --app <thư mục web> --url http://localhost:4200 --id ten-tour` ([tour-record.md](tour-record.md)).
 
 ## Thử toàn bộ quy trình bằng một lệnh
 

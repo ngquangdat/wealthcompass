@@ -1,10 +1,9 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { exists, isStorePath as storePath, readText, writeText } from '@wealthcompass/tourdb';
+import { dataRoot, usesStore } from '../project';
+import { join, relative, resolve, dirname } from 'node:path';
 import { Node } from 'ts-morph';
-import { parseDocument, type YAMLMap } from 'yaml';
 import type { LlmConfig } from '@wealthcompass/llm';
-import { annotate } from '../annotate';
-import { addEdit, addToDecoratorArray, buildGitPatch, importsEdit, mergeEdits, type EditSet } from '../codemod';
+import { addEdit, addToDecoratorArray, buildGitPatch, importsEdit, type EditSet } from '../codemod';
 import { enrich } from '../enrich';
 import { scan } from '../scan';
 import { detectProject, relImport, type AuthGuess, type ProjectInfo } from './detect';
@@ -21,7 +20,6 @@ export interface SetupOptions {
   // Cho phép gửi trích đoạn code (service đăng nhập, guard) cho LLM
   aiCode: boolean;
   // Gợi ý tourId luôn trong patch: danh sách màn hình, 'all', hoặc null (không)
-  annotate: string[] | 'all' | null;
   force: boolean;
   today?: string;
 }
@@ -35,7 +33,7 @@ export interface SetupResult {
   guards: GuardMapping[];
   auth: AuthGuess | null;
   todo: string[];
-  stats: { screens: number; drafted: number; annotated: number; patchFiles: number };
+  stats: { screens: number; drafted: number; patchFiles: number };
 }
 
 const PKG = '@wealthcompass/angular';
@@ -54,15 +52,19 @@ export async function setup(opts: SetupOptions, log: (m: string) => void = conso
 
   // 2) compass.config.yaml + overrides (file của WealthCompass, không phải code của web)
   log('2/6 Tạo cấu hình WealthCompass...');
-  const configFile = join(appDir, 'compass.config.yaml');
-  if (existsSync(configFile) && !opts.force) {
-    log('    compass.config.yaml đã có, giữ nguyên (dùng --force để tạo lại).');
+  // Dữ liệu của WealthCompass nằm trong kho dự án SQLite ngoài source (dự án kiểu cũ còn file cạnh source thì giữ chỗ cũ)
+  const data = dataRoot(appDir);
+  const inStore = usesStore(appDir);
+  if (inStore) log(`    kho dự án: ${data}`);
+  const configFile = join(data, 'compass.config.yaml');
+  if (exists(configFile) && !opts.force) {
+    log('    cấu hình đã có, giữ nguyên (dùng --force để tạo lại).');
   } else {
-    writeFileSync(configFile, configYaml(info, opts, today));
+    writeText(configFile, configYaml(info, opts, today, inStore ? appDir : null));
   }
-  const overridesFile = join(appDir, 'compass.overrides.yaml');
-  if (!existsSync(overridesFile)) {
-    writeFileSync(overridesFile, '# Phần do người viết/duyệt: mô tả, câu hỏi mẫu, tour. Ưu tiên hơn nội dung quét từ code.\nfeatures: {}\ntours: {}\n');
+  const overridesFile = join(data, 'compass.overrides.yaml');
+  if (!exists(overridesFile)) {
+    writeText(overridesFile, '# Phần do người viết/duyệt: mô tả, câu hỏi mẫu, tour. Ưu tiên hơn nội dung quét từ code.\nfeatures: {}\ntours: {}\n');
   }
 
   // 3) Quét. Quyền: mặc định mọi màn hình chỉ cần đăng nhập, setup không tự ghi quyền nào vào cấu hình.
@@ -103,8 +105,10 @@ export async function setup(opts: SetupOptions, log: (m: string) => void = conso
 
   // .wealthcompass/ chứa khóa của IdP giả lập và dữ liệu chạy (kết quả kiểm thử): không được commit
   const gitignore = join(appDir, '.gitignore');
-  if (existsSync(gitignore)) {
-    const text = readFileSync(gitignore, 'utf8');
+  if (inStore) {
+    // Dữ liệu nằm ngoài source: không cần đụng tới .gitignore của web
+  } else if (exists(gitignore)) {
+    const text = readText(gitignore);
     if (!/^\/?\.wealthcompass\/?\s*$/m.test(text)) {
       addEdit(edits, gitignore, { pos: text.length, text: `${text && !text.endsWith('\n') ? '\n' : ''}\n# WealthCompass: dữ liệu chạy trên máy (khóa IdP giả lập, kết quả kiểm thử)\n.wealthcompass/\n` });
     }
@@ -112,23 +116,15 @@ export async function setup(opts: SetupOptions, log: (m: string) => void = conso
     todo.push('Thêm `.wealthcompass/` vào .gitignore: thư mục chứa khóa của IdP giả lập và dữ liệu chạy, không commit.');
   }
 
-  let annotated = 0;
-  if (opts.annotate) {
-    const res = annotate({ config: configFile, only: opts.annotate === 'all' ? undefined : opts.annotate, out: null });
-    mergeEdits(edits, res.edits);
-    annotated = res.candidates.length;
-    if (annotated) todo.push(`Xem ${annotated} gợi ý tourId trong patch, đặc biệt các phần tử bị đánh dấu user-only.`);
-  }
-
   const { patch, base, files } = buildGitPatch(edits, appDir);
   const patchFile = patch ? join(appDir, 'wealthcompass-setup.patch') : null;
-  if (patchFile) writeFileSync(patchFile, patch);
+  if (patchFile) writeText(patchFile, patch);
 
   // 6) File cấu hình backend + báo cáo
   log('6/6 Viết file cấu hình backend và báo cáo...');
-  const envFile = join(appDir, 'wealthcompass.env');
-  if (!existsSync(envFile) || opts.force) writeFileSync(envFile, envText(info, opts, scanned.outFile));
-  todo.push('Điền JWKS/issuer/audience của hệ thống đăng nhập vào wealthcompass.env (hoặc dùng IdP giả lập khi thử).');
+  const envFile = join(data, 'wealthcompass.env');
+  if (!exists(envFile) || opts.force) writeText(envFile, envText(info, opts, scanned.outFile));
+  todo.push('Xác thực: mặc định backend tin API gateway đứng trước đã xác minh JWT (COMPASS_AUTH=gateway). Không có gateway thì đặt COMPASS_AUTH=jwks và điền JWKS/issuer/audience trong cấu hình backend.');
   todo.push(...info.notes);
 
   const result: SetupResult = {
@@ -140,21 +136,22 @@ export async function setup(opts: SetupOptions, log: (m: string) => void = conso
     guards,
     auth,
     todo,
-    stats: { screens: scanned.featureMap.features.length, drafted, annotated, patchFiles: files },
+    stats: { screens: scanned.featureMap.features.length, drafted, patchFiles: files },
   };
-  writeFileSync(result.reportFile, report(result, opts, base, today));
+  writeText(result.reportFile, report(result, opts, base, today));
   return result;
 }
 
 // ---------------------------------------------------------------------------
 
-function configYaml(info: ProjectInfo, opts: SetupOptions, today: string): string {
+function configYaml(info: ProjectInfo, opts: SetupOptions, today: string, sourceDir: string | null): string {
   const lines = [
     `# Sinh bởi \`wealthcompass setup\` ngày ${today}. Sửa thoải mái; chạy lại setup không ghi đè file này (trừ khi --force).`,
     'locale: vi',
     'backend:',
     `  url: ${opts.backendUrl}`,
     'discovery:',
+    ...(sourceDir ? [`  sourceDir: ${JSON.stringify(resolve(sourceDir))}   # source của web; dữ liệu WealthCompass nằm trong kho dự án, không nằm trong source`] : []),
     `  entry: ${info.routesFile}`,
     ...(info.menuFile ? [`  menu: ${info.menuFile}`] : ['  # menu: src/app/duong-dan/menu.ts   # không tự tìm thấy file menu']),
     '  overrides: compass.overrides.yaml',
@@ -183,7 +180,7 @@ function integrationEdits(info: ProjectInfo, opts: SetupOptions, auth: AuthGuess
 
   // a) package.json: các gói WealthCompass (+ driver.js vì angular.json trỏ thẳng vào css của nó)
   const pkgFile = join(appDir, 'package.json');
-  const pkgText = readFileSync(pkgFile, 'utf8');
+  const pkgText = readText(pkgFile);
   const pkg = JSON.parse(pkgText) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
   pkg.dependencies ??= {};
   const spec = (name: string) => {
@@ -214,7 +211,7 @@ function integrationEdits(info: ProjectInfo, opts: SetupOptions, auth: AuthGuess
 
   // b) angular.json: style của driver.js và theme của WealthCompass (đặt trước style của web để web ghi đè được)
   const ngFile = join(appDir, 'angular.json');
-  const ngText = readFileSync(ngFile, 'utf8');
+  const ngText = readText(ngFile);
   if (/^\s*\/\//m.test(ngText)) {
     todo.push('angular.json có chú thích nên không tự sửa: thêm "driver.js/dist/driver.css" và "@wealthcompass/angular/compass-theme.scss" vào mảng styles.');
   } else {
@@ -295,8 +292,8 @@ function integrationEdits(info: ProjectInfo, opts: SetupOptions, auth: AuthGuess
     if (url && Node.isPropertyAssignment(url)) {
       const lit = url.getInitializer();
       const file = lit && (Node.isStringLiteral(lit) || Node.isNoSubstitutionTemplateLiteral(lit)) ? resolve(b.root.file, '..', lit.getLiteralText()) : null;
-      if (file && existsSync(file)) {
-        const text = readFileSync(file, 'utf8');
+      if (file && exists(file)) {
+        const text = readText(file);
         if (!text.includes('compass-chat-widget')) addEdit(edits, file, { pos: text.length, text: `${text.endsWith('\n') ? '' : '\n'}<compass-chat-widget />\n` });
       }
     } else if (inline && Node.isPropertyAssignment(inline)) {
@@ -338,9 +335,9 @@ function providerSnippet(backendUrl: string, auth: AuthGuess | null, suggestions
 function envText(info: ProjectInfo, opts: SetupOptions, featureMap: string): string {
   const port = info.devPort;
   return [
-    '# Cấu hình backend WealthCompass cho web này. Backend chạy độc lập (không cài trong web): wealthcompass-server --env-file <đường dẫn file này>',
+    '# Cấu hình backend WealthCompass cho web này (lưu trong kho dự án). Backend chạy độc lập: COMPASS_PROJECT=<file kho .db> wealthcompass-server',
     '# KHÔNG ghi khóa LLM vào file này; đặt COMPASS_LLM_API_KEY qua biến môi trường/secret.',
-    `COMPASS_FEATURE_MAP=${featureMap}`,
+    ...(storePath(featureMap) ? [] : [`COMPASS_FEATURE_MAP=${featureMap}`]),
     `COMPASS_ORIGINS=http://localhost:${port},http://127.0.0.1:${port}`,
     `PORT=${new URL(opts.backendUrl).port || 8890}`,
     '',
@@ -384,7 +381,7 @@ function report(r: SetupResult, opts: SetupOptions, base: string, today: string)
     '',
     `- \`compass.config.yaml\`, \`compass.overrides.yaml\`, \`feature-map.json\`, \`compass.lock.json\`: file của WealthCompass (không phải code của web).`,
     `- \`wealthcompass.env\`: cấu hình backend cho web này.`,
-    r.patchFile ? `- \`wealthcompass-setup.patch\`: ${r.stats.patchFiles} file code cần sửa (gói, style, provider, widget${r.stats.annotated ? `, ${r.stats.annotated} gợi ý tourId` : ''}).` : '- Không có thay đổi code nào cần làm.',
+    r.patchFile ? `- \`wealthcompass-setup.patch\`: ${r.stats.patchFiles} file code cần sửa (gói, style, provider, widget).` : '- Không có thay đổi code nào cần làm.',
     r.stats.drafted ? `- AI đã soạn nháp dữ liệu tìm kiếm cho ${r.stats.drafted} màn hình (đánh dấu \`llmDraft\`).` : '',
     '',
     '## Cần bạn xem',
@@ -397,7 +394,7 @@ function report(r: SetupResult, opts: SetupOptions, base: string, today: string)
     ...(patchRel ? [`cd ${base}`, `git apply --check ${patchRel} && git apply ${patchRel}`] : []),
     `cd ${i.appDir}`,
     'npm install',
-    `wealthcompass-server --env-file ${join(i.appDir, 'wealthcompass.env')}   # backend: tiến trình riêng, chạy từ bản cài WealthCompass (cổng ${new URL(opts.backendUrl).port || 8890})`,
+    `${storePath(r.envFile) ? `COMPASS_PROJECT=${dirname(r.envFile)} wealthcompass-server` : `wealthcompass-server --env-file ${r.envFile}`}   # backend: tiến trình riêng, chạy từ bản cài WealthCompass (cổng ${new URL(opts.backendUrl).port || 8890})`,
     'npm start                                              # web',
     `wealthcompass doctor --app ${i.appDir}   # kiểm tra mọi thứ đã nối đúng (chạy từ bản cài WealthCompass)`,
     '```',

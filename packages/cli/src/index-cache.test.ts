@@ -56,6 +56,6 @@ test('chỉ mục source: dùng lại khi source không đổi, quét lại khi 
   assert.notEqual(committed, base);
   assert.equal(scan(cfg, { useIndex: true }).fromIndex, false);
   assert.equal(scan(cfg, { useIndex: true }).fromIndex, true);
-  // Quét đầy đủ (CLI scan, annotate, enrich) không bao giờ đọc chỉ mục
+  // Quét đầy đủ (CLI scan, enrich) không bao giờ đọc chỉ mục
   assert.equal(scan(cfg).fromIndex, false);
 });

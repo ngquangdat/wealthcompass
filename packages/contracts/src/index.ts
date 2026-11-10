@@ -258,6 +258,8 @@ export const compassConfigSchema = z.object({
     // angular: quét source Angular (route, menu, template). none: chưa có source, màn hình lấy từ tour đã ghi
     // và từ `features.<id>.route` trong overrides.
     source: z.enum(['angular', 'none']).default('angular'),
+    // Thư mục source của web (đường dẫn tuyệt đối) khi dữ liệu nằm trong kho dự án ngoài source; bỏ trống = cùng thư mục với cấu hình
+    sourceDir: z.string().optional(),
     // File route gốc; bắt buộc khi source là angular
     entry: z.string().optional(),
     menu: z.string().optional(),
@@ -278,10 +280,8 @@ export const compassConfigSchema = z.object({
     .object({
       userOnly: z.array(z.string()).default([]),
       blockedRoutes: z.array(z.string()).default([]),
-      // Từ khóa trên nút nhạy cảm (so khớp không dấu), vd. "bán", "xác nhận": phần tử khớp chỉ được tô sáng
-      userOnlyText: z.array(z.string()).default([]),
     })
-    .default({ userOnly: [], blockedRoutes: [], userOnlyText: [] }),
+    .default({ userOnly: [], blockedRoutes: [] }),
   // Bố cục và chờ tải khi ghi/chạy tour
   tours: z
     .object({

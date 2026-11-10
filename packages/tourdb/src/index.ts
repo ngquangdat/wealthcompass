@@ -8,6 +8,10 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import { recordedTourSchema, toursFileSchema, type RecordedTour, type ToursFile } from '@wealthcompass/contracts';
+import { storeOf } from './store';
+
+export * from './store';
+export * from './seed';
 
 export const TOUR_ID = /^[a-z0-9][a-z0-9-]{1,60}$/;
 const STEP_KEY = /^[\w-]{1,40}$/;
@@ -56,7 +60,10 @@ CREATE TABLE IF NOT EXISTS tour_shots (
 );`;
 
 // Đường dẫn file SQLite của kho. Cấu hình cũ còn trỏ compass.tours.json thì dùng file .db cùng tên.
+// Đường dẫn nằm trong kho dự án (`<kho>.db/compass.tours.db`): tour nằm ngay trong file kho đó, không có file riêng.
 export function tourDbPath(file: string): string {
+  const store = storeOf(file);
+  if (store) return store.db;
   return file.endsWith('.json') ? file.replace(/\.json$/, '.db') : file;
 }
 // File JSON của bản trước (compass.tours.json) nằm cạnh file .db

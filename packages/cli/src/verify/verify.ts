@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
+import { writeText } from '@wealthcompass/tourdb';
 import { dirname, join, resolve } from 'node:path';
 import type { Layout, Locator, Tour, TourStep } from '@wealthcompass/contracts';
 import { routeMatches, stepsForLayout, type ProbeOptions, type ProbeResult } from '@wealthcompass/core';
@@ -150,7 +151,6 @@ export async function verifyTours(opts: VerifyOptions, log: (msg: string) => voi
     mobileBreakpoint: config.tours.mobileBreakpoint,
     busySelector: config.tours.busySelector,
     userOnly: config.safety.userOnly,
-    userOnlyText: config.safety.userOnlyText,
     timeoutMs: opts.timeoutMs ?? 4000,
   };
 
@@ -238,7 +238,7 @@ export async function verifyTours(opts: VerifyOptions, log: (msg: string) => voi
   const result: VerifyReport = { url: base, at: new Date().toISOString(), tours: reports, summary };
   if (opts.report) {
     mkdirSync(dirname(resolve(opts.report)), { recursive: true });
-    writeFileSync(resolve(opts.report), JSON.stringify(result, null, 2) + '\n');
+    writeText(resolve(opts.report), JSON.stringify(result, null, 2) + '\n');
   }
   const drifted = all.filter((s) => s.drift?.length && !s.healed).length;
   log(

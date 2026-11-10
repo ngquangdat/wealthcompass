@@ -4,10 +4,11 @@ import { rerecordStep } from './record/rerecord';
 import { verifyTours } from './verify/verify';
 import { pushTours } from './verify/push';
 import { enrich, resolveOnly } from './enrich';
-import { annotate, formatReport } from './annotate';
-import { dirname, join, relative, resolve } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { toursFileSchema } from '@wealthcompass/contracts';
+import { compassHome, exists, exportProject, importProject, seedDirFor, writeText } from '@wealthcompass/tourdb';
+import { CONFIG_NAME, dataRoot, migrateToStore, resolveConfigArg } from './project';
 import { readToursFile, writeTours } from './record/write';
 import { fileURLToPath } from 'node:url';
 import { setup } from './setup/setup';
@@ -32,13 +33,9 @@ if (command === 'doctor' && arg('app')) {
   process.exit(failed ? 1 : 0);
 } else if (command === 'studio') {
   // Giao diện web trên máy dev, thay cho việc gõ từng lệnh
-  const repoTarballs = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'dist', 'tarballs');
-  // Chỉ chọn thư mục; có đúng bản .tgz hay không thì kiểm tra lúc dùng (có thể `npm run pack` sau khi mở Studio)
-  const tgz = process.env['COMPASS_TARBALLS'] ?? (existsSync(repoTarballs) ? repoTarballs : null);
   const { url } = await startStudio({
     port: Number(arg('port', '5310')),
     open: arg('app'),
-    tarballs: process.argv.includes('--registry') ? null : tgz,
   });
   console.log(`WealthCompass Studio: ${url}\n(chỉ mở trên máy này; Ctrl+C để tắt, các tiến trình Studio mở sẽ dừng theo)`);
   if (!process.argv.includes('--no-open')) {
@@ -50,39 +47,63 @@ if (command === 'doctor' && arg('app')) {
   // Chưa có source của web: tạo cấu hình tối thiểu để ghi tour bằng URL (màn hình sinh từ tour đã ghi)
   const url = arg('url');
   if (!url || !/^https?:\/\//.test(url)) {
-    console.error('Cách dùng: wealthcompass init --url <địa chỉ web> [--dir <thư mục dự án tour>]');
+    console.error('Cách dùng: wealthcompass init --url <địa chỉ web> [--name <tên dự án>]');
     process.exit(1);
   }
-  const dir = resolve(arg('dir', '.')!);
-  const file = join(dir, 'compass.config.yaml');
-  if (existsSync(file) && !process.argv.includes('--force')) {
-    console.error(`${file} đã có. Dùng --force để ghi đè.`);
+  // Kho dự án: file SQLite ngoài mọi source, đặt tên theo tên miền của web (hoặc --name)
+  const name = (arg('name') ?? new URL(url).hostname).replace(/[^\w.-]/g, '_');
+  const db = arg('db') ? resolve(arg('db')!) : join(compassHome(), 'projects', `${name}.db`);
+  const file = join(db, 'compass.config.yaml');
+  if (exists(file) && !process.argv.includes('--force')) {
+    console.error(`Kho dự án ${db} đã có cấu hình. Dùng --force để ghi đè, hoặc --name <tên khác>.`);
     process.exit(1);
   }
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(
+  writeText(
     file,
     [
-      '# WealthCompass: dự án tour chưa có source của web. Khi có source, chạy `wealthcompass setup --app <thư mục web>`',
-      '# rồi chép compass.tours.db và compass.overrides.yaml sang.',
+      '# WealthCompass: dự án tour chưa có source của web. Khi có source, chạy `wealthcompass setup --app <thư mục web>`.',
       'locale: vi',
       `web: { url: ${JSON.stringify(new URL(url).origin)} }`,
       'discovery:',
       '  source: none',
-      'safety:',
-      '  # Nút có chữ này chỉ được tô sáng, không bao giờ bấm thật khi ghi hay kiểm tour. Thêm chữ của các nút gây giao dịch trên web của bạn.',
-      '  userOnlyText: [đặt lệnh, gửi lệnh, xác nhận]',
       '',
     ].join('\n'),
   );
-  if (!existsSync(join(dir, 'compass.overrides.yaml'))) {
-    writeFileSync(join(dir, 'compass.overrides.yaml'), '# Mô tả màn hình cho trợ lý. Khai màn hình có tham số: features: { orders.detail: { route: /orders/:id, title: ... } }\nfeatures: {}\n');
+  if (!exists(join(db, 'compass.overrides.yaml'))) {
+    writeText(join(db, 'compass.overrides.yaml'), '# Mô tả màn hình cho trợ lý. Khai màn hình có tham số: features: { orders.detail: { route: /orders/:id, title: ... } }\nfeatures: {}\n');
   }
-  console.log(`Đã tạo ${file}\nGhi tour: wealthcompass tour:record --config ${file} --id <tour-id>   (hoặc: wealthcompass studio --app ${dir})`);
+  console.log(`Đã tạo kho dự án ${db}\nGhi tour: wealthcompass tour:record --app ${db} --id <tour-id>   (hoặc: wealthcompass studio --app ${db})`);
+} else if (command === 'project:export' || command === 'project:import') {
+  // Xuất cả kho dự án ra thư mục file văn bản (sao lưu, chuyển máy, bản mẫu commit cùng repo), hoặc nhập lại
+  const app = arg('app');
+  if (!app) {
+    console.error('Cách dùng: wealthcompass project:export --app <thư mục web | file kho> [--out <thư mục>]   |   project:import --app <thư mục web | file kho> [--from <thư mục>]\nMặc định dùng thư mục bản mẫu cạnh source: <thư mục web>.compass');
+    process.exit(1);
+  }
+  const abs = resolve(app);
+  const db = dataRoot(abs);
+  if (!db.endsWith('.db')) {
+    console.error(`${abs} là dự án kiểu cũ (file cạnh source). Chạy \`wealthcompass migrate --app ${abs}\` trước.`);
+    process.exit(1);
+  }
+  const dir = resolve(arg(command === 'project:export' ? 'out' : 'from') ?? seedDirFor(abs));
+  const names = command === 'project:export' ? exportProject(db, dir) : importProject(db, dir, abs.endsWith('.db') ? undefined : abs);
+  console.log(`${command === 'project:export' ? `Đã xuất kho ${db} ra ${dir}` : `Đã nhập ${dir} vào kho ${db}`}:\n` + names.map((n) => `  - ${n}`).join('\n'));
+} else if (command === 'migrate') {
+  // Chuyển dự án kiểu cũ (file của WealthCompass nằm cạnh source) vào kho dự án SQLite ngoài source, rồi xóa các file đó
+  const app = arg('app');
+  if (!app || !existsSync(join(resolve(app), CONFIG_NAME))) {
+    console.error('Cách dùng: wealthcompass migrate --app <thư mục web còn compass.config.yaml cạnh source>');
+    process.exit(1);
+  }
+  const result = migrateToStore(resolve(app));
+  console.log(`Đã chuyển vào kho dự án ${result.db}:\n` + result.moved.map((m) => `  - ${m}`).join('\n'));
+  if (result.left.length) console.log('Giữ lại trong source (không thuộc kho):\n' + result.left.map((m) => `  - ${m}`).join('\n'));
+  console.log(`Chạy backend: COMPASS_PROJECT=${result.db} wealthcompass-server   ·   Studio: wealthcompass studio --app ${resolve(app)}`);
 } else if (command === 'setup') {
   const app = arg('app');
   if (!app) {
-    console.error('Cách dùng: wealthcompass setup --app <thư mục web Angular> [--backend-url http://localhost:8890] [--tarballs <thư mục .tgz> | --registry] [--annotate all|màn-hình,...] [--ai-code] [--no-llm] [--force] [--project <tên>]');
+    console.error('Cách dùng: wealthcompass setup --app <thư mục web Angular> [--backend-url http://localhost:8890] [--tarballs <thư mục .tgz> | --registry] [--ai-code] [--no-llm] [--force] [--project <tên>]');
     process.exit(1);
   }
   // Gói .tgz: --tarballs, biến COMPASS_TARBALLS, hoặc dist/tarballs của repo (khi chạy từ source)
@@ -94,7 +115,6 @@ if (command === 'doctor' && arg('app')) {
     console.error(`Không thấy gói ${VERSION} trong ${tarballs}. Chạy \`npm run pack\` trong repo WealthCompass trước, chỉ đúng --tarballs, hoặc dùng --registry.`);
     process.exit(1);
   }
-  const annotateArg = arg('annotate');
   const result = await setup({
     app,
     project: arg('project'),
@@ -103,7 +123,6 @@ if (command === 'doctor' && arg('app')) {
     version: VERSION,
     llm: process.argv.includes('--no-llm') ? null : resolveLlmConfig(),
     aiCode: process.argv.includes('--ai-code'),
-    annotate: annotateArg ? (annotateArg === 'all' ? 'all' : resolveOnly(annotateArg)!) : null,
     force: process.argv.includes('--force'),
   });
   console.log(`\nXong. Code của web chưa bị sửa.`);
@@ -112,7 +131,7 @@ if (command === 'doctor' && arg('app')) {
   console.log(`  Backend:  ${result.envFile}`);
   if (result.todo.length) console.log(`\nCần xem (${result.todo.length} mục, chi tiết trong báo cáo):\n` + result.todo.map((t) => '  - ' + t).join('\n'));
 } else if (command === 'scan' || command === 'doctor') {
-  const config = arg('config', 'compass.config.yaml')!;
+  const config = resolveConfigArg(arg('config'), arg('app'));
   const { featureMap, outFile } = scan(config);
   const c = featureMap.coverage;
   const pct = (n: number) => (c.routesFound ? Math.round((n / c.routesFound) * 100) : 0);
@@ -128,27 +147,10 @@ if (command === 'doctor' && arg('app')) {
   }
   const strict = process.argv.includes('--strict');
   if (strict && c.warnings.length) process.exit(1);
-} else if (command === 'annotate') {
-  // Gợi ý tourId cho phần tử chưa có và xuất patch; KHÔNG sửa code
-  const config = arg('config', 'compass.config.yaml')!;
-  const print = process.argv.includes('--print');
-  const result = annotate({ config, only: resolveOnly(arg('only')), out: print ? null : arg('out'), directiveImport: arg('directive-import') });
-  const base = dirname(config);
-  console.log(formatReport(result, base) || '\nKhông có phần tử tương tác nào còn thiếu tourId.');
-  for (const s of result.skipped) console.log(`\n! Bỏ qua ${s.component} (${relative(base, s.file)})${s.count ? `, ${s.count} phần tử` : ''}: ${s.reason}`);
-  const sure = result.candidates.filter((c) => c.sensitive?.level === 'sure').length;
-  const maybe = result.candidates.filter((c) => c.sensitive?.level === 'maybe').length;
-  console.log(`\n${result.candidates.length} phần tử gợi ý tourId (${sure} chắc chắn user-only, ${maybe} cần xem lại).`);
-  if (print) console.log('\n' + result.patch);
-  else if (result.patchFile) {
-    console.log(`Đã ghi patch (${result.patchFileCount} file): ${result.patchFile}`);
-    console.log('Xem patch, bỏ những chỗ không cần, rồi áp dụng:\n  ' + result.applyHint);
-    console.log('Code chưa bị sửa. Sau khi áp patch: chạy scan để xác nhận.');
-  }
 } else if (command === 'enrich') {
   // Soạn nháp description/keywords/sampleQuestions cho màn hình còn thiếu; chỉ điền chỗ trống
   await enrich({
-    config: arg('config', 'compass.config.yaml')!,
+    config: resolveConfigArg(arg('config'), arg('app')),
     dryRun: process.argv.includes('--dry-run'),
     only: resolveOnly(arg('only')),
     llm: resolveLlmConfig(),
@@ -159,7 +161,7 @@ if (command === 'doctor' && arg('app')) {
   let url = arg('url');
   if (!url) {
     try {
-      url = loadConfig(arg('config', 'compass.config.yaml')!).config.web?.url;
+      url = loadConfig(resolveConfigArg(arg('config'), arg('app'))).config.web?.url;
     } catch {
       url = undefined;
     }
@@ -169,7 +171,7 @@ if (command === 'doctor' && arg('app')) {
     process.exit(1);
   }
   await recordTour({
-    config: arg('config', 'compass.config.yaml')!,
+    config: resolveConfigArg(arg('config'), arg('app')),
     url,
     id,
     title: arg('title'),
@@ -182,7 +184,7 @@ if (command === 'doctor' && arg('app')) {
   });
 } else if (command === 'tour:export' || command === 'tour:import') {
   // Kho tour là SQLite (nhị phân): xuất ra JSON để xem/sửa tay các trường nâng cao (list.index, rowText, chữ bản mobile), rồi nhập lại
-  const { config, root } = loadConfig(arg('config', 'compass.config.yaml')!);
+  const { config, root } = loadConfig(resolveConfigArg(arg('config'), arg('app')));
   const db = join(root, config.discovery.tours);
   const file = resolve(arg('file', 'compass.tours.export.json')!);
   if (command === 'tour:export') {
@@ -211,7 +213,7 @@ if (command === 'doctor' && arg('app')) {
     process.exit(1);
   }
   const report = await verifyTours({
-    config: arg('config', 'compass.config.yaml')!,
+    config: resolveConfigArg(arg('config'), arg('app')),
     url,
     only: arg('only')?.split(',').map((s) => s.trim()).filter(Boolean),
     layouts: layout ? [layout as 'desktop' | 'mobile'] : undefined,
@@ -242,7 +244,7 @@ if (command === 'doctor' && arg('app')) {
     process.exit(1);
   }
   const layout = process.argv.includes('--mobile') ? 'mobile' : process.argv.includes('--desktop') ? 'desktop' : undefined;
-  await rerecordStep({ config: arg('config', 'compass.config.yaml')!, url, id, key, layout });
+  await rerecordStep({ config: resolveConfigArg(arg('config'), arg('app')), url, id, key, layout });
 } else if (command === 'tour:push') {
   // Đưa tour lên kho tour của backend (có phiên bản); widget lấy tour từ đó, không cần deploy lại web
   const server = arg('server');
@@ -252,7 +254,7 @@ if (command === 'doctor' && arg('app')) {
     process.exit(1);
   }
   await pushTours({
-    config: arg('config', 'compass.config.yaml')!,
+    config: resolveConfigArg(arg('config'), arg('app')),
     server,
     token,
     only: arg('only')?.split(',').map((s) => s.trim()).filter(Boolean),
@@ -262,6 +264,6 @@ if (command === 'doctor' && arg('app')) {
     dryRun: process.argv.includes('--dry-run'),
   });
 } else {
-  console.log('Cách dùng: wealthcompass studio [--app <dir>] | setup --app <dir> | init --url <web> [--dir <dir>] | doctor --app <dir> | scan --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--dry-run] | annotate --config <yaml> [--only ...] [--out file] [--print] | tour:record ... | tour:verify ... | tour:auth ... | tour:rerecord ... | tour:push ... | tour:export [--file x.json] | tour:import --file x.json');
+  console.log('Cách dùng: wealthcompass studio [--app <dir>] | setup --app <dir> | init --url <web> [--name <tên>] | migrate --app <dir> | project:export --app <dir> | project:import --app <dir> | doctor --app <dir> | scan --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--dry-run] | tour:record ... | tour:verify ... | tour:auth ... | tour:rerecord ... | tour:push ... | tour:export [--file x.json] | tour:import --file x.json');
   process.exit(command ? 1 : 0);
 }

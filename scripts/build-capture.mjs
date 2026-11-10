@@ -13,11 +13,10 @@ const out = join(root, 'packages/cli/src/record/capture.bundle.ts');
 const result = await build({
   stdin: {
     contents: [
-      "import { appearedSince, captureLocator, snapshotVisible } from './packages/core/src/locator-capture';",
-      "import { matchesUserOnlyText } from './packages/core/src/safety';",
+      "import { appearedSince, captureLocator, pickTourId, snapshotVisible } from './packages/core/src/locator-capture';",
       "import { probeStep } from './packages/core/src/locator-probe';",
       'window.__compassCapture = captureLocator;',
-      'window.__compassUserOnlyText = matchesUserOnlyText;',
+      'window.__compassPickTourId = pickTourId;',
       'window.__compassSnapshot = snapshotVisible;',
       'window.__compassAppeared = appearedSince;',
       // tour:verify: thử từng bước bằng đúng bộ tìm phần tử của widget

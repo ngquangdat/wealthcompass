@@ -44,19 +44,26 @@ const MAX_TARGET_TEXT = 120;
 
 // Phần tử thật sự nhận lần bấm.
 // 1. Thẻ/role tương tác gần nhất (bấm trúng icon/span bên trong nút).
-// 2. Web gắn (click) lên div/span thường (không role, không href): leo lên tổ tiên ngoài cùng còn `cursor: pointer`
-//    (cursor kế thừa xuống con, nên phần tử ngoài cùng là nơi khai báo), miễn vùng đó không quá lớn.
+// 2. Web gắn (click) lên div/span thường (không role, không href): leo lên các tổ tiên còn `cursor: pointer` (cursor kế
+//    thừa xuống con) chừng nào tổ tiên đó vẫn chỉ chứa đúng chữ của mục vừa bấm.
 // 3. Bấm trúng icon/ảnh không có chữ và không có cursor: leo tối đa 4 cấp tới tổ tiên gần nhất có chữ ngắn,
 //    để locator có manh mối tìm lại.
 export function interactiveTarget(element: Element): Element {
   const semantic = element.closest(INTERACTIVE_SELECTOR);
   if (semantic) return semantic;
   if (cursorOf(element) === 'pointer') {
+    // Leo lên trong khi phần tử cha vẫn là "cùng một mục": cha không thêm chữ nào khác. Cha có thêm chữ (các mục anh em
+    // của một menu, cả thanh bên có cursor: pointer) là vùng chứa nhiều mục, không phải nút vừa bấm: dừng.
+    // Bấm trúng icon không chữ thì nhận chữ của tổ tiên gần nhất có chữ ngắn rồi mới áp quy tắc trên.
     let target = element;
-    for (let depth = 0; depth < 6; depth++) {
+    let text = shortText(target);
+    for (let depth = 0; depth < 8; depth++) {
       const parent = target.parentElement;
-      if (!parent || parent === document.body || cursorOf(parent) !== 'pointer' || shortText(parent).length > MAX_TARGET_TEXT) break;
+      if (!parent || parent === document.body || cursorOf(parent) !== 'pointer') break;
+      const parentText = shortText(parent);
+      if (text ? parentText !== text : parentText.length > MAX_TARGET_TEXT) break;
       target = parent;
+      text = parentText;
     }
     return target;
   }
@@ -69,6 +76,42 @@ export function interactiveTarget(element: Element): Element {
     }
   }
   return element;
+}
+
+const TOUR_ID_ATTR = 'data-tour-id';
+
+export interface TourIdPick {
+  // Phần tử mang tourId được chọn; null khi lần bấm không có tourId nào dùng được
+  element: Element | null;
+  tourId: string | null;
+  // tourId của một vùng chứa bao ngoài đã bị bỏ qua (vùng đó có nhiều phần tử bấm được nên không trỏ đúng nút vừa bấm)
+  skipped?: string;
+}
+
+// Lần bấm nằm trong nhiều phần tử có tourId lồng nhau (vd. div[tourId] > button[tourId] > span[tourId]): chọn tourId nào?
+// Quy tắc, theo thứ tự:
+//   1. tourId của CHÍNH phần tử tương tác vừa bấm (nút, link, ô nhập). Đây là thứ người dùng thật sẽ bấm.
+//   2. tourId của phần tử con nằm giữa chỗ bấm và phần tử tương tác (span/icon bên trong nút), gần chỗ bấm nhất.
+//   3. tourId của phần tử bọc sát bên ngoài (tối đa 3 cấp) NẾU nó chỉ chứa đúng một phần tử tương tác: bọc một nút.
+//   Vùng chứa có nhiều phần tử bấm được (thanh công cụ, thẻ, form) không được dùng: tourId của nó trỏ cả vùng, không trỏ
+//   nút vừa bấm. Khi đó bước được ghi bằng selector (locator) và báo lại tourId đã bỏ qua.
+export function pickTourId(clicked: Element): TourIdPick {
+  const target = interactiveTarget(clicked);
+  if (target.hasAttribute(TOUR_ID_ATTR)) return { element: target, tourId: target.getAttribute(TOUR_ID_ATTR) };
+  for (let el: Element | null = clicked; el && el !== target; el = el.parentElement) {
+    if (el.hasAttribute(TOUR_ID_ATTR)) return { element: el, tourId: el.getAttribute(TOUR_ID_ATTR) };
+  }
+  let el = target.parentElement;
+  for (let depth = 0; el && el !== document.body && depth < 3; depth++, el = el.parentElement) {
+    if (!el.hasAttribute(TOUR_ID_ATTR)) continue;
+    const id = el.getAttribute(TOUR_ID_ATTR);
+    const inside = el.querySelectorAll(INTERACTIVE_SELECTOR).length;
+    return inside <= 1 ? { element: el, tourId: id } : { element: null, tourId: null, ...(id ? { skipped: id } : {}) };
+  }
+  // tourId ở xa hơn 3 cấp là của cả một khu vực: không dùng, nhưng báo lại để người ghi biết
+  const far = target.parentElement?.closest(`[${TOUR_ID_ATTR}]`);
+  const farId = far?.getAttribute(TOUR_ID_ATTR);
+  return { element: null, tourId: null, ...(farId ? { skipped: farId } : {}) };
 }
 
 // Chữ an toàn để ghi: không lấy trong vùng nhạy cảm, không lấy chuỗi toàn số, đã che PII

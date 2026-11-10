@@ -1,10 +1,11 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { exists, mtime, readText } from '@wealthcompass/tourdb';
+import { configPathOf, dataRoot } from '../project';
 import { Document, parseDocument } from 'yaml';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import type { OutgoingHttpHeaders } from 'node:http';
-import { spawn } from 'node:child_process';
 import type { FastifyReply } from 'fastify';
 import { resolveLlmConfig, LLM_PRESETS } from '@wealthcompass/llm';
 import { findGaps } from '../enrich';
@@ -20,10 +21,10 @@ import { readOverrides } from './overrides-edit';
 interface State {
   appDir: string | null;
   // Ghi đè cấu hình AI trong phiên Studio (không ghi file)
-  ai: { provider?: string; model?: string; apiKey?: string; aiCode: boolean };
+  ai: { provider?: string; model?: string; apiKey?: string };
 }
 
-export const state: State = { appDir: null, ai: { aiCode: false } };
+export const state: State = { appDir: null, ai: {} };
 
 export function llmEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
@@ -54,8 +55,11 @@ export function httpError(status: number, message: string): Error & { statusCode
   return Object.assign(new Error(message), { statusCode: status });
 }
 
-export const configPath = (app: string) => join(app, 'compass.config.yaml');
-export const integrated = (app: string) => existsSync(configPath(app));
+// Cấu hình của dự án: trong kho dự án SQLite (mặc định) hoặc cạnh source (dự án kiểu cũ)
+export const configPath = (app: string) => configPathOf(app);
+// Tài liệu dữ liệu khác của dự án (wealthcompass.env, compass.eval.yaml...)
+export const dataFile = (app: string, name: string) => join(dataRoot(app), name);
+export const integrated = (app: string) => exists(configPath(app));
 
 // Luồng sự kiện cho việc chạy lâu (setup, enrich, npm install): {type:'log'|'result'|'error'}
 export async function stream(reply: FastifyReply, task: (log: (m: string) => void) => Promise<unknown>): Promise<void> {
@@ -69,17 +73,6 @@ export async function stream(reply: FastifyReply, task: (log: (m: string) => voi
     send({ type: 'error', message: (e as Error).message });
   }
   reply.raw.end();
-}
-
-export function runCommand(cmd: string, args: string[], cwd: string, log: (m: string) => void, env = process.env): Promise<void> {
-  return new Promise((ok, fail) => {
-    const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    const relay = (d: Buffer) => d.toString().split('\n').filter((l) => l.trim()).forEach(log);
-    child.stdout.on('data', relay);
-    child.stderr.on('data', relay);
-    child.on('error', fail);
-    child.on('exit', (code) => (code === 0 ? ok() : fail(new Error(`${cmd} ${args.join(' ')} thoát với mã ${code}`))));
-  });
 }
 
 // Dự án tour chưa có source của web: chỉ có compass.config.yaml với discovery.source: none (tạo bằng `wealthcompass init`)
@@ -144,6 +137,9 @@ export function projectSummary(app: string) {
     patchPending: existsSync(join(app, 'wealthcompass-setup.patch')),
     noSource: false,
     webUrl: webUrl(app),
+    // Nơi lưu dữ liệu của dự án: file kho SQLite ngoài source, hoặc chính thư mục web (kiểu cũ)
+    dataStore: dataRoot(app),
+    legacyFiles: !dataRoot(app).endsWith('.db') && integrated(app),
   };
 }
 
@@ -238,9 +234,9 @@ export function cachedScan(app: string, full = false): ScanResult {
   const { config: cfg, root } = loadConfig(config);
   // Kho tour: file .db (hoặc compass.tours.json của bản trước khi chưa chuyển)
   const toursDb = join(root, cfg.discovery.tours).replace(/\.json$/, '.db');
-  const files = [config, join(root, cfg.discovery.overrides), toursDb, toursDb.replace(/\.db$/, '.json')].filter(existsSync);
+  const files = [config, join(root, cfg.discovery.overrides), toursDb, toursDb.replace(/\.db$/, '.json')].filter((f) => exists(f));
   // File dữ liệu theo mtime; source theo commit + file đang sửa dở (không duyệt cả cây thư mục mỗi lần)
-  const fingerprint = `${Math.max(0, ...files.map((f) => statSync(f).mtimeMs))}|${cfg.discovery.source === 'none' ? '' : appFingerprint(app)}`;
+  const fingerprint = `${Math.max(0, ...files.map((f) => mtime(f)))}|${cfg.discovery.source === 'none' ? '' : appFingerprint(app)}`;
   if (cache && cache.key === config && cache.fingerprint === fingerprint && (!full || !cache.result.fromIndex)) return cache.result;
   const result = scan(config, { useIndex: !full });
   // scan ghi lại feature-map.json/lock (không nằm trong thư mục nguồn nên không làm đổi dấu vân tay)
@@ -253,14 +249,6 @@ export function invalidateScan(): void {
   forgetFingerprints();
 }
 
-// Các patch Studio sinh ra để người xem trước khi áp
-const PATCHES: Record<string, string> = { setup: 'wealthcompass-setup.patch', tourid: 'wealthcompass-tourid.patch' };
-export function patchFile(app: string, name = 'setup'): string {
-  const file = PATCHES[name];
-  if (!file) throw httpError(400, 'Tên patch không hợp lệ');
-  return join(app, file);
-}
-
 // Nhật ký hỏi đáp của backend do Studio bật: để ngoài dự án (không lẫn vào git), mỗi dự án một file
 export function eventLogFile(app: string): string {
   const id = createHash('sha256').update(resolve(app)).digest('hex').slice(0, 8);
@@ -269,13 +257,13 @@ export function eventLogFile(app: string): string {
 
 // Địa chỉ backend của dự án (PORT trong wealthcompass.env, mặc định 8890); Studio gọi qua 127.0.0.1
 export function backendUrl(app: string): string {
-  const file = join(app, 'wealthcompass.env');
-  const port = existsSync(file) ? readEnvFile(file)['PORT'] : undefined;
+  const file = dataFile(app, 'wealthcompass.env');
+  const port = exists(file) ? readEnvFile(file)['PORT'] : undefined;
   return `http://127.0.0.1:${port || 8890}`;
 }
 
 export function loadDoc(file: string): Document {
-  const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const text = exists(file) ? readText(file) : '';
   const doc = text.trim() ? parseDocument(text) : new Document({});
   if (doc.errors.length) throw httpError(400, `${file} không phải YAML hợp lệ: ${doc.errors[0].message}`);
   return doc;

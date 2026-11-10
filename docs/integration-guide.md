@@ -36,7 +36,7 @@ COMPASS_JWT_ISSUER=https://sso.congty.vn \
 COMPASS_JWT_AUDIENCE=web-dau-tu \
 COMPASS_CAPABILITIES_CLAIM=roles \
 COMPASS_ORIGINS=https://web.congty.vn \
-COMPASS_FEATURE_MAP=/duong/dan/feature-map.json \
+COMPASS_PROJECT=/duong/dan/toi/web-hoac-file-kho.db \
 COMPASS_LLM_PROVIDER=deepseek COMPASS_LLM_API_KEY=... \
 npm run server
 ```
@@ -48,7 +48,8 @@ npm run server
 | `COMPASS_JWKS_URL`, `COMPASS_JWT_ISSUER`, `COMPASS_JWT_AUDIENCE` | Xác minh chữ ký, nhà phát hành, đối tượng của JWT | trỏ IdP giả lập |
 | `COMPASS_CAPABILITIES_CLAIM` | Tên claim chứa quyền; chấp nhận mảng hoặc chuỗi cách nhau bằng dấu cách/phẩy | `roles` |
 | `COMPASS_ORIGINS` | Origin được gọi (CORS), phân tách bằng dấu phẩy | `localhost:4200` |
-| `COMPASS_FEATURE_MAP` | File Feature Map; tự nạp lại khi file đổi | file của demo |
+| `COMPASS_PROJECT` | Kho dự án backend phục vụ: file kho `.db` hoặc thư mục source của web. Bản đồ tính năng, tour và cấu hình backend đều đọc từ đó; tự nạp lại khi kho đổi | web demo trong repo |
+| `COMPASS_FEATURE_MAP` | Chỉ cho dự án kiểu cũ: đường dẫn `feature-map.json` cạnh source | file của demo |
 | `COMPASS_LLM_PROVIDER` | `deepseek` hoặc `gemini` (preset base URL + model + tên biến khóa) | `deepseek` |
 | `COMPASS_LLM_BASE_URL`, `COMPASS_LLM_MODEL`, `COMPASS_LLM_API_KEY` | Ghi đè preset, dùng cho endpoint tương thích OpenAI bất kỳ (vLLM, Ollama on-prem...) | theo preset |
 | `COMPASS_LLM_REASONING_EFFORT` | `low`/`high`/`max` cho mô hình suy luận, `low` nhanh hơn | không đặt |
@@ -208,51 +209,17 @@ Quy tắc:
    }
    ```
 
-   Mỗi mục tự có mốc `menu-<route>` (`/leave/request` → `menu-leave-request`, `/` → `menu-home`). Scanner đọc dữ liệu menu (`discovery.menu`) và tạo đủ các mốc này kèm nhãn theo đường đi menu, nên tour và `tour:record` trỏ được vào từng mục, kể cả mục thêm sau. `annotate`/Studio tự gợi ý `[tourMenu]` cho link trong vòng lặp có `[routerLink]="mục.trường"`.
+   Mỗi mục tự có mốc `menu-<route>` (`/leave/request` → `menu-leave-request`, `/` → `menu-home`). Scanner đọc dữ liệu menu (`discovery.menu`) và tạo đủ các mốc này kèm nhãn theo đường đi menu, nên tour và `tour:record` trỏ được vào từng mục, kể cả mục thêm sau.
 
-### 5.1 Gợi ý `tourId` hàng loạt bằng `annotate`
+### 5.1 Ai gắn `tourId`
 
-Gắn tay từng phần tử thì chậm, nên `annotate` quét template, gợi ý `tourId` cho phần tử tương tác còn thiếu và **xuất patch**. Nó **không bao giờ tự sửa code**.
-
-```bash
-cd ~/wealthcompass
-npm run annotate                                   # toàn bộ màn hình; ghi compass-annotate.patch cạnh compass.config.yaml
-npm run annotate -- --only /iconnect/assets,/home  # chỉ một vài màn hình (id tính năng hoặc tiền tố route)
-npm run annotate -- --print                        # in patch ra màn hình, không ghi file
-npm run annotate -- --out /tmp/x.patch --directive-import @cong-ty/compass
-# web khác: npx tsx packages/cli/src/main.ts annotate --config duong/dan/compass.config.yaml
-```
-
-Nó làm gì:
-
-1. **Liệt kê** nút, link, tab, ô nhập (và phần tử có `(click)`) chưa có `tourId`. Bỏ qua phần tử đã có `tourId`, phần tử ẩn (`hidden`), `input type="hidden"`, và khung bao ngoài chỉ để bắt click.
-2. **Đặt tên** `<màn-hình>-<phần-tử>`: màn hình lấy từ đoạn cuối của route, phần tử lấy từ chữ trên nó (ưu tiên `aria-label`, rồi chữ bên trong không kể icon, rồi `placeholder`, `title`), bỏ dấu và viết thường: nút "Hủy lệnh" ở `/orders` thành `orders-huy-lenh`; ô nhập thêm hậu tố `-input`, tab thêm `-tab`. Trùng thì thêm `-2`, `-3`, và không bao giờ trùng với `tourId` đã có trong dự án. Thêm `tourLabel` từ chữ trên nút.
-3. **Đánh dấu `tourRole="user-only"`** cho phần tử có vẻ nhạy cảm:
-   - ⛔ *chắc chắn*: ô mật khẩu, ô OTP/PIN/CVV, ô thẻ, `type="submit"`, nút có chữ đúng là BÁN, MUA, Đặt lệnh, Xác nhận, Đồng ý, Thanh toán, Chuyển tiền, Rút tiền, Nộp tiền, Hủy lệnh, Xóa...
-   - ⚠ *cần xem lại*: có từ liên quan trong chữ, tên hàm trong `(click)` hoặc class (ví dụ "Lệnh nhanh", `placeOrder()`, `class="btn-sell"`).
-   - Link chuyển trang (`routerLink`, `href`) và ô nhập thông thường không bị đánh dấu.
-4. **Thêm `TourIdDirective`** vào `imports` của component và câu `import` tương ứng (nếu không, thuộc tính `tourId` chỉ là thuộc tính HTML thường, không gắn `data-tour-id` và tour sẽ hỏng âm thầm). Component khai trong NgModule (`standalone: false`) hoặc có `imports` không phải mảng literal sẽ **bị bỏ qua kèm lý do**, bạn thêm tay.
-
-Quy trình duyệt:
-
-```bash
-cd ~/wealthcompass                       # gốc repo git
-git apply --check compass-annotate.patch # thử, chưa sửa gì
-# mở patch (hoặc IDE) xem; xóa những hunk không cần; sửa tên nếu muốn
-git apply compass-annotate.patch
-npm run scan                             # xác nhận scanner thấy các tourId mới
-```
-
-- **Đọc kỹ cột user-only.** Gắn thừa thì tour không bấm thay được nút đó (chỉ tô sáng); thiếu ở nút giao dịch thì nguy hiểm hơn, nên heuristic nghiêng về gắn thừa. Nút "chọn bán" kiểu bật/tắt chế độ thường bị ⚠ nhưng có thể bỏ `tourRole` đi nếu muốn tour tự chờ người dùng bấm vào nó.
-- **Chỉ giữ `tourId` của phần tử tour thật sự cần.** Danh sách gợi ý thường nhiều hơn mức cần (một web demo 13 màn hình ra khoảng 35 gợi ý); đặt tên và gắn thừa đều là việc phải duy trì về sau. Dùng `--only` theo luồng đang làm.
-- Chạy lại `annotate` sau khi áp patch sẽ không còn gợi ý nào (đã có `tourId`).
-- Template nằm trong `.ts` chỉ sửa được khi là chuỗi không có ký tự thoát (`\`) hay `${}`; trường hợp khác bị bỏ qua kèm lý do.
+`tourId` do **dev của web tự gắn trong source** theo cách ở trên, khi một phần tử cần được ghim chắc chắn (chữ trùng nhau, phần tử quan trọng). WealthCompass không còn công cụ gắn hộ: lệnh `annotate`, tùy chọn `setup --annotate` và trang "Gắn tourId" của Studio đã bỏ. Tour ghi bằng `tour:record` không cần `tourId` (tìm phần tử bằng locator), nên đa số trường hợp không phải gắn gì.
 
 ## 6. Bước 5: Quét và viết tour
 
 ### 6.1 Cấu hình quét
 
-`compass.config.yaml` đặt cùng thư mục với `tsconfig.app.json` của web:
+`compass.config.yaml` là một tài liệu trong kho dự án (file SQLite ngoài source, xem [quickstart.md](quickstart.md)); `setup` tạo nó. Xem và sửa bằng Studio, hoặc `wealthcompass project:export` / `project:import`. Các tên file khác trong tài liệu này (`compass.overrides.yaml`, `feature-map.json`...) cũng là tài liệu trong kho. Nội dung:
 
 ```yaml
 locale: vi

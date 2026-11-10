@@ -24,6 +24,11 @@ const LINKS: Array<[RegExp, string, string]> = [
         </button>
       </ui-page-header>
 
+      @if (p.dataStore) {
+        <div class="muted small store">Dữ liệu của dự án: <code>{{ p.dataStore }}</code>
+          @if (p.legacyFiles) { · <span class="badge warning">kiểu cũ: file nằm cạnh source</span> chuyển vào kho riêng bằng <code>wealthcompass migrate --app {{ p.path }}</code> }
+        </div>
+      }
       @if (!p.integrated) {
         <div class="card hero">
           <div class="hero-icon"><ui-icon name="plug" [size]="22" /></div>

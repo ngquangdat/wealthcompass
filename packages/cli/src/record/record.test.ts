@@ -5,17 +5,21 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync, copyFileSync, mkdirSy
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { readText } from '@wealthcompass/tourdb';
+import { dataRoot } from '../project';
 import { readToursFile } from './write';
 import { draftTour } from './draft';
 import { finishRecording, loadFeatureMap } from './run';
-import { mergeTourIntoOverrides, mergeTourIntoToursFile } from './write';
+import { mergeSampleQuestionsIntoOverrides, mergeTourIntoToursFile } from './write';
 import { scan } from '../scan';
 import { Recorder, type RecordedStep } from './recorder';
 import type { Page } from 'playwright-core';
 import type { LlmConfig } from '@wealthcompass/llm';
 
 const demoDir = resolve(import.meta.dirname, '../../../../examples/iconnect-demo');
-const featureMap = loadFeatureMap(join(demoDir, 'feature-map.json'));
+// Dữ liệu của demo nằm trong kho dự án (dựng từ bản mẫu examples/iconnect-demo.compass), không nằm trong source
+const demoData = dataRoot(demoDir);
+const featureMap = loadFeatureMap(join(demoData, 'feature-map.json'));
 
 const steps: RecordedStep[] = [
   { tourId: 'home-shortcut-iconnect', route: '/home', advanceOn: 'click', userOnly: false, tag: 'a', text: 'Giao dịch iConnect' },
@@ -75,14 +79,6 @@ test('không có LLM: dùng lời người ghi làm tiêu đề và mô tả', a
   assert.equal(draft.description, 'Bán trái phiếu đang nắm giữ');
 });
 
-test('chú thích DRAFT ghi lại mô tả của người ghi', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'compass-'));
-  const file = join(dir, 'o.yaml');
-  const draft = { title: 'T tour', description: '', source: 'llm' as const, steps: [{ text: 'a' }, { text: 'b' }, { text: 'c' }], sampleQuestions: [] };
-  const out = mergeTourIntoOverrides(file, { id: 'x', draft, steps, startRoute: '/home', purpose: 'Bán trái phiếu đang nắm giữ', force: false });
-  assert.match(out.yaml, /# Người ghi mô tả: Bán trái phiếu đang nắm giữ/);
-});
-
 test('LLM trả sai số bước: thử lại rồi rơi về mẫu', async () => {
   const llm = await fakeLlm(() => ({ title: 'x y z', steps: [{ text: 'chỉ một bước' }] }));
   const draft = await draftTour({ id: 't', steps, featureMap, llm: llm.config });
@@ -98,21 +94,14 @@ test('không có khóa LLM: dùng mẫu, không gọi mạng', async () => {
   assert.equal(draft.source, 'template');
 });
 
-test('gộp vào overrides: giữ chú thích cũ, thêm câu hỏi không trùng, không ghi đè khi chưa --force', () => {
+test('câu hỏi mẫu gộp vào overrides: giữ chú thích cũ, không thêm câu trùng', () => {
   const dir = mkdtempSync(join(tmpdir(), 'compass-'));
   const file = join(dir, 'compass.overrides.yaml');
-  writeFileSync(file, '# Do nghiệp vụ duyệt tay\nfeatures:\n  iconnect.assets:\n    sampleQuestions:\n      - bán trái phiếu ở đâu   # giữ nguyên\ntours: {}\n');
-  const draft = { title: 'Bán trái phiếu', description: 'd', source: 'llm' as const, steps: [{ text: 'a' }, { text: 'b' }, { text: 'c' }], sampleQuestions: ['Bán trái phiếu ở đâu', 'cách bán lại'] };
-  const input = { id: 'sell-2', draft, steps, startRoute: '/home', featureId: 'iconnect.assets', force: false, today: '2026-10-03' };
-  const out = mergeTourIntoOverrides(file, input);
+  writeFileSync(file, '# Do nghiệp vụ duyệt tay\nfeatures:\n  iconnect.assets:\n    sampleQuestions:\n      - bán trái phiếu ở đâu # giữ nguyên\n');
+  const out = mergeSampleQuestionsIntoOverrides(file, 'iconnect.assets', ['Bán trái phiếu ở đâu', 'cách bán lại']);
   assert.match(out.yaml, /# Do nghiệp vụ duyệt tay/);
   assert.match(out.yaml, /# giữ nguyên/);
-  assert.match(out.yaml, /DRAFT \(LLM soạn ngày 2026-10-03/);
-  assert.deepEqual(out.addedQuestions, ['cách bán lại'], 'câu trùng (khác hoa thường) không thêm lại');
-  assert.match(out.yaml, /advanceOn: click/);
-  writeFileSync(file, out.yaml);
-  assert.throws(() => mergeTourIntoOverrides(file, input), /--force/);
-  assert.equal(mergeTourIntoOverrides(file, { ...input, force: true }).replaced, true);
+  assert.deepEqual(out.added, ['cách bán lại'], 'câu trùng (khác hoa thường) không thêm lại');
 });
 
 test('tính năng đích lấy theo màn hình lúc dừng, không theo route lúc bấm bước cuối', async () => {
@@ -123,7 +112,7 @@ test('tính năng đích lấy theo màn hình lúc dừng, không theo route l�
   ];
   const run = (endRoute?: string) =>
     finishRecording(
-      { config: join(demoDir, 'compass.config.yaml'), url: '', id: 'to-orders', force: false, noLlm: true, dryRun: true },
+      { config: join(demoData, 'compass.config.yaml'), url: '', id: 'to-orders', force: false, noLlm: true, dryRun: true },
       { steps: toOrders, startRoute: '/home', endRoute },
       () => undefined,
     );
@@ -256,8 +245,8 @@ test('E2E: ghi tour trên web demo bằng Chrome thật, bước BÁN bị chặ
   const { recordSession } = await import('./recorder');
   const dir = mkdtempSync(join(tmpdir(), 'compass-e2e-'));
   // Sao chép cấu hình demo vào thư mục tạm để không đụng file thật; scanner cần tsconfig và src nên trỏ về app demo
-  const config = join(demoDir, 'compass.config.yaml');
-  const overridesBackup = readFileSync(join(demoDir, 'compass.overrides.yaml'), 'utf8');
+  const config = join(demoData, 'compass.config.yaml');
+  const overridesBackup = readText(join(demoData, 'compass.overrides.yaml'));
   const { recorder, browser } = await recordSession(process.env['COMPASS_E2E_URL']!);
   try {
     const page = (browser.contexts()[0].pages())[0];
@@ -292,9 +281,30 @@ test('E2E: ghi tour trên web demo bằng Chrome thật, bước BÁN bị chặ
       () => undefined,
     );
     assert.ok(JSON.parse(result.json).tours['sell-bond-e2e']);
-    assert.equal(readFileSync(join(demoDir, 'compass.overrides.yaml'), 'utf8'), overridesBackup, 'dry-run không được ghi file');
+    assert.equal(readText(join(demoData, 'compass.overrides.yaml')), overridesBackup, 'dry-run không được ghi');
   } finally {
     await browser.close();
     void dir; void copyFileSync; void mkdirSync;
   }
+});
+
+test('bước không có tourId: cảnh báo đang tìm theo selector, nêu tourId của vùng chứa đã bỏ qua', async () => {
+  const { stepNote } = await import('./recorder');
+  const locator = { tag: 'button', role: 'button', name: 'Mua', attrs: {}, context: {}, css: '.toolbar > button:nth-child(2)' };
+  const base = { route: '/home', advanceOn: 'click' as const, userOnly: false, tag: 'button', text: 'Mua' };
+  assert.equal(stepNote({ ...base, tourId: 'home-buy', locator }), '', 'có tourId thì không cảnh báo');
+  assert.match(stepNote({ ...base, tourId: null, locator }), /không có tourId: tìm theo selector \(\.toolbar > button:nth-child\(2\)\)/);
+  assert.match(stepNote({ ...base, tourId: null, locator, skippedTourId: 'toolbar' }), /tourId "toolbar" là của vùng chứa nên không dùng/);
+  assert.match(stepNote({ ...base, tourId: null, locator: { tag: 'div', attrs: {}, context: {} } }), /sẽ bị bỏ khi lưu/);
+
+  // Lúc lưu: log cảnh báo cho từng bước không có tourId
+  const logs: string[] = [];
+  await finishRecording(
+    { config: join(demoData, 'compass.config.yaml'), url: '', id: 'canh-bao-selector', force: false, noLlm: true, dryRun: true },
+    { startRoute: '/home', endRoute: '/home', steps: [{ ...base, tourId: null, locator, skippedTourId: 'toolbar' }] },
+    (m) => logs.push(m),
+  );
+  const warn = logs.find((l) => l.includes('không có tourId'))!;
+  assert.match(warn, /^! Bước 1 \(\/home\) không có tourId, tìm theo selector: button "Mua" · \.toolbar > button:nth-child\(2\)\./);
+  assert.match(warn, /tourId "toolbar" là của vùng chứa bao ngoài nên không dùng/);
 });

@@ -106,13 +106,14 @@ test('tourId ghim luôn thắng locator', () => {
   assert.equal(r?.confident, true);
 });
 
-test('nhận ra nút nhạy cảm theo chữ và nút gửi form', () => {
-  page(`<button>Bán</button><button>Bán trái phiếu</button><button>Xem bảng giá</button><form><button type="submit">Gửi</button></form>`);
-  const policy = buildSafetyPolicy({ userOnlyText: ['bán', 'xác nhận'] });
-  const [sell, sellBond, view, submit] = Array.from(document.querySelectorAll('button'));
-  assert.equal(isUserOnly(sell, policy), true);
-  assert.equal(isUserOnly(sellBond, policy), true);
-  assert.equal(isUserOnly(view, policy), false);
+test('phần tử chỉ được tô sáng: do dev đánh dấu hoặc là nút gửi form; không đoán theo chữ trên nút', () => {
+  page(`<button>Bán</button><button>Đặt lệnh cổ phiếu</button><button tourrole="user-only">Xác nhận</button><div data-sensitive><button>Số dư</button></div><form><button type="submit">Gửi</button></form>`);
+  const policy = buildSafetyPolicy();
+  const [sell, order, marked, inSensitive, submit] = Array.from(document.querySelectorAll('button'));
+  assert.equal(isUserOnly(sell, policy), false, 'chữ "Bán" không tự thành nhạy cảm');
+  assert.equal(isUserOnly(order, policy), false, 'mục menu "Đặt lệnh..." bấm được bình thường');
+  assert.equal(isUserOnly(marked, policy), true);
+  assert.equal(isUserOnly(inSensitive, policy), true);
   assert.equal(isUserOnly(submit, policy), true);
 });
 
@@ -311,9 +312,9 @@ test('manh mối đã đổi: tên, thuộc tính danh tính, component; không 
 
 test('probeStep: tìm chắc nhưng chữ nút đã đổi thì đề xuất locator mới và báo phần tử nhạy cảm', async () => {
   await withLayoutAsync(async () => {
-    page(`<app-bond-sell-panel><h2>Bán trái phiếu</h2><button data-testid="sell-submit">Đặt lệnh bán</button></app-bond-sell-panel>`);
+    page(`<app-bond-sell-panel><h2>Bán trái phiếu</h2><button data-testid="sell-submit" data-tour-role="user-only">Đặt lệnh bán</button></app-bond-sell-panel>`);
     const steps = [{ key: 's1', locator: { tag: 'button', role: 'button', name: 'Bán', attrs: { 'data-testid': 'sell-submit' }, component: 'app-bond-sell-panel', context: {} } }];
-    const r = await probeStep(steps, 0, { userOnlyText: ['đặt lệnh'], timeoutMs: 50 });
+    const r = await probeStep(steps, 0, { timeoutMs: 50 });
     assert.equal(r.status, 'ok');
     assert.equal(r.userOnly, true);
     assert.deepEqual(r.drift, ['name']);
@@ -325,7 +326,7 @@ test('probeStep: tìm chắc nhưng chữ nút đã đổi thì đề xuất loc
     const same = await probeStep([{ key: 's1', locator: { ...steps[0].locator, name: 'Đặt lệnh bán' } }], 0, { timeoutMs: 50 });
     assert.equal(same.status, 'ok');
     assert.equal(same.drift, undefined);
-    assert.equal(same.userOnly, false);
+    assert.equal(same.userOnly, true, 'phần tử dev đánh dấu user-only luôn là nhạy cảm');
   });
 });
 
@@ -391,6 +392,17 @@ test('khóa hover: chặn sự kiện rời chuột của menu JS, đóng băng 
   assert.equal(dropdown.style.getPropertyPriority('display'), 'important');
   assert.equal(trigger.style.getPropertyPriority('display'), '', 'không đụng tới nút mở và tổ tiên chung');
 
+  // Web đóng menu khi chuột ĐI VÀO chỗ khác (phần thân trang): sự kiện hover ngoài vùng menu cũng bị chặn,
+  // còn trong vùng menu và trên giao diện của tour thì vẫn tới nơi
+  const body = document.createElement('main');
+  body.innerHTML = '<p id="content">Nội dung</p><div class="driver-popover"><button id="next">Tiếp</button></div>';
+  document.body.appendChild(body);
+  const got: string[] = [];
+  for (const id of ['content', 'next']) document.getElementById(id)!.addEventListener('mouseenter', () => got.push(id));
+  document.querySelector('.dropdown a')!.addEventListener('mouseenter', () => got.push('item'));
+  for (const el of [document.getElementById('content')!, document.getElementById('next')!, document.querySelector('.dropdown a')!]) el.dispatchEvent(new window.MouseEvent('mouseenter'));
+  assert.deepEqual(got, ['next', 'item'], 'chỉ sự kiện hover ở phần thân trang bị chặn');
+
   lock.release();
   assert.equal(dropdown.style.getPropertyPriority('display'), '', 'trả style cũ');
   assert.equal(dropdown.style.getPropertyValue('display'), 'block');
@@ -398,4 +410,88 @@ test('khóa hover: chặn sự kiện rời chuột của menu JS, đóng băng 
   const before = left;
   trigger.dispatchEvent(new window.MouseEvent('mouseleave'));
   assert.equal(left, before + 1, 'sau khi nhả, sự kiện chạy bình thường');
+  document.getElementById('content')!.dispatchEvent(new window.MouseEvent('mouseenter'));
+  assert.deepEqual(got, ['next', 'item', 'content'], 'sau khi nhả, phần thân trang nhận lại sự kiện hover');
+});
+
+test('tourId lồng nhau: lấy tourId của chính nút vừa bấm; vùng chứa nhiều nút không được dùng', async () => {
+  const { pickTourId } = await import('./locator-capture');
+  const q = (sel: string) => document.querySelector(sel)!;
+
+  // div[tourId] > button[tourId] > span: bấm trúng chữ trong nút -> tourId của nút, không phải của div
+  page(`<div data-tour-id="toolbar"><button data-tour-id="sell-btn"><span class="t">Bán</span></button><button id="other">Mua</button></div>`);
+  assert.equal(pickTourId(q('.t')).tourId, 'sell-btn');
+  assert.equal(pickTourId(q('[data-tour-id="sell-btn"]')).tourId, 'sell-btn');
+  // Nút không có tourId nằm trong vùng chứa có tourId và nhiều nút: không lấy tourId của vùng, báo lại là đã bỏ qua
+  const other = pickTourId(q('#other'));
+  assert.deepEqual([other.tourId, other.element, other.skipped], [null, null, 'toolbar']);
+
+  // Nút và phần tử con đều có tourId: nút thắng
+  page(`<button data-tour-id="outer"><span data-tour-id="inner">Xác nhận</span></button>`);
+  assert.equal(pickTourId(q('span')).tourId, 'outer');
+  // Chỉ phần tử con trong nút có tourId: dùng nó
+  page(`<button><i class="ic"></i><span data-tour-id="label"><b>Lưu</b></span></button>`);
+  assert.equal(pickTourId(q('b')).tourId, 'label');
+  assert.equal(pickTourId(q('.ic')).tourId, null, 'bấm trúng phần khác của nút: không có tourId trên đường đi');
+
+  // Phần tử bọc sát chỉ chứa đúng một nút: dùng tourId của nó
+  page(`<section><div data-tour-id="wrap"><span><button>Gửi</button></span></div><button>Khác</button></section>`);
+  assert.equal(pickTourId(q('button')).tourId, 'wrap');
+  // tourId ở xa (cả khu vực): không dùng, có báo lại
+  page(`<main data-tour-id="page"><div><div><div><div><button>Sâu</button></div></div></div></div></main>`);
+  assert.deepEqual([pickTourId(q('button')).tourId, pickTourId(q('button')).skipped], [null, 'page']);
+  // Không có tourId nào
+  page(`<button>Trần</button>`);
+  assert.deepEqual(pickTourId(q('button')), { element: null, tourId: null });
+});
+
+test('menu có cursor: pointer trên cả vùng chứa (thanh bên TCInvest): chỉ lấy đúng mục, không lấy cả thanh', () => {
+  const pointer = 'style="cursor:pointer"';
+  page(`<app-menu-sidebar><div class="m-contained-content" ${pointer}>
+      <div class="m-root-item" ${pointer}><div class="m-item-wrapper" ${pointer}><div class="item-w2" ${pointer}><i class="ic" ${pointer}></i><span ${pointer}>Tiền</span></div></div></div>
+      <div class="m-root-item" ${pointer}><div class="m-item-wrapper" ${pointer}><div class="item-w2" ${pointer}><i class="ic" ${pointer}></i><span ${pointer}>Cổ phiếu</span></div></div></div>
+      <div class="m-root-item" ${pointer}><div class="m-item-wrapper" ${pointer}><div class="item-w2" ${pointer}><i class="ic" ${pointer}></i><span ${pointer}>Trái phiếu</span></div></div></div>
+    </div></app-menu-sidebar>`);
+  const root = document.querySelectorAll('.m-root-item')[1];
+  // Chuột nằm trên khung trong của mục, trên chữ, hoặc trên icon không chữ: đều ra đúng mục "Cổ phiếu"
+  for (const el of [root.querySelector('.item-w2')!, root.querySelector('span')!, root.querySelector('.ic')!]) {
+    const loc = captureLocator(el);
+    assert.equal(loc.text, 'Cổ phiếu', el.className || el.tagName);
+    const found = findByLocator(loc, document, always);
+    assert.ok(found?.confident, JSON.stringify(found && { score: found.score, runnerUp: found.runnerUp }));
+    assert.equal(found.element.closest('.m-root-item'), root);
+  }
+  // Mục có tiêu đề và dòng mô tả: lấy tiêu đề vừa bấm, không gộp mô tả
+  page(`<div class="cdk-overlay-pane"><div class="block" ${pointer}><div class="flex-center" ${pointer}><span ${pointer}>Bảng giá cổ phiếu</span></div><div class="item-description" ${pointer}>Nơi theo dõi giá</div></div>
+    <div class="block" ${pointer}><div class="flex-center" ${pointer}><span ${pointer}>Đặt lệnh cổ phiếu</span></div><div class="item-description" ${pointer}>Đặt lệnh mua bán</div></div></div>`);
+  assert.equal(captureLocator(document.querySelector('span')!).text, 'Bảng giá cổ phiếu');
+});
+
+test('trang rất nhiều div: phần tử nằm cuối trang (popup) vẫn được tìm thấy theo chữ', () => {
+  const filler = Array.from({ length: 2200 }, (_, i) => `<div class="cell">ô ${i}</div>`).join('');
+  page(`<main>${filler}</main><div class="cdk-overlay-container"><div class="cdk-overlay-pane"><div class="title"><div class="flex-center"><span>Bảng giá cổ phiếu</span></div></div><div class="title"><div class="flex-center"><span>Đặt lệnh cổ phiếu</span></div></div></div></div>`);
+  const target = document.querySelector('.flex-center')!;
+  const loc = captureLocator(target.querySelector('span')!);
+  // Không dựa vào selector dự phòng: chỉ thẻ + chữ + ngữ cảnh
+  const found = findByLocator({ ...loc, css: undefined }, document, always);
+  assert.ok(found, 'popup cuối trang phải nằm trong danh sách ứng viên');
+  assert.ok(found.element === target || target.contains(found.element) || found.element.contains(target));
+  assert.equal(findByLocator(loc, document, always)?.confident, true);
+});
+
+test('mục menu dựng bằng div chỉ có chữ: bố cục đổi (selector và vị trí lệch) vẫn tìm chắc nhờ đúng chữ + ngữ cảnh', () => {
+  const menu = (items: string[]) => `<main><p>Cổ phiếu</p></main><div class="cdk-overlay-pane">${items.map((t) => `<div class="row"><div class="title"><div class="flex-center" style="cursor:pointer"><span style="cursor:pointer">${t}</span></div></div></div>`).join('')}</div>`;
+  page(menu(['Bảng giá cổ phiếu', 'Đặt lệnh cổ phiếu', 'Trade Station']));
+  const loc = captureLocator(document.querySelector('span')!);
+  assert.equal(loc.text, 'Bảng giá cổ phiếu');
+  assert.equal(loc.role, undefined);
+  // Menu mở rộng: thêm mục phía trước, selector dự phòng (nth-of-type) và vị trí không còn đúng
+  page(menu(['iPO', 'Giao dịch Darkpool', 'Bảng giá cổ phiếu', 'Đặt lệnh cổ phiếu']));
+  const found = findByLocator(loc, document, always);
+  assert.ok(found?.confident, JSON.stringify(found && { score: found.score, runnerUp: found.runnerUp, by: found.matchedBy }));
+  assert.equal(found.element.textContent, 'Bảng giá cổ phiếu');
+  // Cùng chữ ở hai nơi không phân biệt được bằng ngữ cảnh thì vẫn không chắc
+  page(`<section><div style="cursor:pointer">Cổ phiếu</div></section><aside><div style="cursor:pointer">Cổ phiếu</div></aside>`);
+  const twin = captureLocator(document.querySelector('div')!);
+  assert.equal(findByLocator({ ...twin, css: undefined, rect: undefined }, document, always)?.confident, false);
 });

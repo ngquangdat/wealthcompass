@@ -68,16 +68,6 @@ import { PageHeaderComponent } from '../shared/page-header.component';
             <ui-icon name="check-circle" class="ok" />
             <div class="grow"><b>Đọc chữ hiển thị trong template</b><p class="muted small">Tiêu đề, nhãn, tên nút, đường dẫn menu. Dùng để soạn mô tả và câu hỏi mẫu. Luôn bật khi có khóa.</p></div>
           </div>
-          <label class="perm toggle">
-            <input type="checkbox" [ngModel]="a.aiCode" (ngModelChange)="update({ aiCode: $event })" />
-            <div class="grow">
-              <b>Cho AI đọc trích đoạn mã nguồn</b>
-              <p class="muted small">Chỉ dùng khi phân tích tĩnh không đoán được service đăng nhập hoặc quyền của guard. Trích đoạn code của dự án sẽ được gửi sang {{ a.provider }}.</p>
-              @if (a.aiCode) {
-                <div class="alert warning small"><ui-icon name="alert" /><span>Đang bật. Kiểm tra chính sách công ty về việc gửi mã nguồn ra ngoài.</span></div>
-              }
-            </div>
-          </label>
         </div>
       </div>
     }
@@ -105,7 +95,7 @@ export class SettingsPage implements OnInit {
     this.ai.set(await this.api.get<AiState>('/api/ai'));
   }
 
-  protected async update(changes: Partial<{ provider: string; model: string; apiKey: string | null; aiCode: boolean }>): Promise<void> {
+  protected async update(changes: Partial<{ provider: string; model: string; apiKey: string | null }>): Promise<void> {
     try {
       this.ai.set(await this.api.put<AiState>('/api/ai', changes));
       this.testResult.set(null);

@@ -50,6 +50,11 @@ export class TourStore {
     this.db = new TourDb(file);
   }
 
+  // File SQLite thật đang mở (kho dự án, hoặc compass.tours.db của dự án kiểu cũ)
+  get dbFile(): string {
+    return this.db.file;
+  }
+
   private view(stored: StoredTour): TourVersion {
     const { id, tour, ...meta } = stored;
     return { ...meta, ...(tour.feature ? { feature: tour.feature } : {}), tour: toTour(id, tour) };

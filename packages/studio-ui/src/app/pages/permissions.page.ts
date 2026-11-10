@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
-import type { AiState, GuardRow, RoleRow } from '../core/models';
+import type { GuardRow, RoleRow } from '../core/models';
 import { ProjectStore } from '../core/project.store';
 import { ToastService } from '../core/toast.service';
 import { ChipsInputComponent } from '../shared/chips-input.component';
@@ -29,7 +29,7 @@ const STATUS: Record<GuardRow['status'], { label: string; cls: string }> = {
     <section class="card">
       <div class="sec-head">
         <h3 class="grow">Danh mục quyền</h3>
-        <span class="muted small">Lưu trong <code>compass.config.yaml</code> (<code>access.roles</code>); dùng làm gợi ý khi chọn quyền cho guard, màn hình và Thử trợ lý.</span>
+        <span class="muted small">Lưu trong cấu hình của dự án (<code>access.roles</code>, trong kho dự án); dùng làm gợi ý khi chọn quyền cho guard, màn hình và Thử trợ lý.</span>
       </div>
       <table class="table">
         <thead><tr><th class="c-name">Quyền</th><th>Mô tả</th><th>Dùng ở</th><th></th></tr></thead>
@@ -102,9 +102,6 @@ const STATUS: Record<GuardRow['status'], { label: string; cls: string }> = {
               <td><span class="badge" [class]="status(g).cls">{{ status(g).label }}</span></td>
               <td class="actions">
                 @if (editing() === g.name) {
-                  <button class="btn btn-ai btn-sm" (click)="askAi(g)" [disabled]="aiBusy() || !ai()?.aiCode" [title]="ai()?.aiCode ? 'AI đọc code guard' : 'Bật quyền đọc mã nguồn trong Cài đặt AI'">
-                    @if (aiBusy()) { <span class="spinner"></span> } @else { <ui-icon name="sparkles" [size]="13" /> } AI đọc code
-                  </button>
                   <button class="btn btn-sm" (click)="editing.set(null)">Hủy</button>
                   <button class="btn btn-primary btn-sm" (click)="save(g)">Lưu</button>
                 } @else {
@@ -141,8 +138,6 @@ export class PermissionsPage implements OnInit {
   private readonly toast = inject(ToastService);
   protected readonly guards = signal<GuardRow[]>([]);
   protected readonly editing = signal<string | null>(null);
-  protected readonly aiBusy = signal(false);
-  protected readonly ai = signal<AiState | null>(null);
   protected draft: string[] = [];
   protected readonly roles = signal<RoleRow[]>([]);
   protected readonly roleNames = computed(() => this.roles().map((r) => r.name));
@@ -152,7 +147,6 @@ export class PermissionsPage implements OnInit {
   protected newDesc = '';
 
   async ngOnInit(): Promise<void> {
-    this.ai.set(await this.api.get<AiState>('/api/ai').catch(() => null));
     await this.load();
   }
 
@@ -228,21 +222,6 @@ export class PermissionsPage implements OnInit {
       await this.load();
     } catch (e) {
       this.toast.error(e);
-    }
-  }
-
-  protected async askAi(g: GuardRow): Promise<void> {
-    this.aiBusy.set(true);
-    try {
-      const res = await this.api.stream<{ requires: string[]; evidence?: string; fromAi: boolean }>(`/api/guards/${encodeURIComponent(g.name)}/ai`, {}, () => undefined);
-      if (res.fromAi) {
-        this.draft = res.requires;
-        this.toast.success(`AI đề xuất: ${res.requires.join(', ') || 'không cần quyền riêng'}. Kiểm tra rồi bấm Lưu.`);
-      } else this.toast.show('AI không đọc được guard này; hãy khai tay.');
-    } catch (e) {
-      this.toast.error(e);
-    } finally {
-      this.aiBusy.set(false);
     }
   }
 }

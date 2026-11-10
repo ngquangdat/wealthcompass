@@ -20,7 +20,7 @@ interface Row extends EvalCase {
   imports: [FormsModule, RouterLink, IconComponent, PageHeaderComponent, ChipsInputComponent, LogConsoleComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ui-page-header title="Kiểm thử" subtitle="Bộ câu hỏi mẫu và màn hình đúng của từng câu. Chạy sau mỗi lần sửa mô tả, từ đồng nghĩa hay quyền để biết trợ lý tìm đúng hơn hay kém đi.">
+    <ui-page-header title="Kiểm thử" subtitle="Bộ câu hỏi mẫu và màn hình đúng của từng câu. Chạy sau mỗi lần sửa mô tả, từ khóa hay quyền để biết trợ lý tìm đúng hơn hay kém đi.">
       <button class="btn btn-ai" (click)="generate()" [disabled]="busy() || !ai()?.hasKey" [title]="ai()?.hasKey ? '' : 'Cần khóa AI (Cài đặt AI)'"><ui-icon name="sparkles" /> AI viết câu hỏi</button>
       <button class="btn" (click)="save()" [disabled]="busy() || !dirty()">Lưu</button>
       <button class="btn btn-primary" (click)="run()" [disabled]="busy() || !rows().length"><ui-icon name="play" /> Chạy kiểm thử</button>
@@ -51,7 +51,7 @@ interface Row extends EvalCase {
           <button [class.on]="filter() === 'draft'" (click)="filter.set('draft')">AI đề xuất <span class="count">{{ draftCount() }}</span></button>
         </div>
         <span class="grow"></span>
-        <span class="muted small mono">compass.eval.yaml</span>
+        <span class="muted small" title="Tài liệu compass.eval.yaml trong kho dự án (file SQLite ngoài source của web)">Lưu trong kho dự án</span>
       </div>
       <table class="table">
         <thead><tr><th>Câu hỏi</th><th class="c-target">Màn hình đúng</th><th class="c-roles">Quyền người hỏi</th><th class="c-res">Kết quả</th><th></th></tr></thead>
@@ -109,6 +109,7 @@ interface Row extends EvalCase {
     .seg button:disabled { opacity: .5; cursor: default; }
     .count { font-size: 11.5px; color: var(--text-3); margin-left: 3px; }
     .table td { vertical-align: top; }
+    th:first-child, td:first-child { min-width: 220px; }
     .c-target { width: 220px; } .c-roles { width: 220px; } .c-res { width: 200px; }
     tr.draft td:first-child { box-shadow: inset 3px 0 0 var(--ai, #7a5af8); }
     .tiny-badge { margin-top: 4px; }
@@ -200,7 +201,7 @@ export class EvalPage implements OnInit {
       const res = await this.api.put<{ count: number }>('/api/eval', { cases: this.toCases() });
       this.rows.update((x) => x.filter((r) => r.q.trim() && r.target).map((r) => ({ ...r, draft: false })));
       this.dirty.set(false);
-      this.toast.success(`Đã lưu ${res.count} câu vào compass.eval.yaml${incomplete ? ` (bỏ ${incomplete} câu chưa chọn màn hình)` : ''}`);
+      this.toast.success(`Đã lưu ${res.count} câu vào kho dự án${incomplete ? ` (bỏ ${incomplete} câu chưa chọn màn hình)` : ''}`);
       return true;
     } catch (e) {
       this.toast.error(e);

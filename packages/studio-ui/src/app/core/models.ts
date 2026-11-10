@@ -4,8 +4,12 @@ export interface ProjectSummary {
   angularVersion: string | null;
   // Dự án tour chưa có source của web (discovery.source: none)
   noSource?: boolean;
-  // web.url trong compass.config.yaml
+  // web.url trong cấu hình
   webUrl?: string | null;
+  // File kho SQLite chứa dữ liệu của dự án (ngoài source), hoặc thư mục web với dự án kiểu cũ
+  dataStore?: string;
+  // Dự án kiểu cũ: file của WealthCompass còn nằm cạnh source, nên chuyển bằng `wealthcompass migrate`
+  legacyFiles?: boolean;
   devPort: number;
   bootstrap: { kind: 'standalone' | 'ngmodule'; root: string } | null;
   routesFile: string | null;
@@ -53,20 +57,6 @@ export interface FeatureRow {
   sourceRef?: string;
 }
 
-export interface Hunk {
-  id: string;
-  header: string;
-  lines: string[];
-  added: number;
-  removed: number;
-}
-
-export interface FilePatch {
-  path: string;
-  head: string[];
-  hunks: Hunk[];
-}
-
 export interface ProcState {
   running: boolean;
   pid?: number;
@@ -99,7 +89,6 @@ export interface AiState {
   baseUrl: string;
   hasKey: boolean;
   keySource: string | null;
-  aiCode: boolean;
   providers: string[];
 }
 
@@ -121,22 +110,6 @@ export interface GuardRow {
   evidence: string | null;
   how: string;
   screens: string[];
-}
-
-export interface TourIdCandidate {
-  key: string;
-  tourId: string;
-  tag: string;
-  kind: string;
-  label: string | null;
-  sensitive: { level: 'sure' | 'maybe'; reason: string } | null;
-  screen: string;
-  screenTitle: string;
-  file: string;
-  line: number;
-  component: string;
-  // Mục menu sinh từ dữ liệu: gắn [tourMenu]="menuExpr", mỗi mục có mốc menu-<route>
-  menuExpr: string | null;
 }
 
 export interface TourStep {

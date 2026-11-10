@@ -14,11 +14,11 @@ WealthCompass là trợ lý AI tích hợp trực tiếp vào web đầu tư, ba
 ```bash
 cd ~/wealthcompass && npm install && npm run pack        # đóng gói (một lần)
 npm run setup -- --app ~/du-an/my-web                    # 1. cài lib vào source web (một lần): sinh patch, duyệt rồi git apply
-npm run server                                           # 2. backend: tiến trình riêng, đọc kho tour compass.tours.db của web
-npm run studio                                           # 3. Studio: soạn dữ liệu, ghi tour vào cùng kho tour đó
+COMPASS_PROJECT=~/du-an/my-web npm run server            # 2. backend: tiến trình riêng, đọc kho dự án (SQLite ngoài source)
+npm run studio -- --app ~/du-an/my-web                   # 3. Studio: soạn dữ liệu, ghi tour vào cùng kho đó
 ```
 
-Chưa có source của web: `npx tsx packages/cli/src/main.ts init --url <địa chỉ web> --dir <thư mục>` rồi mở thư mục đó bằng Studio để ghi tour theo URL.
+Dữ liệu của mỗi web nằm trong một file SQLite ngoài source (`~/.wealthcompass/projects/`); source web chỉ có lib và vài dòng tích hợp. Web demo có bản mẫu `examples/iconnect-demo.compass` nên clone về là chạy được. Chưa có source của web: `npx tsx packages/cli/src/main.ts init --url <địa chỉ web>` rồi mở file kho vừa tạo bằng Studio để ghi tour theo URL.
 
 Chi tiết: [docs/quickstart.md](docs/quickstart.md). Thử toàn bộ quy trình trên web mẫu: `npm run e2e:setup`.
 
@@ -27,7 +27,7 @@ Chi tiết: [docs/quickstart.md](docs/quickstart.md). Thử toàn bộ quy trìn
 - [Plan kỹ thuật v1](docs/technical-plan.md): bản cho một web đầu tư cụ thể
 - [Bắt đầu nhanh: gắn vào web trong 3 bước](docs/quickstart.md)
 - [Hướng dẫn tích hợp chi tiết (làm tay, tham khảo)](docs/integration-guide.md)
-- Gắn `tourId` hàng loạt bằng `annotate` (mục 5.1) và soạn mô tả màn hình bằng `enrich` (mục 6.2b) trong hướng dẫn tích hợp
+- Soạn mô tả màn hình bằng `enrich` (mục 6.2b) trong hướng dẫn tích hợp
 - [Ghi tour bằng `tour:record`](docs/tour-record.md): ghi thao tác thật, không cần `tourId` trong HTML (locator nhiều manh mối), LLM soạn nháp tour vào `compass.tours.db`
 - [Demo iConnect](docs/demo.md)
 - [Plan kỹ thuật tổng quát](docs/universal-plan.md): áp vào bất kỳ web Angular 20+ nào, tự host, mức A có source (hợp đồng, scanner, backend tự host, lộ trình; phần Domain Pack trong plan đã bỏ)

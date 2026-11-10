@@ -11,7 +11,6 @@ export const routes: Routes = [
   { path: 'overview', canActivate: [needProject], loadComponent: () => import('./pages/overview.page').then((m) => m.OverviewPage), title: 'Tổng quan · WealthCompass Studio' },
   { path: 'screens', canActivate: [needProject], loadComponent: () => import('./pages/screens.page').then((m) => m.ScreensPage), title: 'Màn hình · WealthCompass Studio' },
   { path: 'permissions', canActivate: [needProject], loadComponent: () => import('./pages/permissions.page').then((m) => m.PermissionsPage), title: 'Quyền · WealthCompass Studio' },
-  { path: 'tourids', canActivate: [needProject], loadComponent: () => import('./pages/tourids.page').then((m) => m.TourIdsPage), title: 'Gắn tourId · WealthCompass Studio' },
   { path: 'tours', canActivate: [needProject], loadComponent: () => import('./pages/tours.page').then((m) => m.ToursPage), title: 'Tour · WealthCompass Studio' },
   { path: 'assistant', canActivate: [needProject], loadComponent: () => import('./pages/assistant.page').then((m) => m.AssistantPage), title: 'Thử trợ lý · WealthCompass Studio' },
   { path: 'eval', canActivate: [needProject], loadComponent: () => import('./pages/eval.page').then((m) => m.EvalPage), title: 'Kiểm thử · WealthCompass Studio' },

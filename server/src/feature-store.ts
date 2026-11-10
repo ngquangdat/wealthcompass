@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { mtime, readText } from '@wealthcompass/tourdb';
 import { featureMapSchema, type Feature, type FeatureMap, type Tour } from '@wealthcompass/contracts';
 import { normalizeVi, tokenize } from '@wealthcompass/core';
 
@@ -57,8 +57,8 @@ export class FeatureStore {
 
   // Tự nạp lại khi scanner ghi file mới, để demo không cần restart server
   private refresh(): void {
-    const mtime = statSync(this.file).mtimeMs;
-    if (mtime !== this.mtime) this.load();
+    const changedAt = mtime(this.file);
+    if (changedAt !== this.mtime) this.load();
   }
 
   // Nguồn tour bổ sung (kho tour của backend); gọi lại reloadTours() sau mỗi lần kho đổi
@@ -72,8 +72,8 @@ export class FeatureStore {
   }
 
   private load(): void {
-    this.mtime = statSync(this.file).mtimeMs;
-    this.map = withTours(featureMapSchema.parse(JSON.parse(readFileSync(this.file, 'utf8'))), this.overlay());
+    this.mtime = mtime(this.file);
+    this.map = withTours(featureMapSchema.parse(JSON.parse(readText(this.file))), this.overlay());
     this.docs = this.map.features.map((feature) => this.index(feature));
     const df = new Map<string, number>();
     for (const d of this.docs) for (const t of d.tokens.keys()) df.set(t, (df.get(t) ?? 0) + 1);

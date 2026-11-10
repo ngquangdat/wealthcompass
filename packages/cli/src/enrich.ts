@@ -1,8 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { exists, readText, writeText } from '@wealthcompass/tourdb';
 import { join } from 'node:path';
 import { Document, YAMLMap, YAMLSeq, isMap, isScalar, isSeq, parseDocument } from 'yaml';
 import { z } from 'zod';
-import { parse as parseYaml } from 'yaml';
 import { redactPii } from '@wealthcompass/core';
 import { completeText, type LlmConfig } from '@wealthcompass/llm';
 import type { Feature } from '@wealthcompass/contracts';
@@ -138,7 +137,7 @@ async function draftBatch(
 // Gộp bản nháp vào overrides, giữ nguyên chú thích và mọi thứ người đã viết.
 // Mỗi feature được ghi thêm khóa llmDraft liệt kê các trường do LLM soạn; scanner cảnh báo cho tới khi người xóa khóa này.
 export function mergeDrafts(file: string, drafts: Map<string, Draft>, today: string): { yaml: string; fields: Map<string, Field[]> } {
-  const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const existing = exists(file) ? readText(file) : '';
   const doc: Document = existing.trim() ? parseDocument(existing) : new Document({});
   if (doc.errors.length) throw new Error(`${file} không phải YAML hợp lệ: ${doc.errors[0].message}`);
 
@@ -247,7 +246,7 @@ export async function enrich(opts: EnrichOptions, log: (msg: string) => void = c
   }
   if (!drafted.length) return { drafted, skipped, written: false };
 
-  writeFileSync(overridesFile, merged.yaml);
+  writeText(overridesFile, merged.yaml);
   log(`\nĐã ghi ${drafted.length} màn hình vào ${overridesFile}.`);
   const after = scan(opts.config);
   const unreviewed = after.featureMap.coverage.warnings.filter((w) => w.includes('do LLM soạn')).length;

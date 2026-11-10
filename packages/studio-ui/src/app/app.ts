@@ -34,7 +34,6 @@ export class App {
       items: [
         { path: '/screens', label: 'Màn hình', icon: 'list', status: 'screens' },
         { path: '/permissions', label: 'Quyền', icon: 'key' },
-        { path: '/tourids', label: 'Gắn tourId', icon: 'search' },
         { path: '/tours', label: 'Tour', icon: 'compass' },
       ],
     },

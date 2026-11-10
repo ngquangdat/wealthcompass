@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { exists, readText, writeText } from '@wealthcompass/tourdb';
 import { Document, YAMLMap, YAMLSeq, isMap, isScalar, isSeq, parseDocument } from 'yaml';
 
 // Sửa một màn hình trong compass.overrides.yaml từ Studio, giữ nguyên chú thích và phần khác của file.
@@ -17,7 +17,7 @@ export type FeatureChanges = Partial<{
 }>;
 
 function load(file: string): Document {
-  const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const text = exists(file) ? readText(file) : '';
   const doc = text.trim() ? parseDocument(text) : new Document({});
   if (doc.errors.length) throw new Error(`${file} không phải YAML hợp lệ: ${doc.errors[0].message}`);
   return doc;
@@ -76,7 +76,7 @@ export function updateFeature(file: string, id: string, changes: FeatureChanges)
   }
   markReviewed(map, touched);
   if (map.items.length === 0) (doc.get('features', true) as YAMLMap).delete(id);
-  writeFileSync(file, String(doc));
+  writeText(file, String(doc));
 }
 
 export function approveFeature(file: string, id: string): void {
@@ -86,11 +86,11 @@ export function approveFeature(file: string, id: string): void {
   const map = node as YAMLMap;
   map.delete('llmDraft');
   dropDraftComment(map);
-  writeFileSync(file, String(doc));
+  writeText(file, String(doc));
 }
 
 export function readOverrides(file: string): Record<string, Record<string, unknown>> {
-  if (!existsSync(file)) return {};
+  if (!exists(file)) return {};
   const json = load(file).toJSON() as { features?: Record<string, Record<string, unknown>> } | null;
   return json?.features ?? {};
 }

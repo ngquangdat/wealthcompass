@@ -19,7 +19,7 @@ interface Listing {
   imports: [FormsModule, IconComponent, PageHeaderComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ui-page-header title="Mở dự án" subtitle="Chọn thư mục gốc của web Angular (có angular.json), hoặc thư mục dự án tour tạo bằng wealthcompass init khi chưa có source." />
+    <ui-page-header title="Mở dự án" subtitle="Chọn thư mục gốc của web Angular (có angular.json). Dữ liệu của WealthCompass nằm trong kho dự án riêng, ngoài source của web." />
 
     <div class="layout">
       <div class="card">
@@ -59,6 +59,17 @@ interface Listing {
       </div>
 
       <div class="card side">
+        @if (projects().length) {
+          <div class="card-head"><h2>Dự án đã có</h2></div>
+          <div class="card-body stack">
+            @for (p of projects(); track p.db) {
+              <button class="recent" type="button" (click)="open(p.open)" [disabled]="p.missingSource" [title]="p.db">
+                <ui-icon name="compass" [size]="15" />
+                <span class="grow">{{ p.name }}<br /><span class="muted small">{{ p.missingSource ? 'không thấy source: ' : '' }}{{ p.sourceDir ?? p.url ?? 'chưa có source' }}</span></span>
+              </button>
+            }
+          </div>
+        }
         <div class="card-head"><h2>Gần đây</h2></div>
         <div class="card-body">
           @for (r of recent; track r.path) {
@@ -103,10 +114,13 @@ export class OpenPage implements OnInit {
   protected readonly busy = signal(false);
   protected readonly listing = signal<Listing | null>(null);
   protected readonly recent = this.store.recent();
+  // Kho dự án đã có trên máy (~/.wealthcompass/projects)
+  protected readonly projects = signal<Array<{ db: string; name: string; sourceDir: string | null; url: string | null; open: string; missingSource: boolean }>>([]);
 
   ngOnInit(): void {
     const start = this.store.project()?.path ?? this.recent[0]?.path;
     void this.browse(start ? start.replace(/\/[^/]+$/, '') : '');
+    void this.api.get<{ projects: ReturnType<OpenPage['projects']> }>('/api/projects').then((r) => this.projects.set(r.projects)).catch(() => undefined);
   }
 
   protected async browse(path: string): Promise<void> {

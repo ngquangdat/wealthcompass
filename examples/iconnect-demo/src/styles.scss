@@ -51,6 +51,33 @@ a { color: inherit; text-decoration: none; }
   --compass-bottom: 68px;
 }
 
+/* Khung app: mobile chỉ có vùng nội dung; desktop thêm logo + thanh trên + thanh bên trái (bố cục web thật) */
+.app-shell, .tcbs-body, .contained-content { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.contained-content > :not(router-outlet) { flex: 1; min-height: 0; }
+
+@media (min-width: 768px) {
+  .phone.desktop-layout { max-width: none; box-shadow: none; --compass-bottom: 24px; --compass-right: 24px; }
+  .desktop-layout .app-shell {
+    display: grid; grid-template-columns: 60px minmax(0, 1fr); grid-template-rows: 60px minmax(0, 1fr);
+  }
+  .desktop-layout .app-logo {
+    grid-area: 1 / 1; display: grid; place-items: center; background: var(--header);
+    color: var(--red); font-weight: 700; font-size: 18px; letter-spacing: 1px;
+  }
+  .desktop-layout app-toolbar { grid-area: 1 / 2; }
+  .desktop-layout app-menu-sidebar { grid-area: 2 / 1; }
+  .desktop-layout .tcbs-body { grid-area: 2 / 2; }
+  .desktop-layout .contained-content { width: 100%; max-width: 1200px; margin: 0 auto; }
+  /* Trang chủ: thanh trên và thanh bên trái thay cho header và thanh dưới của mobile */
+  .desktop-layout app-home-page .top, .desktop-layout app-home-page .bb { display: none; }
+}
+
+/* Overlay tự làm, cùng cấu trúc và CSS cơ bản với @angular/cdk overlay */
+.cdk-overlay-container { position: fixed; z-index: 1000; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+.cdk-overlay-container:empty { display: none; }
+.cdk-overlay-connected-position-bounding-box { position: absolute; z-index: 1000; display: flex; flex-direction: column; min-width: 1px; min-height: 1px; }
+.cdk-overlay-pane { position: absolute; pointer-events: auto; box-sizing: border-box; z-index: 1000; display: flex; max-width: 100%; max-height: 100%; }
+
 
 /* Thanh điều hướng dưới (mobile) dùng chung cho các màn hình */
 .bb {

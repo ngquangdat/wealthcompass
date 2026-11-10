@@ -1,10 +1,12 @@
 import { strict as assert } from 'node:assert';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
+import { configPathOf } from './project';
 import { scan } from './scan';
 
-// Chạy scanner trên app demo thật và kiểm tra những điều mà agent dựa vào
-const config = resolve(import.meta.dirname, '../../../examples/iconnect-demo/compass.config.yaml');
+// Chạy scanner trên app demo thật và kiểm tra những điều mà agent dựa vào. Dữ liệu của demo nằm trong kho dự án
+// (dựng từ bản mẫu examples/iconnect-demo.compass lần đầu), không nằm trong source của nó.
+const config = configPathOf(resolve(import.meta.dirname, '../../../examples/iconnect-demo'));
 const { featureMap } = scan(config);
 const feature = (id: string) => featureMap.features.find((f) => f.id === id)!;
 

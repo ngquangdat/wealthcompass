@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { exists, readText } from '@wealthcompass/tourdb';
 import { join } from 'node:path';
 import { featureMapSchema, type FeatureMap } from '@wealthcompass/contracts';
 import { resolveLlmConfig } from '@wealthcompass/llm';
@@ -34,9 +34,9 @@ export function matchRoutePattern(featureMap: FeatureMap | null, path: string): 
 }
 
 export function loadFeatureMap(path: string): FeatureMap | null {
-  if (!existsSync(path)) return null;
+  if (!exists(path)) return null;
   try {
-    return featureMapSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+    return featureMapSchema.parse(JSON.parse(readText(path)));
   } catch {
     return null;
   }
@@ -65,7 +65,11 @@ export async function finishRecording(
   if (!mapped.length) throw new Error('Không có bước nào nhận ra được, không có gì để lưu.');
   if (!recorded.startRoute) throw new Error('Chưa bấm "Bắt đầu ghi".');
   for (const s of mapped) {
-    if (!s.tourId && s.locator) log(`  · ${s.route}: ${describeLocator(s.locator)}`);
+    if (!s.tourId && s.locator) {
+      const step = mapped.indexOf(s) + 1;
+      const skipped = s.skippedTourId ? ` tourId "${s.skippedTourId}" là của vùng chứa bao ngoài nên không dùng.` : '';
+      log(`! Bước ${step} (${s.route}) không có tourId, tìm theo selector: ${describeLocator(s.locator)}${s.locator.css ? ` · ${s.locator.css}` : ''}.${skipped} Muốn ghim chắc chắn thì dev gắn tourId cho phần tử này.`);
+    }
     if (featureMap && !noSource && !s.routePattern) log(`! Màn hình ${s.route} không khớp route nào trong feature-map.json; bước vẫn được lưu nhưng tour không tự mở được màn hình đó.`);
   }
 
@@ -134,7 +138,6 @@ export async function finishRecording(
 export async function recordTour(opts: RecordOptions): Promise<void> {
   const { config } = loadConfig(opts.config);
   const { recorder, browser } = await recordSession(opts.url, opts.about, {
-    userOnlyText: config.safety.userOnlyText,
     mobileBreakpoint: config.tours.mobileBreakpoint,
     mobile: opts.mobile,
   });

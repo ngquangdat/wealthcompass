@@ -11,7 +11,6 @@ export interface ProbeOptions {
   mobileBreakpoint?: number;
   busySelector?: string;
   userOnly?: string[];
-  userOnlyText?: string[];
   timeoutMs?: number;
 }
 
@@ -40,7 +39,7 @@ export async function probeStep(steps: ProbeStep[], index: number, options: Prob
   const found = (await waitForStep(step, options.timeoutMs ?? 4000)) ?? resolveStep(step);
   if (!found) return { status: 'missing' };
   w.__compassFound = found.element;
-  const userOnly = isUserOnly(found.element, buildSafetyPolicy({ userOnlySelectors: options.userOnly ?? [], userOnlyText: options.userOnlyText ?? [] }));
+  const userOnly = isUserOnly(found.element, buildSafetyPolicy({ userOnlySelectors: options.userOnly ?? [] }));
   const base = { matchedBy: found.matchedBy, ...(found.score !== undefined ? { score: found.score } : {}), userOnly };
   if (!found.confident) return { status: 'low_confidence', ...base };
 

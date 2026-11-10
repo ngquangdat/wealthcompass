@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { exists, isStorePath, readText } from '@wealthcompass/tourdb';
+import { configPathOf } from '../project';
+import { dirname, join } from 'node:path';
 import { loadConfig, scan, type ScanResult } from '../scan';
 import { detectProject } from './detect';
 
@@ -37,7 +38,7 @@ export function codeChecks(appDir: string, project: string | undefined, scanned:
       const m = f.getFullText().match(/templateUrl:\s*['"]([^'"]+)['"]/g) ?? [];
       return m.some((x) => {
         const p = join(f.getDirectoryPath(), x.replace(/templateUrl:\s*['"]|['"]/g, ''));
-        return existsSync(p) && readFileSync(p, 'utf8').includes('compass-chat-widget');
+        return exists(p) && readText(p).includes('compass-chat-widget');
       });
     });
     widget = htmlHit;
@@ -56,7 +57,7 @@ export function codeChecks(appDir: string, project: string | undefined, scanned:
     status: uniq.length ? 'fail' : 'ok',
     name: 'TourIdDirective được import nơi có tourId',
     detail: uniq.length ? `thiếu ở: ${uniq.join(', ')}` : undefined,
-    fix: 'Thêm TourIdDirective vào imports của các component trên (annotate tự làm việc này)',
+    fix: 'Thêm TourIdDirective vào imports của các component trên',
   });
   return checks;
 }
@@ -65,13 +66,13 @@ export async function doctor(appDir: string, project?: string, prescanned?: Scan
   const checks: Check[] = [];
   const add = (c: Check) => checks.push(c);
 
-  const configFile = join(appDir, 'compass.config.yaml');
-  if (!existsSync(configFile)) {
-    add({ status: 'fail', name: 'compass.config.yaml', fix: 'Chạy `wealthcompass setup --app .`' });
+  const configFile = configPathOf(appDir);
+  if (!exists(configFile)) {
+    add({ status: 'fail', name: 'Cấu hình dự án', detail: 'web chưa tích hợp: chưa có kho dự án', fix: 'Chạy `wealthcompass setup --app <thư mục web>`' });
     return checks;
   }
   const { config } = loadConfig(configFile);
-  add({ status: 'ok', name: 'compass.config.yaml' });
+  add({ status: 'ok', name: 'Cấu hình dự án', detail: isStorePath(configFile) ? `kho dự án ${dirname(configFile)}` : 'compass.config.yaml cạnh source (kiểu cũ)' });
 
   // Quét lại và đếm cảnh báo
   // Studio truyền sẵn kết quả quét (đã đệm) để khỏi quét lại
@@ -84,13 +85,13 @@ export async function doctor(appDir: string, project?: string, prescanned?: Scan
   if (others) add({ status: 'warn', name: 'Cảnh báo của scanner', detail: `${others} cảnh báo`, fix: 'Chạy `wealthcompass scan` để xem chi tiết' });
 
   // Gói đã cài chưa
-  const pkg = JSON.parse(readFileSync(join(appDir, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> };
+  const pkg = JSON.parse(readText(join(appDir, 'package.json'))) as { dependencies?: Record<string, string> };
   const declared = Boolean(pkg.dependencies?.['@wealthcompass/angular']);
-  const installed = existsSync(join(appDir, 'node_modules', '@wealthcompass', 'angular', 'package.json'));
+  const installed = exists(join(appDir, 'node_modules', '@wealthcompass', 'angular', 'package.json'));
   // Web nằm trong repo WealthCompass (web demo) dùng thẳng source của gói qua `paths` trong tsconfig: không cần khai và cài gói
   const viaPaths = ['tsconfig.json', 'tsconfig.app.json'].some((f) => {
     const file = join(appDir, f);
-    return existsSync(file) && /"@wealthcompass\/angular"\s*:\s*\[/.test(readFileSync(file, 'utf8'));
+    return exists(file) && /"@wealthcompass\/angular"\s*:\s*\[/.test(readText(file));
   });
   add({
     status: viaPaths || (declared && installed) ? 'ok' : 'fail',
@@ -100,7 +101,7 @@ export async function doctor(appDir: string, project?: string, prescanned?: Scan
   });
 
   // Style
-  const ng = readFileSync(join(appDir, 'angular.json'), 'utf8');
+  const ng = readText(join(appDir, 'angular.json'));
   const hasStyles = ng.includes('driver.js/dist/driver.css') && ng.includes('compass-theme');
   add({ status: hasStyles ? 'ok' : 'fail', name: 'Style tour trong angular.json', fix: 'Thêm "driver.js/dist/driver.css" và "@wealthcompass/angular/compass-theme.scss" vào styles' });
 
@@ -137,7 +138,7 @@ function templateTextOf(dir: string, classText: string): string {
   const url = classText.match(/templateUrl:\s*['"]([^'"]+)['"]/);
   if (url) {
     const p = join(dir, url[1]);
-    return existsSync(p) ? readFileSync(p, 'utf8') : '';
+    return exists(p) ? readText(p) : '';
   }
   return classText.match(/template:\s*`([\s\S]*?)`/)?.[1] ?? '';
 }

@@ -8,11 +8,10 @@ import { IconComponent } from '../shared/icon.component';
 import { LogConsoleComponent } from '../shared/log-console.component';
 import { PageHeaderComponent } from '../shared/page-header.component';
 
-type Proc = 'backend' | 'web';
+type Proc = 'web';
 
 interface EnvForm {
   PORT: string;
-  COMPASS_PACK: string;
   COMPASS_ORIGINS: string;
   COMPASS_MOCK_IDP: boolean;
   COMPASS_JWKS_URL: string;
@@ -101,7 +100,7 @@ interface EnvForm {
         <div class="card">
           <div class="card-head">
             <ui-icon name="terminal" />
-            <h2>Log {{ logOf() === 'backend' ? 'backend' : 'web' }}</h2>
+            <h2>Log web</h2>
             <button class="btn btn-ghost btn-icon btn-sm" (click)="hideLog()" aria-label="Đóng log"><ui-icon name="x" /></button>
           </div>
           <div class="card-body"><ui-log-console [lines]="logLines()" height="280px" placeholder="Chưa có log. Hãy chạy tiến trình." /></div>
@@ -112,7 +111,7 @@ interface EnvForm {
     <div class="card">
       <div class="card-head">
         <h2>Cấu hình backend</h2>
-        <span class="muted small mono">wealthcompass.env</span>
+        <span class="muted small" title="Tài liệu wealthcompass.env trong kho dự án; backend đọc khi chạy với COMPASS_PROJECT">Lưu trong kho dự án</span>
       </div>
       @if (envExists()) {
         <div class="card-body stack">
@@ -145,7 +144,7 @@ interface EnvForm {
           </div>
         </div>
       } @else {
-        <div class="empty"><h3>Chưa có wealthcompass.env</h3><p>File này do lệnh <code>wealthcompass setup --app .</code> tạo.</p></div>
+        <div class="empty"><h3>Chưa có cấu hình backend trong kho dự án</h3><p>Lệnh <code>wealthcompass setup</code> tạo cấu hình này. Chưa có thì backend chạy bằng giá trị mặc định (cổng 8890, xác thực qua gateway).</p></div>
       }
     </div>
   `,
@@ -168,7 +167,7 @@ export class RunPage implements OnInit, OnDestroy {
   protected readonly logLines = signal<string[]>([]);
   protected readonly envExists = signal(false);
   protected readonly savingEnv = signal(false);
-  protected env: EnvForm = { PORT: '8890', COMPASS_PACK: 'generic', COMPASS_ORIGINS: '', COMPASS_MOCK_IDP: true, COMPASS_JWKS_URL: '', COMPASS_JWT_ISSUER: '', COMPASS_JWT_AUDIENCE: '', COMPASS_CAPABILITIES_CLAIM: 'roles' };
+  protected env: EnvForm = { PORT: '8890', COMPASS_ORIGINS: '', COMPASS_MOCK_IDP: true, COMPASS_JWKS_URL: '', COMPASS_JWT_ISSUER: '', COMPASS_JWT_AUDIENCE: '', COMPASS_CAPABILITIES_CLAIM: 'roles' };
 
   private timer?: ReturnType<typeof setInterval>;
   private unfollow?: () => void;
@@ -198,7 +197,6 @@ export class RunPage implements OnInit, OnDestroy {
     const v = res.values;
     this.env = {
       PORT: v['PORT'] ?? '8890',
-      COMPASS_PACK: v['COMPASS_PACK'] ?? 'generic',
       COMPASS_ORIGINS: v['COMPASS_ORIGINS'] ?? '',
       COMPASS_MOCK_IDP: v['COMPASS_MOCK_IDP'] !== '0',
       COMPASS_JWKS_URL: v['COMPASS_JWKS_URL'] ?? '',
@@ -213,15 +211,9 @@ export class RunPage implements OnInit, OnDestroy {
       await this.api.post(`/api/run/${name}/${action}`);
       if (action === 'start') this.showLog(name);
       await this.poll();
-      if (name === 'backend') setTimeout(() => void this.store.refreshOverview(), 1500);
     } catch (e) {
       this.toast.error(e);
     }
-  }
-
-  protected async restart(name: Proc): Promise<void> {
-    await this.act(name, 'stop');
-    await this.act(name, 'start');
   }
 
   protected showLog(name: Proc): void {
@@ -242,7 +234,6 @@ export class RunPage implements OnInit, OnDestroy {
       const e = this.env;
       const res = await this.api.put<{ restartNeeded: boolean }>('/api/env', {
         PORT: e.PORT,
-        COMPASS_PACK: e.COMPASS_PACK,
         COMPASS_ORIGINS: e.COMPASS_ORIGINS,
         COMPASS_MOCK_IDP: e.COMPASS_MOCK_IDP ? '1' : '0',
         COMPASS_JWKS_URL: e.COMPASS_JWKS_URL || null,

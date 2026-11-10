@@ -3,10 +3,10 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Quản lý tiến trình Studio mở hộ dev: backend WealthCompass và dev server của web.
+// Quản lý tiến trình Studio mở hộ dev: dev server của web (backend chạy độc lập, Studio không bật).
 // Giữ một ít log gần nhất để hiện trên giao diện; tắt hết khi Studio thoát.
 
-export type ProcName = 'backend' | 'web' | 'task';
+export type ProcName = 'web';
 
 export interface ProcInfo {
   name: ProcName;

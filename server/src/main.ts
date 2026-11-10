@@ -6,13 +6,26 @@ import { z } from 'zod';
 import { runAgent } from './agent.js';
 import { createAuthHook, type Principal } from './auth.js';
 import { createEventLog } from './event-log.js';
-import { loadConfig } from './config.js';
+import { join } from 'node:path';
+import { parseEnv } from 'node:util';
+import { exists, readText } from '@wealthcompass/tourdb';
+import { loadConfig, projectDb } from './config.js';
 import { FeatureStore } from './feature-store.js';
 import { registerMockIdp } from './idp.js';
 import { TourStore } from './tour-store.js';
 import { registerTourAdmin } from './tour-admin.js';
 
 // --env-file <file>: nạp cấu hình do `wealthcompass setup` sinh ra (file của chính dự án, không phải .env chứa bí mật khác)
+// Cấu hình backend lưu trong kho dự án (tài liệu wealthcompass.env): nạp trước khi đọc cấu hình; biến môi trường đã đặt thắng
+const projectFlag = process.argv.indexOf('--project');
+if (projectFlag !== -1 && process.argv[projectFlag + 1]) process.env['COMPASS_PROJECT'] = process.argv[projectFlag + 1];
+{
+  const db = projectDb();
+  const envDoc = db ? join(db, 'wealthcompass.env') : null;
+  if (envDoc && exists(envDoc)) {
+    for (const [key, value] of Object.entries(parseEnv(readText(envDoc)))) if (process.env[key] === undefined && value !== undefined) process.env[key] = value;
+  }
+}
 const envFlag = process.argv.indexOf('--env-file');
 if (envFlag !== -1 && process.argv[envFlag + 1]) process.loadEnvFile(process.argv[envFlag + 1]);
 
@@ -60,7 +73,7 @@ app.get('/v1/health', async () => ({
   auth: config.authMode,
   debug: config.debug,
   // Chỉ báo đường dẫn kho tour khi chạy debug (trên máy dev) để Studio kiểm hai bên có dùng chung một file không
-  ...(config.debug ? { tourDb: config.tourDbPath } : {}),
+  ...(config.debug ? { tourDb: tourStore.dbFile } : {}),
 }));
 
 // Quyền xem tour = quyền vào tính năng sở hữu tour

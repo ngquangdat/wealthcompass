@@ -83,7 +83,7 @@ const OUTCOME: Record<string, { label: string; cls: string }> = {
                 } @empty { <tr><td class="empty">Không có câu nào. Tốt!</td></tr> }
               </tbody>
             </table>
-            @if (s.notFound.length) { <p class="hint pad">Cách sửa thường gặp: thêm từ khóa/câu hỏi mẫu cho màn hình ở trang <a routerLink="/screens">Màn hình</a>, hoặc thêm từ đồng nghĩa ở <a routerLink="/pack">Domain Pack</a>; rồi chạy lại <a routerLink="/eval">Kiểm thử</a>.</p> }
+            @if (s.notFound.length) { <p class="hint pad">Cách sửa thường gặp: thêm từ khóa/câu hỏi mẫu cho màn hình ở trang <a routerLink="/screens">Màn hình</a>; rồi chạy lại <a routerLink="/eval">Kiểm thử</a>.</p> }
           </section>
 
           <section class="card">
@@ -212,7 +212,7 @@ export class LogsPage implements OnInit {
         this.toast.show('Câu này đã có trong bộ kiểm thử.');
       } else {
         await this.api.put('/api/eval', { cases: [...data.cases, { q, expect: [feature] }] });
-        this.toast.success('Đã thêm vào Kiểm thử. Sửa mô tả hoặc từ đồng nghĩa rồi chạy lại để xác nhận.');
+        this.toast.success('Đã thêm vào Kiểm thử. Sửa mô tả hoặc từ khóa của màn hình rồi chạy lại để xác nhận.');
       }
       this.adding.set(null);
     } catch (e) {

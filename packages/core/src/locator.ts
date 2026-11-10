@@ -27,6 +27,10 @@ export const LOCATOR_WEIGHTS = {
   weakAttr: 1, // aria-label, placeholder, type
   strongAttrConflict: -2,
   text: 3,
+  // Phần tử không có vai trò lẫn tên truy cập (div/span có (click)): chữ hiển thị chính là danh tính của nó, nên khớp
+  // đúng chữ được tính gần bằng khớp tên. Không thế thì mục menu dựng bằng div chỉ còn dựa vào selector và vị trí,
+  // hai thứ đổi ngay khi bố cục đổi (menu mở rộng, thêm mục).
+  textIdentity: 4.5,
   textPartial: 1.5,
   tag: 0.5,
   component: 2,
@@ -67,16 +71,31 @@ function safeQuery(root: ParentNode, selector: string): Element[] {
   }
 }
 
+// Gom ứng viên. Thứ tự quan trọng vì có giới hạn số lượng: manh mối cụ thể trước (selector, thuộc tính, role), thẻ sau cùng.
+// Thẻ chung chung (div, span...) trên trang lớn có hàng nghìn phần tử, nên khi locator có chữ thì chỉ nhận phần tử thẻ đó
+// có chứa chữ ấy (so rẻ trên textContent, bỏ vùng chứa quá lớn) thay vì lấy 1500 phần tử đầu trang: nếu không, phần tử nằm
+// cuối trang (popup, overlay) sẽ không bao giờ được xét.
 function candidatesFor(locator: Locator, root: ParentNode): Element[] {
   const set = new Set<Element>();
   const add = (list: Element[]) => list.forEach((e) => set.size < MAX_CANDIDATES && set.add(e));
-  add(safeQuery(root, locator.tag));
-  if (locator.role) add(safeQuery(root, `[role="${CSS.escape(locator.role)}"]`));
+  if (locator.css) add(safeQuery(root, locator.css));
   for (const [name, value] of Object.entries(locator.attrs ?? {})) {
     if (name === 'href') add(safeQuery(root, `a[href$="${CSS.escape(value)}"]`));
     else add(safeQuery(root, `[${name}="${CSS.escape(value)}"]`));
   }
-  if (locator.css) add(safeQuery(root, locator.css));
+  if (locator.role) add(safeQuery(root, `[role="${CSS.escape(locator.role)}"]`));
+  const byTag = safeQuery(root, locator.tag);
+  const want = norm(locator.text ?? locator.name);
+  if (want && byTag.length > MAX_CANDIDATES / 2) {
+    const limit = Math.max(200, want.length * 6);
+    add(
+      byTag.filter((e) => {
+        const text = e.textContent ?? '';
+        return text.length <= limit && normalizeVi(text).includes(want);
+      }),
+    );
+  }
+  add(byTag);
   return [...set];
 }
 
@@ -114,7 +133,7 @@ function score(element: Element, locator: Locator): { score: number; matchedBy: 
   if (locator.text) {
     const want = norm(locator.text);
     const have = norm(stripIconText(element, cleanText((element as HTMLElement).innerText ?? element.textContent, 200)));
-    if (have === want) hit('text', w.text);
+    if (have === want) hit('text', !locator.name && !locator.role ? w.textIdentity : w.text);
     else if (want.length >= 3 && have.length <= want.length * 3 && have.includes(want)) hit('text~', w.textPartial);
   }
 

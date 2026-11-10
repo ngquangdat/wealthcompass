@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
+import { exists, readText, writeText } from '@wealthcompass/tourdb';
 import { join } from 'node:path';
 import type { OutgoingHttpHeaders } from 'node:http';
 import type { FastifyInstance } from 'fastify';
@@ -6,7 +7,7 @@ import { z } from 'zod';
 import { normalizeVi } from '@wealthcompass/core';
 import { completeText } from '@wealthcompass/llm';
 import { loadConfig } from '../scan';
-import { backendUrl, cachedScan, configPath, eventLogFile, httpError, llm, loadDoc, parseJson, requireApp, stream } from './context';
+import { backendUrl, cachedScan, dataFile, configPath, eventLogFile, httpError, llm, loadDoc, parseJson, requireApp, stream } from './context';
 
 // Đợt 3: thử trợ lý (qua chế độ debug của backend), bộ kiểm thử tìm kiếm, thống kê nhật ký hỏi đáp
 
@@ -34,8 +35,9 @@ export interface EvalRow {
   top: Array<{ id: string; title: string; score: number }>;
 }
 
-const evalFile = (app: string) => join(app, 'compass.eval.yaml');
-const lastEvalFile = (app: string) => join(app, '.wealthcompass', 'eval-last.json');
+const evalFile = (app: string) => dataFile(app, 'compass.eval.yaml');
+// Kết quả lần chạy gần nhất: trong kho dự án, hoặc .wealthcompass/ của dự án kiểu cũ
+const lastEvalFile = (app: string) => (dataFile(app, 'x').includes('.db/') ? dataFile(app, 'eval-last.json') : join(app, '.wealthcompass', 'eval-last.json'));
 
 function readCases(app: string): EvalCase[] {
   const raw = (loadDoc(evalFile(app)).toJSON() as { cases?: unknown[] } | null)?.cases ?? [];
@@ -191,8 +193,8 @@ export function registerPhase3(app: FastifyInstance): void {
   // ======================= Kiểm thử =======================
   app.get('/api/eval', async () => {
     const dir = requireApp();
-    const last = existsSync(lastEvalFile(dir)) ? JSON.parse(readFileSync(lastEvalFile(dir), 'utf8')) : null;
-    return { file: existsSync(evalFile(dir)), cases: readCases(dir), last, roles: allRoles(dir) };
+    const last = exists(lastEvalFile(dir)) ? JSON.parse(readText(lastEvalFile(dir))) : null;
+    return { file: exists(evalFile(dir)), cases: readCases(dir), last, roles: allRoles(dir) };
   });
 
   app.put('/api/eval', async (req) => {
@@ -201,7 +203,7 @@ export function registerPhase3(app: FastifyInstance): void {
     const doc = loadDoc(evalFile(dir));
     if (!doc.commentBefore) doc.commentBefore = ' Bộ câu hỏi kiểm thử tìm kiếm của WealthCompass (Studio > Kiểm thử).\n expect: id màn hình đúng; roles: quyền người hỏi (bỏ trống = mọi quyền)';
     doc.set('cases', doc.createNode(cases.map((c) => ({ q: c.q, expect: c.expect.length === 1 ? c.expect[0] : c.expect, ...(c.roles?.length ? { roles: c.roles } : {}) }))));
-    writeFileSync(evalFile(dir), String(doc));
+    writeText(evalFile(dir), String(doc));
     return { ok: true, count: cases.length };
   });
 
@@ -222,8 +224,8 @@ export function registerPhase3(app: FastifyInstance): void {
         if ((i + 1) % 20 === 0) log(`Đã chạy ${i + 1}/${cases.length}`);
       }
       const result = { at: new Date().toISOString(), summary: summarize(rows), rows };
-      mkdirSync(join(dir, '.wealthcompass'), { recursive: true });
-      writeFileSync(lastEvalFile(dir), JSON.stringify(result));
+      if (!lastEvalFile(dir).includes('.db/')) mkdirSync(join(dir, '.wealthcompass'), { recursive: true });
+      writeText(lastEvalFile(dir), JSON.stringify(result));
       log(`Xong: hit@3 ${(result.summary.hit3 * 100).toFixed(0)}%, ${result.summary.failed} câu chưa đạt.`);
       return result;
     });
@@ -272,8 +274,8 @@ export function registerPhase3(app: FastifyInstance): void {
     const file = eventLogFile(dir);
     const since = new Date(Date.now() - days * 86_400_000).toISOString();
     const entries: LogEntry[] = [];
-    if (existsSync(file)) {
-      for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (exists(file)) {
+      for (const line of readText(file).split('\n')) {
         if (!line.trim()) continue;
         try {
           const e = JSON.parse(line) as LogEntry;
@@ -284,6 +286,6 @@ export function registerPhase3(app: FastifyInstance): void {
       }
     }
     const tourIds = new Set(cachedScan(dir).featureMap.tours.map((t) => t.id));
-    return { file, exists: existsSync(file), days, ...logStats(entries, tourIds) };
+    return { file, exists: exists(file), days, ...logStats(entries, tourIds) };
   });
 }

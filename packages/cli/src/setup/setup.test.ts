@@ -1,9 +1,11 @@
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { exists, readText } from '@wealthcompass/tourdb';
+import { dataRoot } from '../project';
 import { scan } from '../scan';
 import { detectProject } from './detect';
 import { analyzeGuards } from './guards';
@@ -37,7 +39,6 @@ const options = (app: string, extra: Partial<SetupOptions> = {}): SetupOptions =
   version: '0.1.0',
   llm: null,
   aiCode: false,
-  annotate: null,
   force: false,
   today: '2026-10-03',
   ...extra,
@@ -81,7 +82,7 @@ test('setup (standalone): không sửa code, patch áp được, sau khi áp đ�
   const result = await setup(options(dir), () => undefined);
   assert.equal(git(dir, 'status', '--porcelain', '--', 'src', 'package.json', 'angular.json'), '', 'code của web chưa bị đụng');
 
-  const config = readFileSync(result.configFile, 'utf8');
+  const config = readText(result.configFile);
   // Quyền mặc định là chỉ cần đăng nhập: setup không tự ghi quyền nào, chuỗi quyền trong code chỉ là gợi ý trong báo cáo
   assert.doesNotMatch(config, /adminGuard|reportsGuard/);
   assert.ok(!result.todo.some((t) => /guard/i.test(t)));
@@ -110,7 +111,7 @@ test('setup (standalone): không sửa code, patch áp được, sau khi áp đ�
   assert.match(app, /import \{ ChatWidgetComponent \} from '@wealthcompass\/angular';/);
   assert.match(readFileSync(join(dir, 'src/app/app.html'), 'utf8'), /<compass-chat-widget \/>/);
 
-  const env = readFileSync(result.envFile, 'utf8');
+  const env = readText(result.envFile);
   assert.match(env, /COMPASS_ORIGINS=http:\/\/localhost:4300/, 'origin lấy từ cổng dev của angular.json');
   assert.match(readFileSync(result.reportFile, 'utf8'), /## Cần bạn xem/);
 });
@@ -137,18 +138,6 @@ test('setup (NgModule): provider và widget vào AppModule, thẻ widget vào te
   assert.match(readFileSync(join(dir, 'src/app/app.component.html'), 'utf8'), /<compass-chat-widget \/>/);
 });
 
-test('--annotate: gợi ý tourId được gộp vào cùng một patch và vẫn áp được', async () => {
-  const dir = tempRepo('setup-app');
-  const result = await setup(options(dir, { annotate: 'all' }), () => undefined);
-  assert.ok(result.stats.annotated >= 2);
-  execFileSync('git', ['apply', result.patchFile!], { cwd: dir });
-  const routes = readFileSync(join(dir, 'src/app/app.routes.ts'), 'utf8');
-  assert.match(routes, /tourId="orders-huy-don"/);
-  assert.match(routes, /TourIdDirective/);
-  // Nút gửi biểu mẫu bị đánh dấu user-only
-  assert.match(routes, /<button tourId="returns-gui-yeu-cau" tourLabel="Gửi yêu cầu" tourRole="user-only" type="submit">/);
-});
-
 // --ai-code: LLM giả trả lời cố định
 async function fakeLlm(reply: (body: any) => unknown) {
   const { createServer } = await import('node:http');
@@ -167,6 +156,7 @@ async function fakeLlm(reply: (body: any) => unknown) {
   const port = (server.address() as import('node:net').AddressInfo).port;
   return { llm: { provider: 'fake', baseUrl: `http://127.0.0.1:${port}`, apiKey: 'k', model: 'm' }, requests, close: () => new Promise<void>((r) => server.close(() => r())) };
 }
+
 
 test('--ai-code: LLM chọn thành viên, nhưng biểu thức do code dựng; tên bịa hoặc chèn code bị từ chối', async () => {
   const { guessAuthWithLlm } = await import('./guards');
@@ -201,18 +191,22 @@ test('AI đọc code guard: chỉ guard chưa đọc được quyền mới đư
   assert.deepEqual([kept.find((g) => g.name === 'reportsGuard')?.how, kept.find((g) => g.name === 'reportsGuard')?.requires], ['default', []], 'chuỗi quyền không hợp lệ thì vẫn là chỉ cần đăng nhập');
 });
 
-test('setup: thêm .wealthcompass/ vào .gitignore qua patch (một lần), không có .gitignore thì nhắc trong việc cần làm', async () => {
+test('setup: dữ liệu nằm trong kho dự án ngoài source; source web không có file nào của WealthCompass, .gitignore không bị đụng', async () => {
   const dir = tempRepo('setup-app');
   writeFileSync(join(dir, '.gitignore'), 'node_modules');
   git(dir, 'add', '-A');
   git(dir, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'gi');
   const result = await setup(options(dir), () => undefined);
-  assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), 'node_modules', 'chưa đụng trước khi áp');
-  execFileSync('git', ['apply', result.patchFile!], { cwd: dir });
-  assert.match(readFileSync(join(dir, '.gitignore'), 'utf8'), /^node_modules\n\n# WealthCompass[^\n]*\n\.wealthcompass\/\n$/);
-  const again = await setup(options(dir, { force: true }), () => undefined);
-  assert.doesNotMatch(again.patchFile ? readFileSync(again.patchFile, 'utf8') : '', /\.gitignore/);
-
-  const bare = await setup(options(tempRepo('setup-app')), () => undefined);
-  assert.ok(bare.todo.some((t) => t.includes('.wealthcompass/')));
+  // Mọi dữ liệu là tài liệu trong một file SQLite ngoài thư mục web
+  const db = dataRoot(dir);
+  assert.ok(db.endsWith('.db') && !db.startsWith(dir), db);
+  assert.equal(result.configFile, join(db, 'compass.config.yaml'));
+  for (const name of ['compass.config.yaml', 'compass.overrides.yaml', 'feature-map.json', 'compass.lock.json', 'wealthcompass.env']) assert.ok(exists(join(db, name)), name);
+  assert.match(readText(result.configFile), new RegExp(`sourceDir: "${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
+  // Trong source chỉ có patch và báo cáo (tạm, để áp rồi xóa)
+  for (const name of ['compass.config.yaml', 'compass.overrides.yaml', 'feature-map.json', 'compass.lock.json', 'wealthcompass.env', 'compass.tours.db']) assert.equal(existsSync(join(dir, name)), false, name);
+  assert.doesNotMatch(readFileSync(result.patchFile!, 'utf8'), /\.gitignore|compass\.config|feature-map/);
+  assert.equal(readFileSync(join(dir, '.gitignore'), 'utf8'), 'node_modules');
+  // Quét lại và doctor đọc từ kho
+  assert.equal(scan(result.configFile).featureMap.features.length, result.stats.screens);
 });

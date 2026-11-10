@@ -4,7 +4,7 @@
 // File chỉ mục nằm ngoài dự án (~/.wealthcompass/index) để không lẫn vào git của web.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -152,15 +152,4 @@ export function indexed<T>(root: string, name: string, fingerprint: string, comp
   const value = compute();
   writeIndex(root, name, fingerprint, value);
   return value;
-}
-
-// Test: đóng file và quên dấu vân tay đã nhớ
-export function resetIndexForTests(): void {
-  try {
-    db?.close();
-  } catch {
-    // bỏ qua
-  }
-  db = undefined;
-  memo.clear();
 }

@@ -1,6 +1,6 @@
 import { Project } from 'ts-morph';
 import { dirname, join, resolve } from 'node:path';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { exists, readText, writeText } from '@wealthcompass/tourdb';
 import { parse as parseYaml } from 'yaml';
 import {
   SCHEMA_VERSION,
@@ -63,12 +63,12 @@ export interface ScanResult {
   outFile: string;
   contexts: Record<string, FeatureContext>;
   hidden: HiddenScreen[];
-  // Project ts-morph đã nạp; annotate dùng lại để tính chỗ sửa mà không phải nạp lần nữa
+  // Project ts-morph đã nạp (phân tích guard, doctor dùng lại)
   project: Project;
   root: string;
   layouts: ScannedLayout[];
   // Route/menu lấy từ chỉ mục SQLite (source chưa đổi): `project` rỗng, `layouts` và `contexts[*].classes` rỗng.
-  // Việc cần đọc mã nguồn (annotate, enrich, phân tích guard, doctor) phải quét đầy đủ (không truyền useIndex).
+  // Việc cần đọc mã nguồn (enrich, phân tích guard, doctor) phải quét đầy đủ (không truyền useIndex).
   fromIndex: boolean;
 }
 
@@ -96,14 +96,18 @@ function slug(path: string): string {
 }
 
 function readYaml<T>(file: string): T | undefined {
-  return existsSync(file) ? (parseYaml(readFileSync(file, 'utf8')) as T) : undefined;
+  return exists(file) ? (parseYaml(readText(file)) as T) : undefined;
 }
 
-export function loadConfig(configPath: string): { config: CompassConfig; root: string } {
+// `root`: nơi chứa dữ liệu của WealthCompass (kho dự án SQLite, hoặc thư mục kiểu cũ). `sourceRoot`: thư mục source của web.
+// Dự án kiểu cũ thì hai nơi là một.
+export function loadConfig(configPath: string): { config: CompassConfig; root: string; sourceRoot: string } {
   const file = resolve(configPath);
   const raw = readYaml<unknown>(file);
-  if (!raw) throw new Error(`Không đọc được cấu hình: ${file}`);
-  return { config: compassConfigSchema.parse(raw), root: dirname(file) };
+  if (!raw) throw new Error(`Không đọc được cấu hình: ${file}. Web chưa tích hợp thì chạy \`wealthcompass setup --app <thư mục web>\`.`);
+  const config = compassConfigSchema.parse(raw);
+  const root = dirname(file);
+  return { config, root, sourceRoot: config.discovery.sourceDir ? resolve(config.discovery.sourceDir) : root };
 }
 
 // Chưa có source: màn hình = route khai trong overrides (features.<id>.route) + route xuất hiện trong tour đã ghi.
@@ -134,15 +138,15 @@ export function featureIdOfRoute(path: string): string {
 }
 
 export function scan(configPath: string, options: ScanOptions = {}): ScanResult {
-  const { config, root } = loadConfig(configPath);
+  const { config, root, sourceRoot } = loadConfig(configPath);
   const warnings: string[] = [];
 
   const overrides = readYaml<Overrides>(join(root, config.discovery.overrides)) ?? {};
   const noSource = config.discovery.source === 'none';
   if (!noSource && !config.discovery.entry) throw new Error('compass.config.yaml thiếu discovery.entry (file route gốc). Chưa có source thì đặt discovery.source: none.');
   // Phần tốn thời gian (ts-morph đọc route, menu, template) chỉ phụ thuộc source: lưu vào chỉ mục theo dấu vân tay source
-  const fingerprint = noSource ? '' : sourceFingerprint(root, indexIgnore(config));
-  const cached = !noSource && options.useIndex ? readIndex<SourceIndex>(root, 'scan', fingerprint) : null;
+  const fingerprint = noSource ? '' : sourceFingerprint(sourceRoot, indexIgnore(config));
+  const cached = !noSource && options.useIndex ? readIndex<SourceIndex>(sourceRoot, 'scan', fingerprint) : null;
   let project: Project;
   let routes: ScannedRoute[];
   let layouts: ScannedLayout[] = [];
@@ -157,19 +161,19 @@ export function scan(configPath: string, options: ScanOptions = {}): ScanResult 
     menu = new Map(cached.menu);
     warnings.push(...cached.warnings);
   } else {
-    project = new Project({ tsConfigFilePath: join(root, 'tsconfig.app.json'), skipAddingFilesFromTsConfig: false });
-    const scanned = scanRoutes(project, config.discovery.entry!, root, warnings);
+    project = new Project({ tsConfigFilePath: join(sourceRoot, 'tsconfig.app.json'), skipAddingFilesFromTsConfig: false });
+    const scanned = scanRoutes(project, config.discovery.entry!, sourceRoot, warnings);
     routes = scanned.routes;
     layouts = scanned.layouts;
-    menu = scanMenu(project, config.discovery.menu, root, warnings);
+    menu = scanMenu(project, config.discovery.menu, sourceRoot, warnings);
     // Cảnh báo tới đây đều từ source (route, menu): lưu kèm để lần đọc chỉ mục báo y như quét đầy đủ
     const index: SourceIndex = { routes: routes.map(({ classes: _classes, ...rest }) => rest), menu: [...menu], warnings: [...warnings] };
-    writeIndex(root, 'scan', fingerprint, index);
+    writeIndex(sourceRoot, 'scan', fingerprint, index);
   }
 
   // Khóa ổn định: nếu id sinh ra chưa có trong lock nhưng component cũ vẫn còn, coi là đổi tên route
   const lockFile = join(root, 'compass.lock.json');
-  const lock: Lock = existsSync(lockFile) ? JSON.parse(readFileSync(lockFile, 'utf8')) : { features: {} };
+  const lock: Lock = exists(lockFile) ? JSON.parse(readText(lockFile)) : { features: {} };
   const claimed = new Set<string>();
   const idFor = (r: ScannedRoute): string => {
     const explicit = r.data['compassId'];
@@ -372,7 +376,8 @@ export function scan(configPath: string, options: ScanOptions = {}): ScanResult 
   });
 
   const outFile = resolve(root, config.discovery.out);
-  writeFileSync(outFile, JSON.stringify(featureMap, null, 2) + '\n');
-  writeFileSync(lockFile, JSON.stringify(lock, null, 2) + '\n');
-  return { featureMap, outFile, contexts, hidden, project, root, layouts, fromIndex: Boolean(cached) };
+  writeText(outFile, JSON.stringify(featureMap, null, 2) + '\n');
+  writeText(lockFile, JSON.stringify(lock, null, 2) + '\n');
+  // `root` của kết quả quét là thư mục source
+  return { featureMap, outFile, contexts, hidden, project, root: sourceRoot, layouts, fromIndex: Boolean(cached) };
 }

@@ -1,10 +1,13 @@
 // Khóa hover: giữ menu mở bằng hover (menu desktop) trong lúc tour tô sáng và chờ người dùng bấm mục bên trong.
 // Không khóa thì menu đóng ngay khi chuột rời nút mở (để bấm "Tiếp", hoặc khi lớp phủ của tour che nút mở).
 //
-// Hai kiểu menu hover:
-// 1. JS (mouseenter/mouseleave, Angular (mouseleave), overlay của CDK): chặn sự kiện "rời chuột" ở pha capture trên window
-//    cho nút mở và vùng menu, nên app không biết chuột đã rời.
-// 2. CSS (:hover): không ép được :hover từ JS, nên đóng băng kiểu hiển thị hiện tại (display, visibility, opacity...)
+// Ba cách một web đóng menu hover, và cách khóa xử lý từng cách:
+// 1. JS nghe "rời chuột" trên nút mở/vùng menu (mouseleave, mouseout): chặn các sự kiện đó ở pha capture trên window cho
+//    nút mở và vùng menu, nên app không biết chuột đã rời.
+// 2. JS nghe "chuột đi vào chỗ khác" (mouseenter/mouseover/mousemove trên phần thân trang hay mục menu khác rồi đóng
+//    menu đang mở; TCInvest làm vậy): chặn các sự kiện hover xảy ra NGOÀI vùng menu. Giao diện của chính tour (popover,
+//    widget chat) được chừa ra.
+// 3. CSS (:hover): không ép được :hover từ JS, nên đóng băng kiểu hiển thị hiện tại (display, visibility, opacity...)
 //    của mục cần giữ và các tổ tiên của nó bằng inline style !important.
 // Nhả khóa: gỡ chặn, trả style cũ, rồi bắn mouseleave/mouseout vào nút mở để menu JS tự đóng.
 
@@ -15,6 +18,10 @@ export interface HoverLock {
 }
 
 const LEAVE_EVENTS = ['mouseleave', 'mouseout', 'pointerleave', 'pointerout'] as const;
+// Sự kiện báo "chuột đang ở chỗ khác": chặn khi xảy ra ngoài vùng menu
+const ENTER_EVENTS = ['mouseenter', 'mouseover', 'mousemove', 'pointerenter', 'pointerover', 'pointermove'] as const;
+// Giao diện của tour và trợ lý: không bao giờ bị chặn sự kiện
+const OWN_UI = '.driver-popover, .compass-popover, compass-chat-widget, #__compass-recorder';
 const FROZEN_PROPS = ['display', 'visibility', 'opacity', 'pointer-events', 'transform', 'max-height'] as const;
 const MAX_DEPTH = 12;
 
@@ -32,7 +39,18 @@ export function lockHover(trigger: Element): HoverLock {
   const block = (event: Event) => {
     if (inZone(event.target)) event.stopImmediatePropagation();
   };
+  const ownUi = (node: EventTarget | null): boolean => {
+    try {
+      return node instanceof Element && node.closest(OWN_UI) !== null;
+    } catch {
+      return false;
+    }
+  };
+  const blockOutside = (event: Event) => {
+    if (!inZone(event.target) && !ownUi(event.target)) event.stopImmediatePropagation();
+  };
   for (const type of LEAVE_EVENTS) window.addEventListener(type, block, true);
+  for (const type of ENTER_EVENTS) window.addEventListener(type, blockOutside, true);
 
   const freeze = (element: Element) => {
     if (!(element instanceof HTMLElement) || frozen.has(element)) return;
@@ -65,6 +83,7 @@ export function lockHover(trigger: Element): HoverLock {
       if (released) return;
       released = true;
       for (const type of LEAVE_EVENTS) window.removeEventListener(type, block, true);
+      for (const type of ENTER_EVENTS) window.removeEventListener(type, blockOutside, true);
       for (const [element, saved] of frozen) {
         for (const [prop, value, priority] of saved) {
           if (value) element.style.setProperty(prop, value, priority);

@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import type { Locator } from '@wealthcompass/contracts';
-import { describeLocator } from '@wealthcompass/core';
+import { describeLocator, isUsableLocator } from '@wealthcompass/core';
 import { CAPTURE_SCRIPT } from './capture.bundle';
 import { PAGE_SCRIPT } from './page-script';
 
@@ -22,6 +22,8 @@ export interface RecordedStep {
   text: string;
   // Manh mối để tìm lại phần tử lúc chạy, không cần tourId trong HTML (null khi trang không ghi được)
   locator?: Locator | null;
+  // tourId của vùng chứa bao ngoài đã bị bỏ qua (vùng đó có nhiều phần tử bấm được, không trỏ đúng nút vừa bấm)
+  skippedTourId?: string | null;
   // Phần tử của lần bấm này chưa hiện ở lần bấm trước (cùng màn hình): lần bấm trước đã mở nó ra
   appeared?: boolean;
   // Bước này chỉ mở chỗ chứa bước sau (nút menu, mở rộng): chạy tour thì bỏ qua khi bước sau đã hiện
@@ -29,8 +31,6 @@ export interface RecordedStep {
 }
 
 export interface RecorderOptions {
-  // Từ khóa nút nhạy cảm (safety.userOnlyText): lần bấm khớp bị chặn và ghi thành bước chỉ-tô-sáng
-  userOnlyText?: string[];
   // Dưới bề rộng này (px) coi là bố cục mobile
   mobileBreakpoint?: number;
   // Mở trình duyệt với khung nhìn điện thoại để ghi bản mobile của tour
@@ -44,9 +44,12 @@ export interface RecorderState {
   highlight: boolean;
   count: number;
   last: string;
+  // Cảnh báo cho bước vừa ghi: không có tourId nên tìm bằng selector; hoặc không nhận ra phần tử
+  lastNote: string;
+  // Số bước đã ghi không có tourId (tìm bằng selector)
+  noIdCount: number;
   // Mô tả của người ghi: đang ghi tour cho tính năng gì
   purpose: string;
-  userOnlyText: string[];
   mobileBreakpoint: number;
 }
 
@@ -79,8 +82,9 @@ export class Recorder {
       highlight: this.highlight,
       purpose: this.purpose,
       count: this.steps.length,
-      last: last ? (last.tourId ?? (last.locator ? describeLocator(last.locator) : `(không nhận ra: ${last.tag})`)) : '',
-      userOnlyText: this.options.userOnlyText ?? [],
+      last: last ? (last.tourId ? `tourId ${last.tourId}` : last.locator ? describeLocator(last.locator) : `(không nhận ra: ${last.tag})`) : '',
+      lastNote: stepNote(last),
+      noIdCount: this.steps.filter((s) => !s.tourId).length,
       mobileBreakpoint: this.options.mobileBreakpoint ?? 768,
     };
   }
@@ -151,6 +155,16 @@ export class Recorder {
     await this.page.evaluate(CAPTURE_SCRIPT).catch(() => undefined);
     await this.page.evaluate(PAGE_SCRIPT).catch(() => undefined);
   }
+}
+
+// Cảnh báo cho một bước không có tourId
+export function stepNote(step: RecordedStep | undefined): string {
+  if (!step || step.tourId) return '';
+  if (!isUsableLocator(step.locator)) return 'Phần tử không có tourId và không có manh mối để tìm lại: bước này sẽ bị bỏ khi lưu.';
+  const selector = step.locator?.css ? ` (${step.locator.css})` : '';
+  return step.skippedTourId
+    ? `Nút này không có tourId; tourId "${step.skippedTourId}" là của vùng chứa nên không dùng. Tìm theo selector${selector}.`
+    : `Phần tử không có tourId: tìm theo selector${selector}.`;
 }
 
 export async function launchRecorderBrowser(): Promise<Browser> {

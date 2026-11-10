@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { resolveLlmConfig, type LlmConfig } from '@wealthcompass/llm';
+import { ensureSeeded, projectDbFor } from '@wealthcompass/tourdb';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,7 +29,7 @@ export interface ServerConfig {
   debug: boolean;
   // COMPASS_LOG_FILE: ghi nhật ký hỏi đáp JSONL để thống kê
   logFile?: string;
-  // Kho tour (file SQLite dùng chung với tour:record và Studio); COMPASS_TOUR_DB, mặc định compass.tours.db cạnh feature-map.json
+  // Kho tour: nằm trong chính kho dự án (cùng file với bản đồ tính năng); dự án kiểu cũ thì compass.tours.db cạnh feature-map.json
   tourDbPath: string;
   // COMPASS_ADMIN_TOKEN: bật API quản trị tour (/admin/tours). Không đặt thì API tắt.
   adminToken?: string;
@@ -63,9 +64,29 @@ export function loadConfig(): ServerConfig {
   };
 }
 
+// Kho dự án (file SQLite ngoài source của web) mà backend phục vụ: COMPASS_PROJECT là file kho .db hoặc thư mục source
+// của web (khi đó suy ra file kho như Studio). Trả null khi không đặt.
+export function projectDb(): string | null {
+  const value = process.env['COMPASS_PROJECT'];
+  if (!value) return null;
+  const abs = resolve(value);
+  if (abs.endsWith('.db')) return abs;
+  // Thư mục web có bản mẫu đi kèm mà máy này chưa có kho: dựng kho từ bản mẫu
+  ensureSeeded(abs);
+  return projectDbFor(abs);
+}
+
+// Bản đồ tính năng: COMPASS_FEATURE_MAP (file) > kho dự án (COMPASS_PROJECT) > web demo trong repo
 function featureMapPath(): string {
   const value = process.env['COMPASS_FEATURE_MAP'];
   if (value) return resolve(value);
-  if (inRepo) return resolve(repoRoot, 'examples/iconnect-demo/feature-map.json');
-  throw new Error('Thiếu COMPASS_FEATURE_MAP: đường dẫn tới feature-map.json của web (do `wealthcompass setup` hoặc `scan` sinh ra).');
+  const project = projectDb();
+  if (project) return join(project, 'feature-map.json');
+  if (inRepo) {
+    // Web demo trong repo: kho dự án của nó, dựng từ bản mẫu examples/iconnect-demo.compass nếu máy này chưa có
+    const demo = resolve(repoRoot, 'examples/iconnect-demo');
+    ensureSeeded(demo);
+    return join(projectDbFor(demo), 'feature-map.json');
+  }
+  throw new Error('Thiếu COMPASS_PROJECT: file kho dự án (.db) hoặc thư mục source của web đã chạy `wealthcompass setup`.');
 }

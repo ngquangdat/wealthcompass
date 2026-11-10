@@ -17,9 +17,9 @@ Tài liệu này dành cho người ghi tour. Muốn biết hệ thống tổng 
 ## 2. Chuẩn bị (kiểm tra trước khi ghi)
 
 - [ ] **Chrome** đã cài trên máy. Công cụ dùng Chrome có sẵn, không tải trình duyệt riêng. Chrome ở chỗ khác thì đặt `CHROME_PATH=/duong/dan/toi/chrome`.
-- [ ] **Web đang chạy** và có tài khoản đăng nhập được. **Ghi trên môi trường thử/staging với tài khoản thử**, vì mọi lần bấm không nhạy cảm vẫn chạy thật trên web (xem mục 5).
+- [ ] **Web đang chạy** và có tài khoản đăng nhập được. **Ghi trên môi trường thử/staging với tài khoản thử**, vì mọi lần bấm đều chạy thật trên web (xem mục 5).
 - [ ] **Không bắt buộc** gắn `tourId`. Chỉ nên ghim `tourId` cho vài phần tử quan trọng hay có chữ trùng nhau (xem mục 5b).
-- [ ] Mọi nút **gây thay đổi dữ liệu hay tiền** (đặt lệnh, xác nhận, hủy lệnh, chuyển tiền) được nhận ra là nhạy cảm: hoặc có `tourRole="user-only"`/`data-sensitive`, hoặc chữ trên nút khớp `safety.userOnlyText` trong `compass.config.yaml` (vd. `[đặt lệnh, xác nhận lệnh]`). Nút đó bị chặn khi ghi nên không vô tình chạy. Truyền cùng danh sách cho widget qua `provideCompass({ safety: { userOnlyText } })`.
+- [ ] **Mọi lần bấm chạy thật trên web**, kể cả nút đặt lệnh hay xác nhận: công cụ không đoán nút nhạy cảm theo chữ. Nút nào không muốn bấm thật thì bật **Tô sáng (không bấm)** trong khung ghi trước khi bấm (xem mục 4). Chỉ phần tử dev đã đánh dấu trong source (`tourRole="user-only"`, `data-sensitive`) và ô mật khẩu/OTP mới tự bị chặn.
 - [ ] Đã chạy **`scan`** để có `feature-map.json` (công cụ lấy nhãn và tính năng đích từ đó). Trong repo này: `npm run scan`.
 - [ ] (Tùy chọn) Khóa LLM. Không có khóa vẫn ghi được, chữ sẽ theo mẫu. Thứ tự tìm khóa: `COMPASS_LLM_API_KEY` → biến theo nhà cung cấp (`DEEPSEEK_API_KEY` mặc định, `GOOGLE_API_KEY` nếu `COMPASS_LLM_PROVIDER=gemini`) → đúng biến đó trong file chỉ định bởi `COMPASS_ENV_FILE` (nếu đặt). Ví dụ dùng chung khóa với dự án khác: `export COMPASS_ENV_FILE=~/du-an-khac/.env`.
 
@@ -34,17 +34,17 @@ npm run tour:record -- --url http://localhost:4200 --id sell-bond --about "Hư�
 
 Dấu `--` đứng riêng là bắt buộc: nó tách tham số của `npm` khỏi tham số của công cụ.
 
-Script `tour:record` trong `package.json` đã gắn sẵn `--config examples/iconnect-demo/compass.config.yaml`. Với web khác, gọi trực tiếp:
+Script `tour:record` trong `package.json` đã gắn sẵn `--app examples/iconnect-demo`. Với web khác, gọi trực tiếp:
 
 ```bash
-npx tsx packages/cli/src/main.ts tour:record --config duong/dan/compass.config.yaml --url https://staging.congty.vn --id sell-bond
+npx tsx packages/cli/src/main.ts tour:record --app ~/du-an/my-web --url https://staging.congty.vn --id sell-bond
 ```
 
 | Cờ | Bắt buộc | Ý nghĩa |
 | --- | --- | --- |
-| `--url` | có, trừ khi `compass.config.yaml` có `web.url` | Địa chỉ web mở trong Chrome |
+| `--url` | có, trừ khi cấu hình có `web.url` | Địa chỉ web mở trong Chrome |
 | `--id` | có | Id của tour (khóa dưới `tours:` trong YAML). Dạng `ban-trai-phieu` hoặc `sell-bond`; đừng đổi sau khi đã phát hành |
-| `--config` | không | File `compass.config.yaml` của web (xác định nơi ghi overrides và feature map). Mặc định `compass.config.yaml` ở thư mục đang đứng; script `npm run tour:record` đã gắn sẵn cấu hình của web demo |
+| `--app` | có (script `npm run tour:record` đã gắn sẵn web demo) | Thư mục source của web, hoặc file kho `.db` của dự án chưa có source. Công cụ tìm kho dự án từ đó. Dự án kiểu cũ dùng `--config <compass.config.yaml>` |
 | `--about "..."` | không, nhưng nên có | Mô tả đang ghi tour cho tính năng gì. Có thể gõ hoặc sửa tiếp trong khung ghi |
 | `--title "..."` | không | Ép tiêu đề tour; bỏ qua thì LLM đặt |
 | `--feature <id>` | không | Tính năng đích (id trong Feature Map, như `iconnect.assets`). Bỏ qua thì tự suy ra theo màn hình lúc dừng ghi |
@@ -77,12 +77,14 @@ Phải dùng phím tắt vì đưa chuột xuống khung ghi để bấm nút th
 
 Lúc chạy tour, bước `hover` tô sáng nút mở menu và chờ người dùng di chuột vào. Khi menu mở, widget **khóa hover**: menu được giữ mở trong lúc tour tô sáng mục bên trong, dù chuột rời nút mở hay lớp phủ của tour che mất nó. Khóa được nhả ngay sau bước không-hover kế tiếp (mục trong menu đã được bấm), khi tour kết thúc hoặc bị đóng.
 
-- Menu mở bằng JS (`mouseenter`/`mouseleave`, overlay): widget chặn sự kiện "rời chuột" của nút mở và vùng menu.
+- Menu mở bằng JS (`mouseenter`/`mouseleave`, overlay): widget chặn sự kiện "rời chuột" của nút mở và vùng menu, và chặn luôn các sự kiện hover xảy ra **ngoài** vùng menu (nhiều web, như TCInvest, đóng menu khi chuột đi vào phần thân trang chứ không phải khi rời nút). Popover của tour và khung chat không bị chặn. Trong lúc khóa, phần còn lại của trang tạm không phản ứng với hover (tooltip, menu khác) cho tới khi nhả khóa.
 - Menu mở bằng CSS `:hover`: widget ghim kiểu hiển thị hiện tại (`display`, `visibility`, `opacity`...) của mục và các phần tử chứa nó.
 - Màn hình cảm ứng không có hover: nút **Tiếp** của bước gửi sự kiện hover thay người dùng (chỉ mở được menu JS). Bước `hover` luôn có `skipIfNextVisible`, nên bố cục mà mục đã hiện sẵn (menu mobile) thì bước này tự được bỏ qua.
 - `tour:verify` di chuột thật vào nút mở menu rồi mới thử bước sau.
 
 ### Các nút trong khung ghi
+
+Khung ghi che mất phần tử cần bấm thì **nắm thanh tiêu đề "WealthCompass · ghi tour" và kéo** ra chỗ khác. Vị trí được nhớ khi chuyển trang trong cùng tab; thao tác kéo không bị ghi thành bước tour.
 
 | Nút | Tác dụng |
 | --- | --- |
@@ -98,6 +100,23 @@ Lúc chạy tour, bước `hover` tô sáng nút mở menu và chờ người d�
 - Bấm vào phần tử **không có manh mối nào dùng được** (không tên, không chữ, không thuộc tính ổn định, vd. một `div` trống) → bị bỏ qua (app vẫn chạy) và có cảnh báo. Thêm `aria-label` hoặc `tourId` cho phần tử đó nếu cần bước này.
 - **Không ghi dữ liệu cá nhân**: chữ trong vùng `data-sensitive`, chuỗi gần như toàn số (số dư, khối lượng) và chữ có email/số điện thoại/số giấy tờ bị bỏ; `href` chỉ giữ đường dẫn, bỏ query; id/class sinh tự động (`_ngcontent-*`, `mat-mdc-*`, `cdk-*`, `input-2`) không được dùng.
 - Bấm đúp vào cùng một phần tử chỉ tính một bước.
+
+### tourId lồng nhau và bước không có tourId
+
+Một lần bấm có thể nằm trong nhiều phần tử có `tourId` lồng nhau (vd. `div[tourId] > button[tourId] > span`). Công cụ chọn theo thứ tự:
+
+1. `tourId` của **chính phần tử tương tác vừa bấm** (nút, link, ô nhập).
+2. `tourId` của phần tử con nằm giữa chỗ bấm và nút (span/icon trong nút), gần chỗ bấm nhất.
+3. `tourId` của phần tử **bọc sát** bên ngoài (tối đa 3 cấp), chỉ khi nó chứa đúng một phần tử bấm được.
+
+`tourId` của vùng chứa có nhiều nút (thanh công cụ, thẻ, form) hoặc của cả khu vực **không được dùng**: nó trỏ cả vùng, không trỏ nút vừa bấm.
+
+Khi lần bấm không có `tourId` dùng được, bước được ghi bằng selector (locator) và có cảnh báo ở hai chỗ:
+
+- **Khung ghi:** dòng ⚠ dưới bước vừa ghi (kèm selector, và tên `tourId` của vùng chứa đã bỏ qua nếu có), cùng tổng số bước không có `tourId`.
+- **Lúc lưu:** mỗi bước một dòng `! Bước N (/route) không có tourId, tìm theo selector: ...`.
+
+Bước như vậy vẫn chạy được; cảnh báo để biết chỗ nào nên nhờ dev gắn `tourId` nếu muốn ghim chắc chắn.
 
 ## 5b. Widget tìm lại phần tử thế nào
 
@@ -155,10 +174,10 @@ Lần chạy thật (không `--dry-run`) in ra dạng như sau (ví dụ; số b
 
 ```
 ! Bỏ qua lần bấm vào <div> ở /iconnect/orders: phần tử không có tên, chữ hay thuộc tính ổn định để tìm lại. Thêm aria-label hoặc tourId nếu cần bước này.
-  · /home: link "Giao dịch iConnect" · app-home-page
-  · /iconnect/price-board: link "Sổ lệnh" · app-iconnect-shell
+! Bước 1 (/home) không có tourId, tìm theo selector: link "Giao dịch iConnect" · app-home-page · [routerlink="/iconnect/price-board"]. Muốn ghim chắc chắn thì dev gắn tourId cho phần tử này.
+! Bước 2 (/iconnect/price-board) không có tourId, tìm theo selector: link "Sổ lệnh" · app-iconnect-shell.
 Soạn nội dung bằng LLM (deepseek / deepseek-v4-flash)...
-Đã ghi tour "orders-tour" (2 bước) vào .../examples/iconnect-demo/compass.tours.db, thêm 6 câu hỏi mẫu vào .../compass.overrides.yaml
+Đã ghi tour "orders-tour" (2 bước) vào kho dự án iconnect-demo, thêm 6 câu hỏi mẫu vào compass.overrides.yaml
 ✔ scan: tour "orders-tour" hợp lệ.
   - Tour "orders-tour" là nháp (LLM soạn), chưa duyệt: đọc lại chữ rồi bấm Lưu ở trang Tour của Studio
 ```
@@ -206,7 +225,7 @@ Câu hỏi mẫu mới được **thêm** vào `features.<feature>.sampleQuestio
 - [ ] **Bấm Lưu trong Studio** sau khi duyệt xong: tour hết là bản nháp.
 - [ ] Chạy **`npm run scan -- --strict`**: phải không còn cảnh báo.
 - [ ] **Thử tour thật**: chạy web, mở chat, hỏi đúng câu liên quan, bấm "Dẫn tôi đi" và đi hết các bước.
-- [ ] Commit `compass.tours.db`, `compass.overrides.yaml` cùng `feature-map.json` và `compass.lock.json`.
+- [ ] Sao lưu file kho của dự án (dữ liệu không nằm trong git của web). Dự án kiểu cũ: commit `compass.tours.db`, `compass.overrides.yaml`, `feature-map.json`, `compass.lock.json`.
 
 ## 7. LLM làm gì và gửi đi những gì
 
@@ -261,14 +280,14 @@ Web đổi liên tục (đổi chữ nút, migration component, đổi route). B
 # Trang cần đăng nhập: lưu phiên một lần (mở Chrome, đăng nhập tài khoản kiểm thử, đóng Chrome)
 npx tsx packages/cli/src/main.ts tour:auth --url https://staging.example.vn/login --out compass.auth.json
 
-npx tsx packages/cli/src/main.ts tour:verify --config compass.config.yaml \
+npx tsx packages/cli/src/main.ts tour:verify --app ~/du-an/my-web \
   --url https://staging.example.vn --storage-state compass.auth.json \
   --report verify-report.json --screenshots .compass-shots
 ```
 
 - Chạy Chromium không giao diện, mỗi tour hai lượt: desktop 1280px và mobile 390px. Mỗi lượt dùng bản tour của bố cục đó (`variants`), thiếu thì dùng bản chính (báo `dùng bản chính`), đúng như widget.
 - Trang trình duyệt được tiêm đúng bộ tìm phần tử của widget (`resolveStep`, `findByLocator`, chờ spinner, `skipIfNextVisible`), nên kết quả là điều người dùng sẽ thấy.
-- Bước "chờ bấm" được **bấm thật** để đi tiếp như người dùng. Bước "Tiếp" và mọi phần tử nhạy cảm (theo `safety` hiện tại, kể cả `userOnlyText` và nút gửi form) **không bao giờ bị bấm**, nên không có lệnh nào được đặt trên staging.
+- Bước "chờ bấm" được **bấm thật** để đi tiếp như người dùng. Bước "Tiếp" (bước chỉ tô sáng), phần tử dev đánh dấu `user-only`/`data-sensitive` và nút gửi form **không bao giờ bị bấm**. Nút đặt lệnh hay xác nhận muốn an toàn thì phải được ghi là bước tô sáng (bật **Tô sáng** lúc ghi): bước ghi là "chờ bấm" sẽ bị `tour:verify` bấm thật.
 - Kết quả từng bước: `ok`, `low_confidence` (widget sẽ hiện popover không gắn phần tử), `missing` (các bước sau báo `not_reached`), `skipped`. Bước có manh mối đã đổi ghi `đổi: name, attrs.routerlink...`.
 - Mã thoát khác 0 khi có tour hỏng (`missing`), hoặc khi có bước không chắc nếu thêm `--strict`: dùng được trong CI và lịch chạy hằng đêm.
 - `tour:auth` lưu cả cookie, localStorage và **sessionStorage** (nhiều web ngân hàng giữ phiên ở đó). File phiên là phiên thật: đã có trong `.gitignore`, không commit, dùng tài khoản kiểm thử.
@@ -302,7 +321,7 @@ Khi phần tử vẫn được tìm **chắc chắn** bằng các manh mối cò
 Phần tử của một bước đổi hẳn (không còn manh mối nào khớp) thì không cần ghi lại cả tour:
 
 ```bash
-npx tsx packages/cli/src/main.ts tour:rerecord --config compass.config.yaml --url http://localhost:4200 --id sell-bond --step s3 [--mobile]
+npx tsx packages/cli/src/main.ts tour:rerecord --app ~/du-an/my-web --url http://localhost:4200 --id sell-bond --step s3 [--mobile]
 ```
 
 Chrome mở ở màn hình của bước và **đang ghi sẵn**: lần bấm đầu tiên trở thành phần tử mới của bước, rồi Chrome tự đóng. Chữ, khóa bước và thứ tự giữ nguyên; `healedAt` được ghi; phần tử mới nhạy cảm thì bước chuyển sang chỉ tô sáng. Bước ở route có tham số (`/orders/:id`) thì bạn tự mở tới màn hình đó và bấm **● Bắt đầu ghi** trước. Trong Studio: nút **Ghi lại phần tử** cạnh mỗi bước trong ngăn sửa tour, và nút **Ghi lại bước này** trong đề xuất.
@@ -311,9 +330,9 @@ Studio cũng có nút **Kiểm tra tour** (chạy `tour:verify` trên web đang 
 
 ### Một kho tour duy nhất (SQLite)
 
-Mọi tour ghi bằng `tour:record` hay sửa trong Studio nằm trong **một file SQLite**: `compass.tours.db`, cạnh `compass.config.yaml`, commit cùng dự án. Không còn `compass.tours.json`, và backend không còn kho riêng.
+Mọi tour ghi bằng `tour:record` hay sửa trong Studio nằm trong **kho dự án**: một file SQLite cho mỗi web, ngoài source (`~/.wealthcompass/projects/<tên web>-<mã>.db`), cùng chỗ với cấu hình và bản đồ tính năng (xem [quickstart.md](quickstart.md)). Backend không có kho riêng: nó mở chính file đó (`COMPASS_PROJECT`). Dự án kiểu cũ thì tour nằm trong `compass.tours.db` cạnh source cho tới khi chạy `wealthcompass migrate`.
 
-| Ai | Làm gì với `compass.tours.db` |
+| Ai | Làm gì với kho dự án |
 |---|---|
 | `tour:record`, `tour:rerecord`, `tour:verify --heal`, Studio | Ghi tour (mỗi lần lưu là một phiên bản mới) |
 | `scan` | Đọc để dựng `feature-map.json` |
@@ -321,18 +340,18 @@ Mọi tour ghi bằng `tour:record` hay sửa trong Studio nằm trong **một f
 
 - **Phiên bản:** nội dung không đổi thì không tạo bản; quay về bản cũ cũng tạo bản mới, lịch sử không bị viết lại. Xóa tour xóa cả lịch sử và ảnh của nó.
 - **Chuyển từ bản trước:** lần đầu ghi, `compass.tours.json` (nếu có) được chuyển vào kho rồi xóa. Trước đó nó vẫn được đọc như cũ.
-- **Backend dùng file nào:** mặc định `compass.tours.db` nằm cạnh `feature-map.json` (`COMPASS_FEATURE_MAP`); đổi bằng `COMPASS_TOUR_DB`. Chạy backend trên cùng máy với dự án thì Studio lưu tour là trợ lý dùng ngay.
-- File SQLite là nhị phân: git không hiện diff nội dung. Xem tour ở trang Tour của Studio. Cần xem hoặc sửa tay dạng chữ (vd. `list.index`, `rowText`): `wealthcompass tour:export --file tours.json`, sửa, rồi `wealthcompass tour:import --file tours.json`.
+- **Backend dùng file nào:** file kho của dự án (`COMPASS_PROJECT=<thư mục web hoặc file .db>`). Chạy backend trên cùng máy với Studio thì lưu tour là trợ lý dùng ngay.
+- Kho nằm ngoài source nên không có trong git của web; sao lưu bằng cách chép file `.db`. Xem tour ở trang Tour của Studio. Cần xem hoặc sửa tay dạng chữ (vd. `list.index`, `rowText`): `wealthcompass tour:export --file tours.json`, sửa, rồi `wealthcompass tour:import --file tours.json`.
 - Cần Node 22.5+ (`node:sqlite`).
 
-**Backend chạy ở máy khác** (máy chủ thật): triển khai `compass.tours.db` cùng `feature-map.json`, hoặc sửa thẳng kho trên máy chủ qua API quản trị:
+**Backend chạy ở máy khác** (máy chủ thật): chép file kho của dự án sang và trỏ `COMPASS_PROJECT` vào đó, hoặc sửa thẳng kho trên máy chủ qua API quản trị:
 
 ```bash
 # Backend: bật API quản trị bằng một khóa riêng (không phải JWT người dùng)
 COMPASS_ADMIN_TOKEN=<khóa dài, ngẫu nhiên> npm run server
 
 # CI sau tour:verify: đẩy tour đã quét kèm ảnh từng bước lên kho của máy chủ
-COMPASS_ADMIN_TOKEN=<khóa> npx tsx packages/cli/src/main.ts tour:push --config compass.config.yaml \
+COMPASS_ADMIN_TOKEN=<khóa> npx tsx packages/cli/src/main.ts tour:push --app ~/du-an/my-web \
   --server https://compass.example.vn --shots .compass-shots --note "verify hằng đêm"
 ```
 
@@ -357,10 +376,10 @@ API (cần `Authorization: Bearer <COMPASS_ADMIN_TOKEN>`; không đặt biến n
 
 **Chỉ mục source (SQLite).** Phần quét tốn thời gian (đọc route, menu, template bằng ts-morph; dò cấu trúc dự án; các mục kiểm tích hợp) được lưu vào `~/.wealthcompass/index/index.db` theo dấu vân tay của source: commit `HEAD` cộng các file đang sửa dở. Mở Studio, lưu một tour, ghi lại một bước đều đọc chỉ mục; chỉ quét lại khi **có commit mới hoặc có file source sửa chưa commit**. Sửa `compass.overrides.yaml`, kho tour `compass.tours.db`, `feature-map.json` không làm chỉ mục hết hiệu lực. Trên web demo: quét đầy đủ ~850 ms, đọc chỉ mục ~3 ms, Feature Map giống hệt.
 
-- `wealthcompass scan`, `annotate`, `enrich`, `setup` luôn quét đầy đủ (và ghi lại chỉ mục): dùng `scan` khi muốn ép quét lại.
+- `wealthcompass scan`, `enrich`, `setup` luôn quét đầy đủ (và ghi lại chỉ mục): dùng `scan` khi muốn ép quét lại.
 - `COMPASS_INDEX=off` tắt chỉ mục; `COMPASS_INDEX_DIR` đổi chỗ lưu. Cần Node 22.5+ (`node:sqlite`); bản cũ hơn tự chạy không có chỉ mục.
 
-**Web chưa có source.** `wealthcompass init --url <địa chỉ web> --dir <thư mục>` tạo `compass.config.yaml` với `discovery.source: none` và `web.url`. Ghi tour như thường (`tour:record --config ... --id ...`, không cần `--url`, hoặc mở thư mục bằng Studio):
+**Web chưa có source.** `wealthcompass init --url <địa chỉ web>` tạo một kho dự án (`~/.wealthcompass/projects/<tên miền>.db`) với `discovery.source: none` và `web.url`. Ghi tour như thường (`tour:record --app <file kho> --id ...`, không cần `--url`, hoặc mở file kho bằng Studio):
 
 - Màn hình trong Feature Map được dựng từ route xuất hiện trong các tour đã ghi (màn hình xuất phát, màn hình của từng bước, màn hình lúc dừng `endRoute`); tính năng đích của tour là màn hình lúc dừng.
 - Route là đường dẫn thật lúc ghi. Màn hình có tham số thì khai trong `compass.overrides.yaml`: `features: { orders.detail: { route: /orders/:id, title: Chi tiết lệnh } }`. Tiêu đề, mô tả màn hình cũng điền ở đó (hoặc trang Màn hình của Studio).

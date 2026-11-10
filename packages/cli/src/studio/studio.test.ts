@@ -101,24 +101,28 @@ function call(port: number, path: string, headers: Record<string, string>, metho
   });
 }
 
-test('API Studio: bắt buộc token, chặn Host lạ, không cho ghi khóa API vào file', async () => {
+test('API Studio: không cần token; chặn Host lạ và yêu cầu từ trang web khác; không cho ghi khóa API vào file', async () => {
   const port = 5390 + Math.floor(Math.random() * 50);
   const { url, close } = await startStudio({ port, tarballs: null });
-  const token = new URL(url).searchParams.get('t')!;
   try {
+    assert.equal(url, `http://127.0.0.1:${port}/`, 'link mở Studio không còn token');
     const host = `127.0.0.1:${port}`;
-    assert.equal((await call(port, '/api/session', { Host: host })).status, 401, 'thiếu token');
-    assert.equal((await call(port, '/api/session', { Host: host, 'X-Studio-Token': 'sai' })).status, 401, 'sai token');
-    assert.equal((await call(port, '/api/session', { Host: `evil.example:${port}`, 'X-Studio-Token': token })).status, 403, 'Host lạ (DNS rebinding)');
-    const ok = await call(port, '/api/session', { Host: host, 'X-Studio-Token': token });
+    assert.equal((await call(port, '/api/session', { Host: `evil.example:${port}` })).status, 403, 'Host lạ (DNS rebinding)');
+    // Trang web khác trong trình duyệt gọi sang: bị chặn theo Origin hoặc Sec-Fetch-Site
+    assert.equal((await call(port, '/api/session', { Host: host, Origin: 'https://evil.example' })).status, 403, 'Origin lạ');
+    assert.equal((await call(port, '/api/session', { Host: host, 'Sec-Fetch-Site': 'cross-site' })).status, 403, 'yêu cầu từ site khác');
+    assert.equal((await call(port, '/api/project/open', { Host: host, Origin: 'https://evil.example', 'Content-Type': 'application/json' }, 'POST', '{"path":"/"}')).status, 403);
+    // Chính giao diện Studio (cùng origin) và công cụ dòng lệnh trên máy
+    assert.equal((await call(port, '/api/session', { Host: host, Origin: `http://127.0.0.1:${port}`, 'Sec-Fetch-Site': 'same-origin' })).status, 200);
+    const ok = await call(port, '/api/session', { Host: host });
     assert.equal(ok.status, 200);
     assert.equal(JSON.parse(ok.body).project, null);
 
     // Mở dự án mẫu rồi thử ghi khóa API vào env
     const fixture = join(import.meta.dirname, '../../test-fixtures/setup-app');
-    const opened = await call(port, '/api/project/open', { Host: host, 'X-Studio-Token': token, 'Content-Type': 'application/json' }, 'POST', JSON.stringify({ path: fixture }));
+    const opened = await call(port, '/api/project/open', { Host: host, 'Content-Type': 'application/json' }, 'POST', JSON.stringify({ path: fixture }));
     assert.equal(JSON.parse(opened.body).name, 'shop');
-    const put = await call(port, '/api/env', { Host: host, 'X-Studio-Token': token, 'Content-Type': 'application/json' }, 'PUT', JSON.stringify({ COMPASS_LLM_API_KEY: 'sk-x' }));
+    const put = await call(port, '/api/env', { Host: host, 'Content-Type': 'application/json' }, 'PUT', JSON.stringify({ COMPASS_LLM_API_KEY: 'sk-x' }));
     assert.equal(put.status, 400);
   } finally {
     await close();

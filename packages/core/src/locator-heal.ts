@@ -37,6 +37,6 @@ export function healLocator(stored: Locator, fresh: Locator): Locator {
   return {
     ...fresh,
     ...(stored.layout ? { layout: stored.layout } : {}),
-    ...(list ? { list: { ...list, ...(stored.list?.rowText ? { rowText: stored.list.rowText } : {}) } } : {}),
+    ...(list ? { list: { ...list, ...(stored.list?.rowText ? { rowText: stored.list.rowText } : {}), ...(stored.list?.index !== undefined ? { index: stored.list.index } : {}) } } : {}),
   };
 }

@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { tourSchema } from '@wealthcompass/contracts';
-import { TOUR_ID, stripShots, type TourStore } from './tour-store.js';
+import { TOUR_ID, type TourStore } from './tour-store.js';
 
 // API quản trị kho tour: chỉ bật khi đặt COMPASS_ADMIN_TOKEN. Dùng bởi `tour:push` (CI sau khi tour:verify)
 // và công cụ nội bộ. Khóa quản trị tách khỏi JWT của người dùng cuối: người dùng web không bao giờ sửa được tour.
@@ -58,12 +58,10 @@ export async function registerTourAdmin(app: FastifyInstance, deps: TourAdminDep
       const parsed = saveBody.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: 'invalid_tour', detail: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join('.')}: ${i.message}`) });
       if (parsed.data.tour.id !== tourId) return reply.code(400).send({ error: 'id_mismatch' });
-      const current = tours.current(tourId);
-      // Nội dung không đổi: không tạo bản mới (tour:push chạy mỗi đêm vẫn giữ lịch sử gọn)
-      if (current && JSON.stringify(current.tour) === JSON.stringify(stripShots(parsed.data.tour)) && current.feature === parsed.data.feature) {
-        return { version: current.version, unchanged: true };
-      }
+      const before = tours.current(tourId)?.version;
+      // Nội dung không đổi: kho không tạo bản mới (tour:push chạy mỗi đêm vẫn giữ lịch sử gọn)
       const saved = tours.save({ tour: parsed.data.tour, feature: parsed.data.feature, note: parsed.data.note, by: by(request, parsed.data.by) });
+      if (saved.version === before) return { version: saved.version, unchanged: true };
       deps.onChange();
       return { version: saved.version, unchanged: false };
     });

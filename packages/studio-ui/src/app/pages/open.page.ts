@@ -19,7 +19,7 @@ interface Listing {
   imports: [FormsModule, IconComponent, PageHeaderComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ui-page-header title="Mở dự án Angular" subtitle="Chọn thư mục gốc của web (thư mục có angular.json). Studio chỉ đọc; mọi thay đổi code đều xem trước rồi bạn mới áp." />
+    <ui-page-header title="Mở dự án" subtitle="Chọn thư mục gốc của web Angular (có angular.json), hoặc thư mục dự án tour tạo bằng wealthcompass init khi chưa có source." />
 
     <div class="layout">
       <div class="card">
@@ -123,7 +123,7 @@ export class OpenPage implements OnInit {
     try {
       const p = await this.store.open(path.trim());
       this.toast.success(`Đã mở ${p.name}`);
-      await this.router.navigateByUrl(p.integrated ? '/overview' : '/integrate');
+      await this.router.navigateByUrl('/overview');
     } catch (e) {
       this.toast.error(e);
     } finally {

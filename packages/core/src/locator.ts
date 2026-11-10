@@ -4,7 +4,7 @@
 import { computeAccessibleName, getRole } from 'dom-accessibility-api';
 import type { Locator } from '@wealthcompass/contracts';
 import { normalizeVi } from './text';
-import { DIALOG_SELECTOR, HEADING_SELECTOR, LANDMARK_SELECTOR, cleanText, columnOf, isVisible, stripIconText } from './locator-filters';
+import { DIALOG_SELECTOR, HEADING_SELECTOR, LANDMARK_SELECTOR, cleanText, columnOf, isVisible, rowIndex, stripIconText } from './locator-filters';
 
 export interface LocatorMatch {
   element: HTMLElement;
@@ -205,8 +205,9 @@ export function findByLocator(
     .map((element) => ({ element, ...score(element, locator) }))
     .sort((a, b) => b.score - a.score);
   // Phần tử con và cha cùng khớp (span trong button): chỉ giữ phần tử điểm cao hơn khi tính người về nhì
-  const best = ranked[0];
-  if (!best || best.score < MIN_SCORE) return null;
+  const top = ranked[0];
+  if (!top || top.score < MIN_SCORE) return null;
+  const best = pickRow(top, ranked, locator);
   // Danh sách: các dòng khác cùng danh sách không phải đối thủ; điểm bằng nhau thì giữ dòng đầu (thứ tự tài liệu)
   const rival = ranked.find(
     (r) => r !== best && !best.element.contains(r.element) && !r.element.contains(best.element) && !sameList(best.element, r.element, locator),
@@ -219,6 +220,26 @@ export function findByLocator(
     matchedBy: best.matchedBy,
     confident: best.score >= ACCEPT_SCORE && best.score - runnerUp >= ACCEPT_MARGIN,
   };
+}
+
+// Danh sách có ghi thứ tự dòng (list.index): trong các phần tử "y hệt" ở những dòng khác của cùng danh sách, lấy phần tử
+// ở dòng thứ i; danh sách ngắn hơn thì lấy dòng cuối. Các dòng chỉ lệch điểm vì vị trí/selector dự phòng nên cho phép
+// lệch tới tổng hai trọng số đó. Dòng đã ghim bằng rowText thì không đổi.
+function pickRow<T extends { element: Element; score: number }>(top: T, ranked: T[], locator: Locator): T {
+  const index = locator.list?.index;
+  if (index === undefined || locator.list?.rowText) return top;
+  const slack = LOCATOR_WEIGHTS.rect + LOCATOR_WEIGHTS.css;
+  const rows = new Map<number, T>();
+  for (const r of ranked) {
+    if (r !== top && (!sameList(top.element, r.element, locator) || top.score - r.score > slack)) continue;
+    const row = rowFor(r.element, locator);
+    if (!row) continue;
+    const i = rowIndex(row);
+    // Mỗi dòng giữ ứng viên điểm cao nhất (ranked đã xếp giảm dần)
+    if (!rows.has(i)) rows.set(i, r);
+  }
+  if (!rows.size) return top;
+  return rows.get(index) ?? rows.get(Math.max(...rows.keys()))!;
 }
 
 // Locator có ít nhất một manh mối đủ mạnh để tìm lại (không chỉ dựa vào CSS/vị trí)

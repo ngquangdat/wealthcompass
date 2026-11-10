@@ -425,8 +425,8 @@ Bản demo local đã hiện thực lát cắt dọc đầu tiên của kiến t
 | 6.2 Xác thực JWT/JWKS | Có | Xác minh RS256 qua JWKS, kiểm issuer/audience; IdP giả lập chỉ để demo. Đã thử token `alg:none` giả mạo (bị từ chối) |
 | 6.3 Dữ liệu, index theo phiên bản | Chưa | Feature Map nạp từ file và tự nạp lại khi đổi; chưa có Postgres/pgvector, version `active` |
 | 6.4 LLM | Một phần | Client tương thích OpenAI, stream, tool-calling; preset DeepSeek (mặc định) và Gemini; chế độ dự phòng khi LLM lỗi. Đã chạy thật với DeepSeek V4 Flash (~2,7 giây/câu). Chưa có hai bậc mô hình, cache ngữ nghĩa, hạn mức token |
-| 6.6 Tìm kiếm | Một phần | BM25 + từ điển đồng nghĩa + thưởng cụm từ + lọc quyền + ngưỡng điểm; chưa có embedding/rerank |
-| 7. Domain Pack | Một phần | `finance-vn` và `generic` (đóng kèm gói cli/server); chưa có seed eval |
+| 6.6 Tìm kiếm | Một phần | BM25 + thưởng cụm từ + lọc quyền + ngưỡng điểm; chưa có embedding/rerank |
+| 7. Domain Pack | Đã bỏ | Không còn pack, bộ lọc chủ đề và từ điển đồng nghĩa; backend dùng một lời dặn chung cố định (xem integration-guide mục 7) |
 | 9. Kiểm thử | Một phần | 61 test + 1 E2E Chrome tùy chọn (scanner, template, enrich, annotate, setup cả standalone lẫn NgModule và đường --ai-code với LLM giả, soạn nháp tour, gộp YAML, agent với LLM giả) và `npm run e2e:setup` chạy trọn quy trình tích hợp trên web HR. Chưa có ma trận fixture nhiều phiên bản Angular, hit@3, Playwright |
 
 **Phát hiện khi hiện thực**

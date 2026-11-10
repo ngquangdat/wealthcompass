@@ -26,7 +26,7 @@ Tài khoản demo (IdP giả lập, không phải tài khoản thật): `demo` /
 3. Trợ lý trả lời bằng chữ (đường đi, các bước) kèm hai nút: **Dẫn tôi đi: Bán trái phiếu trên iConnect** (tour từng bước) và **Mở thẳng: Tài sản trái phiếu iConnect** (nhảy tới màn hình đích để tự thao tác; khung chat tự thu lại).
 4. Bấm nút: tour bắt đầu từ trang chủ, highlight **Giao dịch iConnect** → tab **Tài sản** → **CHỌN BÁN** → nút **BÁN**. Ba bước đầu chờ bạn tự bấm vào phần được tô sáng; bước cuối chỉ highlight nút BÁN (nhạy cảm, engine không chạm), bạn tự bấm và tự đặt lệnh.
 
-Các câu hỏi khác để thử: "nộp tiền vào tài khoản", "xem lãi lỗ trái phiếu", "hủy lệnh đã đặt" (có nút mở màn hình, không có tour); "có nên mua VHM12607 không" (bị từ chối trước khi gọi LLM); đăng nhập `nobond` rồi hỏi bán trái phiếu (giải thích thiếu quyền).
+Các câu hỏi khác để thử: "nộp tiền vào tài khoản", "xem lãi lỗ trái phiếu", "hủy lệnh đã đặt" (có nút mở màn hình, không có tour); đăng nhập `nobond` rồi hỏi bán trái phiếu (giải thích thiếu quyền).
 
 ## Cấu hình LLM
 
@@ -40,13 +40,13 @@ Xem `server/.env.example`. Mặc định server dùng **DeepSeek** (`deepseek-v4
 npm run check   # tsc cho server và core, test scanner, template, soạn nháp tour, ghi YAML và agent (24 test, thêm 1 bài E2E Chrome chạy khi đặt `COMPASS_E2E_URL`)
 ```
 
-Test agent dùng LLM giả (`server/src/test/mock-llm.ts`) nên không tốn hạn mức và kiểm được: tool-calling, whitelist tourId, thiếu quyền, chặn tư vấn đầu tư, che PII, chế độ dự phòng.
+Test agent dùng LLM giả (`server/src/test/mock-llm.ts`) nên không tốn hạn mức và kiểm được: tool-calling, whitelist tourId, thiếu quyền, che PII, chế độ dự phòng.
 
 ## Giới hạn của demo
 
 - Giao diện mô phỏng bản **mobile** của TCInvest (bố cục 430px, căn giữa trên màn hình rộng), dựa trên ảnh chụp và số đo màu/cỡ chữ. Icon dùng Material Icons thay cho bộ icon riêng; banner khuyến mãi và linh vật không được sao chép; mọi số liệu là dữ liệu giả. Bản desktop (menu trái, nhiều cột) chưa làm.
 - Màn hình đặt lệnh bán chỉ là hộp thoại giải thích; các màn hình khác (nộp tiền, sổ lệnh...) là trang giữ chỗ nhưng vẫn có route, tiêu đề, mô tả để trợ lý chỉ đường tới.
-- Tìm kiếm hiện là từ khóa (BM25) + từ điển đồng nghĩa của Domain Pack; chưa có embedding/pgvector. Lớp `FeatureStore` tách riêng nên thay được.
+- Tìm kiếm hiện là từ khóa (BM25) trên tiêu đề, mô tả, `keywords` và câu hỏi mẫu của từng màn hình; chưa có embedding/pgvector. Lớp `FeatureStore` tách riêng nên thay được.
 - Rate limit và log nằm trong bộ nhớ/stdout; chưa có dashboard, eval hit@3 tự động và E2E Playwright cho tour.
 
 Để gắn vào một web khác, xem [integration-guide.md](integration-guide.md).

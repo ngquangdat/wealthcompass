@@ -206,6 +206,7 @@ interface Editing {
                   <select class="select kind" [(ngModel)]="s.advanceOn" [disabled]="isSensitive(s.target)" title="Ô nhập và phần tử nhạy cảm nên dùng nút Tiếp">
                     <option value="click">Chờ người dùng bấm</option>
                     <option value="next">Bấm "Tiếp"</option>
+                    <option value="hover">Di chuột (mở menu hover)</option>
                   </select>
                 </div>
                 @if (isSensitive(s.target)) { <div class="hint"><ui-icon name="lock" [size]="12" /> Phần tử nhạy cảm: tour chỉ tô sáng, người dùng tự thao tác.</div> }
@@ -221,7 +222,14 @@ interface Editing {
           <button class="btn btn-sm add" (click)="addStep(e)" [disabled]="!targets().length">+ Thêm bước</button>
         </div>
         <div class="d-foot">
-          @if (!e.isNew) { <button class="btn btn-danger btn-sm" (click)="remove(e)">Xóa tour</button> }
+          @if (!e.isNew) {
+            @if (confirmingDelete()) {
+              <button class="btn btn-danger btn-sm" (click)="remove(e)"><ui-icon name="trash" [size]="13" /> Xóa hẳn tour này</button>
+              <button class="btn btn-ghost btn-sm" (click)="confirmingDelete.set(false)">Không xóa</button>
+            } @else {
+              <button class="btn btn-danger btn-sm" (click)="confirmingDelete.set(true)">Xóa tour</button>
+            }
+          }
           <span class="grow"></span>
           <button class="btn" (click)="editing.set(null)">Hủy</button>
           <button class="btn btn-primary" (click)="save(e)" [disabled]="saving()">@if (saving()) { <span class="spinner"></span> } Lưu</button>
@@ -266,6 +274,8 @@ export class ToursPage implements OnInit {
   protected readonly routes = signal<string[]>([]);
   protected readonly loaded = signal(false);
   protected readonly editing = signal<Editing | null>(null);
+  // Xác nhận xóa ngay trong trang (hộp thoại confirm() của trình duyệt bị chặn trong một số khung nhúng nên nút không có tác dụng)
+  protected readonly confirmingDelete = signal(false);
   protected readonly saving = signal(false);
   protected readonly recording = signal(false);
   protected readonly recBusy = signal(false);
@@ -283,7 +293,7 @@ export class ToursPage implements OnInit {
     await this.load();
     const run = await this.api.get<RunState>('/api/run').catch(() => null);
     this.webUrl.set(run?.web.running ? run.web.url : null);
-    this.rec.url = run?.web.url ?? `http://localhost:${this.store.project()?.devPort ?? 4200}`;
+    this.rec.url = this.store.project()?.webUrl ?? run?.web.url ?? `http://localhost:${this.store.project()?.devPort ?? 4200}`;
   }
 
   private async load(): Promise<void> {
@@ -309,6 +319,7 @@ export class ToursPage implements OnInit {
   }
 
   protected edit(t: TourDef): void {
+    this.confirmingDelete.set(false);
     this.editing.set({
       id: t.id,
       isNew: false,
@@ -365,7 +376,7 @@ export class ToursPage implements OnInit {
   }
 
   protected async remove(e: Editing): Promise<void> {
-    if (!confirm(`Xóa tour "${e.title || e.id}"?`)) return;
+    this.confirmingDelete.set(false);
     try {
       await this.api.delete(`/api/tours/${encodeURIComponent(e.id)}`);
       this.editing.set(null);

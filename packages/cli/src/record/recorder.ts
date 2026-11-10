@@ -1,4 +1,8 @@
-import { chromium, type Browser, type Page } from 'playwright-core';
+import { createHash } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import type { Locator } from '@wealthcompass/contracts';
 import { describeLocator } from '@wealthcompass/core';
 import { CAPTURE_SCRIPT } from './capture.bundle';
@@ -10,7 +14,8 @@ export interface RecordedStep {
   tourId: string | null;
   route: string;
   // click: người dùng bấm thật và app chạy tiếp. next: chỉ tô sáng, lần bấm bị chặn không cho chạy
-  advanceOn: 'click' | 'next';
+  // hover: người ghi bấm Alt+H khi đang di chuột trên nút mở menu hover
+  advanceOn: 'click' | 'next' | 'hover';
   userOnly: boolean;
   tag: string;
   // Chữ trên phần tử (đã cắt ngắn); chỉ dùng khi template không có tourLabel
@@ -121,6 +126,8 @@ export class Recorder {
     }
     // Lần bấm trước (bấm thật, cùng màn hình) đã mở ra phần tử này: đánh dấu là bước có thể bỏ qua
     if (step.appeared && prev && prev.advanceOn === 'click' && prev.route === step.route) prev.opensNext = true;
+    // Bước hover chỉ để mở menu: menu đã mở sẵn (bố cục khác, menu ghim) thì bỏ qua
+    if (step.advanceOn === 'hover') step.opensNext = true;
     this.steps.push(step);
     this.options.onStep?.(step);
   }
@@ -152,13 +159,61 @@ export async function launchRecorderBrowser(): Promise<Browser> {
   return chromium.launch({ headless: false, ...(executablePath ? { executablePath } : { channel: 'chrome' }) });
 }
 
-export async function recordSession(startUrl: string, about = '', options: RecorderOptions = {}): Promise<{ recorder: Recorder; browser: Browser }> {
-  const browser = await launchRecorderBrowser();
+// Cửa sổ Chrome của một lần ghi: đủ để chờ người dùng đóng và để đóng khi xong
+export interface RecorderBrowser {
+  on(event: 'disconnected', listener: () => void): unknown;
+  close(): Promise<void>;
+  contexts(): BrowserContext[];
+}
+
+// Hồ sơ Chrome riêng cho việc ghi tour, mỗi web (origin) một hồ sơ: phiên đăng nhập được giữ giữa các lần ghi nên
+// không phải đăng nhập lại mỗi lần. Nằm ngoài dự án. COMPASS_RECORD_PROFILE=off để mỗi lần ghi dùng hồ sơ trắng;
+// đặt thành một đường dẫn để dùng thư mục khác.
+export function recorderProfileDir(startUrl: string): string | null {
+  const setting = process.env['COMPASS_RECORD_PROFILE'];
+  if (setting === 'off') return null;
+  if (setting) return setting;
+  let origin = startUrl;
+  try {
+    origin = new URL(startUrl).origin;
+  } catch {
+    // giữ nguyên
+  }
+  const name = origin.replace(/^https?:\/\//, '').replace(/[^\w.-]/g, '_').slice(0, 60);
+  return join(homedir(), '.wealthcompass', 'chrome-profiles', `${name}-${createHash('sha256').update(origin).digest('hex').slice(0, 8)}`);
+}
+
+export async function recordSession(startUrl: string, about = '', options: RecorderOptions = {}): Promise<{ recorder: Recorder; browser: RecorderBrowser }> {
   // Khung nhìn điện thoại: bố cục mobile của app (menu thu gọn, thẻ thay bảng) và locator ghi layout "mobile"
-  const context = await browser.newContext(
-    options.mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : { viewport: null },
-  );
-  const page = await context.newPage();
+  const contextOptions = options.mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : { viewport: null };
+  let browser: RecorderBrowser | null = null;
+  let context: BrowserContext | null = null;
+  const profile = recorderProfileDir(startUrl);
+  if (profile) {
+    try {
+      mkdirSync(profile, { recursive: true });
+      const executablePath = process.env['CHROME_PATH'];
+      // Cửa sổ desktop đủ rộng: hồ sơ giữ lại có thể mở cửa sổ hẹp, làm app chuyển sang bố cục mobile
+      const persistent = await chromium.launchPersistentContext(profile, {
+        headless: false,
+        ...(executablePath ? { executablePath } : { channel: 'chrome' }),
+        ...contextOptions,
+        ...(options.mobile ? {} : { args: ['--window-size=1440,900'] }),
+      });
+      context = persistent;
+      browser = { on: (_event, listener) => persistent.on('close', listener), close: () => persistent.close(), contexts: () => [persistent] };
+    } catch {
+      // Hồ sơ đang bị một cửa sổ ghi khác giữ, hoặc không tạo được: ghi bằng hồ sơ trắng như trước
+      context = null;
+    }
+  }
+  if (!context || !browser) {
+    const launched = await launchRecorderBrowser();
+    browser = launched;
+    context = await launched.newContext(contextOptions);
+  }
+  // Hồ sơ giữ lại mở sẵn một tab trắng: dùng luôn tab đó
+  const page = context.pages()[0] ?? (await context.newPage());
   const recorder = new Recorder(page, options);
   recorder.setPurpose(about);
   await recorder.attach();

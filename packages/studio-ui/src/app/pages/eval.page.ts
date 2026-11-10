@@ -10,7 +10,6 @@ import { LogConsoleComponent } from '../shared/log-console.component';
 import { PageHeaderComponent } from '../shared/page-header.component';
 
 // Giá trị đặc biệt trong ô "màn hình đúng": câu này phải bị chặn
-const BLOCKED = '__blocked__';
 
 interface Row extends EvalCase {
   target: string; // id màn hình hoặc BLOCKED
@@ -38,7 +37,6 @@ interface Row extends EvalCase {
           <div class="m-sub">màn hình đúng nằm trong 3 kết quả đầu trợ lý thấy</div>
         </div>
         <div class="card metric"><div class="m-label">Đúng ngay đầu (hit@1)</div><div class="m-value">{{ pct(l.summary.hit1) }}</div><div class="m-sub">MRR {{ l.summary.mrr.toFixed(2) }}</div></div>
-        <div class="card metric"><div class="m-label">Chặn đúng</div><div class="m-value">{{ l.summary.blockedOk }}/{{ l.summary.blockedTotal }}</div><div class="m-sub">câu phải bị từ chối</div></div>
         <div class="card metric" [class.bad]="l.summary.failed > 0"><div class="m-label">Chưa đạt</div><div class="m-value">{{ l.summary.failed }}</div><div class="m-sub">chạy lúc {{ time(l.at) }}</div></div>
       </div>
     }
@@ -68,14 +66,13 @@ interface Row extends EvalCase {
                 <select class="select" [(ngModel)]="r.target" (ngModelChange)="touch()">
                   <option [value]="''" disabled>Chọn màn hình</option>
                   @for (f of meta()?.features ?? []; track f.id) { <option [value]="f.id">{{ f.title }}</option> }
-                  <option [value]="blockedValue">⛔ Phải bị chặn</option>
                 </select>
               </td>
               <td><ui-chips [value]="r.roles ?? []" (valueChange)="r.roles = $event; touch()" placeholder="mọi quyền" /></td>
               <td>
                 @if (result(r.q); as x) {
                   @if (x.pass) {
-                    <span class="badge success">{{ x.blocked ? 'Chặn đúng' : '#' + x.rank }}</span>
+                    <span class="badge success">#{{ x.rank }}</span>
                   } @else {
                     <span class="badge danger" [title]="topText(x)">✖ {{ x.reason }}</span>
                     @if (x.top.length) { <div class="tiny muted">Trợ lý thấy: {{ x.top[0].title }}</div> }
@@ -124,7 +121,6 @@ export class EvalPage implements OnInit {
   private readonly api = inject(ApiService);
   private readonly toast = inject(ToastService);
 
-  protected readonly blockedValue = BLOCKED;
   protected readonly meta = signal<AssistantMeta | null>(null);
   protected readonly ai = signal<AiState | null>(null);
   protected readonly rows = signal<Row[]>([]);
@@ -158,7 +154,7 @@ export class EvalPage implements OnInit {
   }
 
   private toRow(c: EvalCase): Row {
-    return { ...c, roles: c.roles ?? [], target: c.blocked ? BLOCKED : (c.expect[0] ?? '') };
+    return { ...c, roles: c.roles ?? [], target: c.expect[0] ?? '' };
   }
 
   protected pct(x: number): string {
@@ -194,7 +190,7 @@ export class EvalPage implements OnInit {
   private toCases(): EvalCase[] {
     return this.rows()
       .filter((r) => r.q.trim() && r.target)
-      .map((r) => (r.target === BLOCKED ? { q: r.q.trim(), expect: [], blocked: true, roles: r.roles } : { q: r.q.trim(), expect: [r.target], roles: r.roles }))
+      .map((r) => ({ q: r.q.trim(), expect: [r.target], roles: r.roles }))
       .map((c) => (c.roles?.length ? c : { ...c, roles: undefined }));
   }
 

@@ -1,6 +1,6 @@
 # Ghi tour hướng dẫn bằng `tour:record`
 
-`tour:record` cho người vận hành **thao tác thật trên web** để tạo một tour, thay vì tự gõ YAML. Công cụ ghi lại những phần tử đã bấm, nhờ LLM soạn chữ và câu hỏi mẫu, rồi ghi vào `compass.tours.json` dưới dạng bản nháp (`"draft": true`) để người duyệt.
+`tour:record` cho người vận hành **thao tác thật trên web** để tạo một tour, thay vì tự gõ YAML. Công cụ ghi lại những phần tử đã bấm, nhờ LLM soạn chữ và câu hỏi mẫu, rồi lưu vào kho tour `compass.tours.db` (SQLite) dưới dạng bản nháp để người duyệt.
 
 **Không cần `tourId` trong HTML.** Với mỗi lần bấm, công cụ ghi một *locator*: nhiều manh mối về phần tử (vai trò và tên truy cập, chữ, thuộc tính ổn định như `formcontrolname`/`routerlink`, thẻ component Angular, hộp thoại hay tiêu đề mục chứa nó, selector CSS dự phòng, vị trí). Lúc chạy, widget chấm điểm các ứng viên trên trang và chỉ tô sáng khi chắc chắn (xem mục 5b). Phần tử có `tourId` vẫn được ưu tiên tuyệt đối như một cái "ghim".
 
@@ -11,7 +11,7 @@ Tài liệu này dành cho người ghi tour. Muốn biết hệ thống tổng 
 | Tình huống | Cách làm |
 | --- | --- |
 | Có luồng nhiều bước qua nhiều màn hình (trang chủ → bảng giá → tab → nút) | `tour:record` |
-| Sửa chữ một tour đã có | Studio (trang Tour) hoặc sửa thẳng `compass.tours.json` |
+| Sửa chữ một tour đã có | Studio (trang Tour) |
 | Tour 1-2 bước rất đơn giản | Viết tay cũng nhanh |
 
 ## 2. Chuẩn bị (kiểm tra trước khi ghi)
@@ -42,7 +42,7 @@ npx tsx packages/cli/src/main.ts tour:record --config duong/dan/compass.config.y
 
 | Cờ | Bắt buộc | Ý nghĩa |
 | --- | --- | --- |
-| `--url` | có | Địa chỉ web mở trong Chrome |
+| `--url` | có, trừ khi `compass.config.yaml` có `web.url` | Địa chỉ web mở trong Chrome |
 | `--id` | có | Id của tour (khóa dưới `tours:` trong YAML). Dạng `ban-trai-phieu` hoặc `sell-bond`; đừng đổi sau khi đã phát hành |
 | `--config` | không | File `compass.config.yaml` của web (xác định nơi ghi overrides và feature map). Mặc định `compass.config.yaml` ở thư mục đang đứng; script `npm run tour:record` đã gắn sẵn cấu hình của web demo |
 | `--about "..."` | không, nhưng nên có | Mô tả đang ghi tour cho tính năng gì. Có thể gõ hoặc sửa tiếp trong khung ghi |
@@ -61,9 +61,26 @@ npx tsx packages/cli/src/main.ts tour:record --config duong/dan/compass.config.y
 4. Bấm **● Bắt đầu ghi**. Màn hình hiện tại trở thành điểm bắt đầu (`startRoute`) của tour.
 5. **Thao tác đúng luồng muốn dẫn**, từng phần tử một. Phần tử vừa được ghi sẽ nhấp nháy viền đỏ; khung hiện số bước đã ghi và phần tử gần nhất.
 6. Đi tới **màn hình đích** (nơi người dùng sẽ làm việc cần làm), rồi bấm **■ Dừng & lưu**. Tính năng đích của tour được xác định theo màn hình bạn đang đứng lúc dừng. Nếu chưa có mô tả, khung nhắc một lần; bấm lại để vẫn dừng.
-7. Công cụ soạn nội dung, ghi tour vào `compass.tours.json` (câu hỏi mẫu vào `compass.overrides.yaml`), rồi tự chạy lại `scan` để xác nhận tour hợp lệ. Xem phần tiếp theo để duyệt.
+7. Công cụ soạn nội dung, lưu tour vào kho `compass.tours.db` (câu hỏi mẫu vào `compass.overrides.yaml`), rồi tự chạy lại `scan` để xác nhận tour hợp lệ. Xem phần tiếp theo để duyệt.
 
 **Đóng cửa sổ Chrome** sau khi đã bấm "Bắt đầu ghi" cũng được coi như dừng và vẫn lưu các bước đã ghi, nhưng khi đó công cụ không biết màn hình đích nên chọn theo bước cuối cùng, dễ gán sai tính năng. Nên luôn bấm **■ Dừng & lưu**.
+
+### Menu mở bằng hover (desktop)
+
+Menu chỉ hiện khi di chuột (thanh menu desktop) không có lần bấm nào trên nút mở menu, nên phải báo cho công cụ:
+
+1. Di chuột vào nút mở menu (menu hiện ra).
+2. Giữ chuột ở đó và nhấn **Alt+H** (Mac: **⌥H**). Nút mở menu nhấp nháy viền đỏ và được ghi thành bước `hover`.
+3. Bấm mục trong menu như bình thường (ghi thành bước `click`). Menu nhiều tầng thì lặp lại bước 1-2 cho từng tầng.
+
+Phải dùng phím tắt vì đưa chuột xuống khung ghi để bấm nút thì menu đã đóng.
+
+Lúc chạy tour, bước `hover` tô sáng nút mở menu và chờ người dùng di chuột vào. Khi menu mở, widget **khóa hover**: menu được giữ mở trong lúc tour tô sáng mục bên trong, dù chuột rời nút mở hay lớp phủ của tour che mất nó. Khóa được nhả ngay sau bước không-hover kế tiếp (mục trong menu đã được bấm), khi tour kết thúc hoặc bị đóng.
+
+- Menu mở bằng JS (`mouseenter`/`mouseleave`, overlay): widget chặn sự kiện "rời chuột" của nút mở và vùng menu.
+- Menu mở bằng CSS `:hover`: widget ghim kiểu hiển thị hiện tại (`display`, `visibility`, `opacity`...) của mục và các phần tử chứa nó.
+- Màn hình cảm ứng không có hover: nút **Tiếp** của bước gửi sự kiện hover thay người dùng (chỉ mở được menu JS). Bước `hover` luôn có `skipIfNextVisible`, nên bố cục mà mục đã hiện sẵn (menu mobile) thì bước này tự được bỏ qua.
+- `tour:verify` di chuột thật vào nút mở menu rồi mới thử bước sau.
 
 ### Các nút trong khung ghi
 
@@ -71,11 +88,11 @@ npx tsx packages/cli/src/main.ts tour:record --config duong/dan/compass.config.y
 | --- | --- |
 | **● Bắt đầu ghi** | Bắt đầu ghi (chỉ hiện khi chưa ghi). Màn hình hiện tại là điểm xuất phát |
 | **■ Dừng & lưu** | Kết thúc và chuyển sang bước soạn nội dung |
-| **Tô sáng (không bấm): tắt/BẬT** | Công tắc. Khi **BẬT**, mọi lần bấm vào phần tử có `tourId` được ghi thành bước chỉ giải thích và **bị chặn, app không chạy gì**. Dùng khi muốn trỏ vào một con số hay một khu vực mà không chuyển màn hình. **Nhớ tắt lại** (bấm lần nữa) để tiếp tục thao tác bình thường; quên tắt thì app đứng yên vì mọi lần bấm đều bị chặn |
+| **Tô sáng (không bấm): tắt/BẬT** | Công tắc. Khi **BẬT**, mọi lần bấm được ghi thành bước chỉ giải thích và **bị chặn, app không chạy gì**. Dùng khi muốn trỏ vào một con số hay một khu vực mà không chuyển màn hình. **Nhớ tắt lại** (bấm lần nữa) để tiếp tục thao tác bình thường; quên tắt thì app đứng yên vì mọi lần bấm đều bị chặn |
 
 ## 5. Điều gì được ghi, điều gì bị chặn
 
-- **Chỉ ghi lần bấm**. Bấm trúng icon/chữ bên trong nút thì phần tử được ghi là chính cái nút. Chữ gõ vào ô nhập, cuộn, hover, kéo thả **không** được ghi.
+- **Ghi lần bấm, và hover khi nhấn Alt+H**. Bấm trúng icon/chữ bên trong nút thì phần tử được ghi là chính cái nút. Web gắn `(click)` lên `div`/`span` thường (không `role`, không `href`): công cụ leo lên vùng bấm ngoài cùng còn `cursor: pointer`; bấm trúng icon không có chữ thì lấy mục gần nhất có chữ. Chữ gõ vào ô nhập, cuộn, kéo thả **không** được ghi.
 - Bấm bình thường → ghi thành bước `click` (người dùng thật sẽ phải bấm vào đúng chỗ đó), và **app vẫn chạy bình thường** (đổi màn hình, đổi tab...). Đó là lý do cần ghi trên môi trường thử.
 - Bấm vào phần tử **nhạy cảm** (`tourRole="user-only"`, `data-sensitive`, ô mật khẩu, ô OTP) → ghi thành bước chỉ-tô-sáng (`next`) và **lần bấm bị chặn, không chạy thật**. Nhờ vậy ghi tour không vô tình đặt lệnh. Bước nhạy cảm nên là **bước cuối** của tour; nếu còn bước sau nó, công cụ in cảnh báo.
 - Bấm vào phần tử **không có manh mối nào dùng được** (không tên, không chữ, không thuộc tính ổn định, vd. một `div` trống) → bị bỏ qua (app vẫn chạy) và có cảnh báo. Thêm `aria-label` hoặc `tourId` cho phần tử đó nếu cần bước này.
@@ -98,13 +115,14 @@ Mỗi bước chấm điểm các ứng viên trên trang: tên truy cập khớ
 Nút lặp trên mỗi dòng (mỗi dòng bảng có một nút **BÁN**, mỗi thẻ trong `@for` có một nút) được nhận ra lúc ghi: phần tử nằm trong một dòng lặp và dòng anh em có phần tử y hệt. Locator khi đó có `list`:
 
 ```json
-"list": { "row": "tr", "column": "Thao tác" }
+"list": { "row": "tr", "column": "Thao tác", "index": 2 }
 ```
 
-- Ghi **hình dạng dòng**, không ghi dòng cụ thể; không ghi chữ trong dòng (mã trái phiếu, số dư). Tiêu đề mục lấy từ ngoài vùng danh sách.
-- Lúc chạy, các dòng khác của cùng danh sách không bị coi là đối thủ: widget tô sáng nút ở dòng cùng vị trí nếu còn, không thì dòng đầu tiên. Dữ liệu đổi, ít dòng hơn, virtual scroll đều chạy.
+- Ghi **hình dạng dòng** và **thứ tự dòng đã bấm** (`index`, từ 0, đếm trong các dòng cùng hình dạng); không ghi chữ trong dòng (mã trái phiếu, số dư). Tiêu đề mục lấy từ ngoài vùng danh sách.
+- Lúc chạy, các dòng khác của cùng danh sách không bị coi là đối thủ: widget tô sáng phần tử ở **dòng thứ `index`**; danh sách ngắn hơn thì lấy dòng cuối. Dữ liệu đổi, số dòng đổi đều chạy.
+- Thứ tự là theo vị trí: danh sách đổi cách sắp xếp thì dòng thứ i là dòng khác. Sửa `index` (xuất tour ra JSON bằng `tour:export`, sửa, rồi `tour:import`) để trỏ dòng khác (vd. `0` cho dòng đầu); tour ghi trước khi có `index` (không có khóa này) giữ cách chọn cũ theo vị trí trên màn hình.
 - `column` (tiêu đề cột hoặc tên cột `mat-column-*`) cộng điểm cho ô đúng cột.
-- Muốn trỏ vào một dòng cụ thể thì người duyệt thêm `"rowText": "VIC2025"`: chỉ chọn dòng chứa chữ đó. Công cụ không tự ghi vì chữ trong dòng có thể là dữ liệu khách.
+- Muốn trỏ vào một dòng theo nội dung thì người duyệt thêm `"rowText": "VIC2025"`: chỉ chọn dòng chứa chữ đó (ưu tiên hơn `index`). Công cụ không tự ghi vì chữ trong dòng có thể là dữ liệu khách.
 
 ### Bố cục web và mobile
 
@@ -140,12 +158,12 @@ Lần chạy thật (không `--dry-run`) in ra dạng như sau (ví dụ; số b
   · /home: link "Giao dịch iConnect" · app-home-page
   · /iconnect/price-board: link "Sổ lệnh" · app-iconnect-shell
 Soạn nội dung bằng LLM (deepseek / deepseek-v4-flash)...
-Đã ghi tour "orders-tour" (2 bước) vào .../examples/iconnect-demo/compass.tours.json, thêm 6 câu hỏi mẫu vào .../compass.overrides.yaml
+Đã ghi tour "orders-tour" (2 bước) vào .../examples/iconnect-demo/compass.tours.db, thêm 6 câu hỏi mẫu vào .../compass.overrides.yaml
 ✔ scan: tour "orders-tour" hợp lệ.
-  - Tour "orders-tour" là nháp (LLM soạn), chưa duyệt: đọc lại chữ rồi xóa "draft" trong compass.tours.json
+  - Tour "orders-tour" là nháp (LLM soạn), chưa duyệt: đọc lại chữ rồi bấm Lưu ở trang Tour của Studio
 ```
 
-Tour được thêm vào `compass.tours.json` (file dữ liệu, **không sửa template**). Ví dụ rút gọn từ một lần ghi thật trên web demo:
+Tour được lưu vào kho `compass.tours.db` (**không sửa template**). Nội dung một tour trong kho có dạng (ví dụ rút gọn từ một lần ghi thật trên web demo):
 
 ```json
 {
@@ -181,14 +199,14 @@ Câu hỏi mẫu mới được **thêm** vào `features.<feature>.sampleQuestio
 
 ### Checklist duyệt (làm trước khi commit)
 
-- [ ] **Đọc lại chữ từng bước.** LLM soạn nháp, có thể sai chi tiết hay giọng văn; sửa trong Studio (trang Tour) hoặc trực tiếp trong `compass.tours.json`.
+- [ ] **Đọc lại chữ từng bước.** LLM soạn nháp, có thể sai chi tiết hay giọng văn; sửa trong Studio (trang Tour).
 - [ ] **`feature:` đúng tính năng đích?** Sai thì trợ lý sẽ gắn tour vào nhầm màn hình. Sửa tay hoặc ghi lại với `--feature <id> --force`.
 - [ ] **`advanceOn` hợp lý?** `click` = người dùng tự bấm vào phần tử sáng; `next` = bấm nút "Tiếp" của popover. Bước nhạy cảm phải là `next`.
 - [ ] **Câu hỏi mẫu** mới thêm: xóa câu nghe lạ, giữ câu người dùng thật sẽ gõ.
-- [ ] **Xóa `"draft": true`** sau khi duyệt xong (bấm Lưu trong Studio cũng xóa cờ này).
+- [ ] **Bấm Lưu trong Studio** sau khi duyệt xong: tour hết là bản nháp.
 - [ ] Chạy **`npm run scan -- --strict`**: phải không còn cảnh báo.
 - [ ] **Thử tour thật**: chạy web, mở chat, hỏi đúng câu liên quan, bấm "Dẫn tôi đi" và đi hết các bước.
-- [ ] Commit `compass.tours.json`, `compass.overrides.yaml` cùng `feature-map.json` và `compass.lock.json`.
+- [ ] Commit `compass.tours.db`, `compass.overrides.yaml` cùng `feature-map.json` và `compass.lock.json`.
 
 ## 7. LLM làm gì và gửi đi những gì
 
@@ -216,10 +234,11 @@ Nếu LLM trả sai định dạng hoặc sai số bước, công cụ thử l�
 | --- | --- |
 | `npm error ENOENT ... package.json` | Chạy sai thư mục. `cd ~/wealthcompass` rồi chạy lại |
 | Chrome không mở, lỗi không tìm thấy trình duyệt | Chưa cài Chrome hoặc ở chỗ khác; đặt `CHROME_PATH` |
-| Bấm nhiều nhưng khung báo "Đã ghi 0 bước" | Chưa bấm **● Bắt đầu ghi**, hoặc phần tử chưa có `tourId` (xem cảnh báo "Bỏ qua lần bấm...") |
+| Bấm nhiều nhưng khung báo "Đã ghi 0 bước" | Chưa bấm **● Bắt đầu ghi** |
 | App không phản ứng khi bấm | Công tắc **Tô sáng** đang BẬT: bấm nút đó lần nữa để tắt |
-| `! Bỏ qua lần bấm vào <tag> "..." ở /route: chưa có tourId` | Phần tử chưa có `tourId`. Thêm `tourId="..."` vào template, rồi ghi lại nếu muốn có bước đó |
-| `Không có bước nào gắn tourId, không có gì để lưu.` | Mọi lần bấm đều vào phần tử chưa có `tourId` |
+| `! Bỏ qua lần bấm vào <tag> ở /route: phần tử không có tên, chữ hay thuộc tính ổn định...` | Phần tử không có manh mối nào để tìm lại (vd. `div` trống). Bấm vào phần có chữ của mục đó, hoặc thêm `aria-label`/`tourId` |
+| `Không có bước nào nhận ra được, không có gì để lưu.` | Mọi lần bấm đều vào phần tử không có manh mối |
+| Menu hover đóng mất khi chạy tour | Bước mở menu chưa được ghi là `hover`: ghi lại và nhấn **Alt+H** khi chuột đang ở trên nút mở menu, hoặc đổi kiểu bước thành "Di chuột" ở trang Tour của Studio |
 | `Chưa bấm "Bắt đầu ghi".` / `Đóng trình duyệt trước khi ghi.` | Đã dừng hoặc đóng Chrome mà chưa bắt đầu ghi |
 | `! Chưa có feature-map.json (hãy chạy scan trước)...` | Chạy `npm run scan` trước. Không có thì không điền được nhãn, và không tự xác định được tính năng đích |
 | `! Không xác định được tính năng đích (dùng --feature <id>)...` | Màn hình lúc dừng không khớp tính năng nào. Dừng ở đúng màn hình đích, hoặc truyền `--feature` |
@@ -259,7 +278,7 @@ npx tsx packages/cli/src/main.ts tour:verify --config compass.config.yaml \
 |---|---|
 | `--only id1,id2` | Chỉ kiểm các tour này |
 | `--layout desktop\|mobile` | Chỉ kiểm một bố cục |
-| `--heal` | Ghi locator đã sửa vào `compass.tours.json` (xem dưới) |
+| `--heal` | Ghi locator đã sửa vào kho tour (xem dưới) |
 | `--storage-state <file>` | Phiên đăng nhập do `tour:auth` lưu |
 | `--screenshots <thư mục>` | Chụp phần tử của từng bước tìm được (`<tour>/<bố cục>-<bước>.png`) cho `tour:push` |
 | `--report <file>` | Báo cáo JSON: từng bước, điểm, manh mối khớp, manh mối đổi, locator đề xuất |
@@ -275,8 +294,8 @@ Khi phần tử vẫn được tìm **chắc chắn** bằng các manh mối cò
 - **Bước thường**: áp luôn, ghi `"healedAt": "<ngày>"` vào bước. Giữ dòng người duyệt đã ghim (`list.rowText`) và bố cục của bản ghi.
 - **Bước nhạy cảm**: chỉ ghi `"proposal": { locator, changed, at }`; locator đang dùng giữ nguyên tới khi người duyệt bấm **Dùng locator mới** (hoặc **Bỏ qua**) ở trang Tour của Studio.
 - Lượt chạy bản chính ở bố cục kia (`dùng bản chính`) không ghi đè bản sửa của lượt chạy đúng bố cục.
-- Chỉ tour ghi bằng `tour:record` (`compass.tours.json`) được sửa; tour soạn tay bằng tourId trong YAML chỉ được báo cáo.
-- Sau khi sửa: chạy `scan`, xem diff của `compass.tours.json` rồi commit (hoặc `tour:push` lên kho tour).
+- Chỉ tour ghi bằng `tour:record` (trong kho tour) được sửa; tour soạn tay bằng tourId trong YAML chỉ được báo cáo.
+- Sau khi sửa: chạy `scan`, xem lại ở trang Tour của Studio rồi commit `compass.tours.db`.
 
 ### Ghi lại riêng một bước
 
@@ -290,43 +309,70 @@ Chrome mở ở màn hình của bước và **đang ghi sẵn**: lần bấm đ
 
 Studio cũng có nút **Kiểm tra tour** (chạy `tour:verify` trên web đang chạy, có tùy chọn tự sửa).
 
-### Kho tour ở backend (`tour:push`)
+### Một kho tour duy nhất (SQLite)
 
-Sửa tour không cần build lại web: tour lưu ở backend thắng tour cùng id trong `feature-map.json`, và được dùng cho cả tìm kiếm, `offer_tour` lẫn `/v1/tours/:id`.
+Mọi tour ghi bằng `tour:record` hay sửa trong Studio nằm trong **một file SQLite**: `compass.tours.db`, cạnh `compass.config.yaml`, commit cùng dự án. Không còn `compass.tours.json`, và backend không còn kho riêng.
+
+| Ai | Làm gì với `compass.tours.db` |
+|---|---|
+| `tour:record`, `tour:rerecord`, `tour:verify --heal`, Studio | Ghi tour (mỗi lần lưu là một phiên bản mới) |
+| `scan` | Đọc để dựng `feature-map.json` |
+| Backend | Đọc để phục vụ tour cho widget; API quản trị ghi vào chính file này |
+
+- **Phiên bản:** nội dung không đổi thì không tạo bản; quay về bản cũ cũng tạo bản mới, lịch sử không bị viết lại. Xóa tour xóa cả lịch sử và ảnh của nó.
+- **Chuyển từ bản trước:** lần đầu ghi, `compass.tours.json` (nếu có) được chuyển vào kho rồi xóa. Trước đó nó vẫn được đọc như cũ.
+- **Backend dùng file nào:** mặc định `compass.tours.db` nằm cạnh `feature-map.json` (`COMPASS_FEATURE_MAP`); đổi bằng `COMPASS_TOUR_DB`. Chạy backend trên cùng máy với dự án thì Studio lưu tour là trợ lý dùng ngay.
+- File SQLite là nhị phân: git không hiện diff nội dung. Xem tour ở trang Tour của Studio. Cần xem hoặc sửa tay dạng chữ (vd. `list.index`, `rowText`): `wealthcompass tour:export --file tours.json`, sửa, rồi `wealthcompass tour:import --file tours.json`.
+- Cần Node 22.5+ (`node:sqlite`).
+
+**Backend chạy ở máy khác** (máy chủ thật): triển khai `compass.tours.db` cùng `feature-map.json`, hoặc sửa thẳng kho trên máy chủ qua API quản trị:
 
 ```bash
 # Backend: bật API quản trị bằng một khóa riêng (không phải JWT người dùng)
-COMPASS_ADMIN_TOKEN=<khóa dài, ngẫu nhiên> COMPASS_TOUR_STORE=/var/lib/compass/tours npm run server
+COMPASS_ADMIN_TOKEN=<khóa dài, ngẫu nhiên> npm run server
 
-# CI sau tour:verify: đẩy tour đã quét kèm ảnh từng bước
+# CI sau tour:verify: đẩy tour đã quét kèm ảnh từng bước lên kho của máy chủ
 COMPASS_ADMIN_TOKEN=<khóa> npx tsx packages/cli/src/main.ts tour:push --config compass.config.yaml \
   --server https://compass.example.vn --shots .compass-shots --note "verify hằng đêm"
 ```
 
-- Mỗi lần lưu là một **phiên bản mới** (người lưu, thời điểm, ghi chú); nội dung không đổi thì không tạo bản. Quay về bản cũ cũng tạo bản mới, lịch sử không bị viết lại.
-- API (cần `Authorization: Bearer <COMPASS_ADMIN_TOKEN>`; không đặt biến này thì API tắt):
+API (cần `Authorization: Bearer <COMPASS_ADMIN_TOKEN>`; không đặt biến này thì API tắt):
 
-  | Đường | Việc |
-  |---|---|
-  | `GET /admin/tours` | Danh sách: phiên bản hiện tại, số phiên bản, ai sửa cuối |
-  | `GET /admin/tours/:id` | Bản hiện tại kèm lịch sử |
-  | `GET /admin/tours/:id/versions/:n` | Một phiên bản |
-  | `PUT /admin/tours/:id` | `{ tour, feature?, note?, by? }`: lưu bản mới |
-  | `POST /admin/tours/:id/rollback` | `{ version }`: quay về bản đó (thành bản mới) |
-  | `DELETE /admin/tours/:id` | Xóa tour và ảnh |
-  | `PUT /admin/tours/:id/shots/:layout/:key` | Ảnh PNG của một bước (tối đa 2 MB) |
+| Đường | Việc |
+|---|---|
+| `GET /admin/tours` | Danh sách: phiên bản hiện tại, số phiên bản, ai sửa cuối |
+| `GET /admin/tours/:id` | Bản hiện tại kèm lịch sử |
+| `GET /admin/tours/:id/versions/:n` | Một phiên bản |
+| `PUT /admin/tours/:id` | `{ tour, feature?, note?, by? }`: lưu bản mới |
+| `POST /admin/tours/:id/rollback` | `{ version }`: quay về bản đó (thành bản mới) |
+| `DELETE /admin/tours/:id` | Xóa tour và ảnh |
+| `PUT /admin/tours/:id/shots/:layout/:key` | Ảnh PNG của một bước (tối đa 2 MB) |
 
 - `feature` là tính năng sở hữu tour: quyền xem tour (`/v1/tours/:id`, `offer_tour`) theo quyền của tính năng đó.
-- **Ảnh chụp phần tử**: tour phục vụ cho widget kèm `shot` ở bước có ảnh; khi widget không chắc phần tử (popover không gắn phần tử), nó tải ảnh bằng JWT của người dùng (`GET /v1/tours/:id/shots/:layout/:key`, cùng kiểm quyền) và hiện ngay dưới dòng "Tìm trên màn hình", để người dùng biết cần tìm gì. Tải lỗi hoặc quá 1,5 giây thì chỉ hiện chữ.
-- Kho lưu dạng file JSON + thư mục ảnh trong `COMPASS_TOUR_STORE` (mặc định `.wealthcompass/tours`), ghi qua file tạm rồi đổi tên. Đủ cho một bản tự host; chạy nhiều instance thì cần ổ dùng chung hoặc thay lớp `TourStore` bằng DB.
+- **Ảnh chụp phần tử** lưu trong cùng file SQLite: tour phục vụ cho widget kèm `shot` ở bước có ảnh; khi widget không chắc phần tử, nó tải ảnh bằng JWT của người dùng (`GET /v1/tours/:id/shots/:layout/:key`, cùng kiểm quyền) và hiện dưới dòng "Tìm trên màn hình". Tải lỗi hoặc quá 1,5 giây thì chỉ hiện chữ.
+
+## 9c. Ghi nhanh hơn: phiên đăng nhập, chỉ mục source, web chưa có source
+
+**Giữ phiên đăng nhập.** Chrome ghi tour dùng một hồ sơ riêng cho mỗi web (`~/.wealthcompass/chrome-profiles/<origin>`), nên chỉ đăng nhập lần đầu; các lần ghi sau vào thẳng. Hồ sơ chứa phiên thật của tài khoản thử và nằm ngoài dự án. `COMPASS_RECORD_PROFILE=off` để mỗi lần ghi dùng hồ sơ trắng; đặt thành một đường dẫn để dùng thư mục khác.
+
+**Chỉ mục source (SQLite).** Phần quét tốn thời gian (đọc route, menu, template bằng ts-morph; dò cấu trúc dự án; các mục kiểm tích hợp) được lưu vào `~/.wealthcompass/index/index.db` theo dấu vân tay của source: commit `HEAD` cộng các file đang sửa dở. Mở Studio, lưu một tour, ghi lại một bước đều đọc chỉ mục; chỉ quét lại khi **có commit mới hoặc có file source sửa chưa commit**. Sửa `compass.overrides.yaml`, kho tour `compass.tours.db`, `feature-map.json` không làm chỉ mục hết hiệu lực. Trên web demo: quét đầy đủ ~850 ms, đọc chỉ mục ~3 ms, Feature Map giống hệt.
+
+- `wealthcompass scan`, `annotate`, `enrich`, `setup` luôn quét đầy đủ (và ghi lại chỉ mục): dùng `scan` khi muốn ép quét lại.
+- `COMPASS_INDEX=off` tắt chỉ mục; `COMPASS_INDEX_DIR` đổi chỗ lưu. Cần Node 22.5+ (`node:sqlite`); bản cũ hơn tự chạy không có chỉ mục.
+
+**Web chưa có source.** `wealthcompass init --url <địa chỉ web> --dir <thư mục>` tạo `compass.config.yaml` với `discovery.source: none` và `web.url`. Ghi tour như thường (`tour:record --config ... --id ...`, không cần `--url`, hoặc mở thư mục bằng Studio):
+
+- Màn hình trong Feature Map được dựng từ route xuất hiện trong các tour đã ghi (màn hình xuất phát, màn hình của từng bước, màn hình lúc dừng `endRoute`); tính năng đích của tour là màn hình lúc dừng.
+- Route là đường dẫn thật lúc ghi. Màn hình có tham số thì khai trong `compass.overrides.yaml`: `features: { orders.detail: { route: /orders/:id, title: Chi tiết lệnh } }`. Tiêu đề, mô tả màn hình cũng điền ở đó (hoặc trang Màn hình của Studio).
+- Không có quyền theo guard, không có menu, không gắn/gợi ý `tourId` (cần source). Để **chạy** tour cho người dùng thật vẫn phải gắn widget vào source bằng `setup`; trước đó dùng `tour:verify` để kiểm tour trên bản web.
 
 ## 10. Giới hạn hiện tại
 
 - Danh sách chỉ được nhận ra khi lúc ghi có **ít nhất hai dòng**; danh sách chỉ có một dòng thì ghi như phần tử thường (vẫn tìm được, nhưng lúc chạy gặp nhiều dòng sẽ báo không chắc). Ghi lại khi có dữ liệu nhiều dòng.
 - Bước mở chỗ chứa chỉ nhận ra trong cùng một màn hình (cùng route); mở menu rồi chuyển trang thì không đánh dấu.
-- Studio chỉ sửa chữ của bản chính; chữ của `variants.mobile` sửa trực tiếp trong `compass.tours.json`.
+- Studio chỉ sửa chữ của bản chính; chữ của `variants.mobile` sửa bằng `tour:export` / `tour:import`.
 
-- Chỉ ghi **lần bấm** (chuột); chưa ghi hover, kéo thả, nhập liệu, phím tắt.
+- Ghi **lần bấm** và **hover có chủ đích** (Alt+H); chưa ghi kéo thả, nhập liệu, phím tắt. Khóa hover không giữ được menu mà app tự đóng theo hẹn giờ hoặc khi cuộn trang.
 - Cần Chrome cài trên máy; chưa hỗ trợ Firefox/Safari.
 - Phần tử trong iframe khác origin hoặc shadow DOM đóng không bắt được; `tourId` sinh động (`[tourId]="item.id"`) không được quét nên cũng không dùng được.
 - Câu hỏi mẫu LLM sinh ra chưa được kiểm tra tự động với bộ test truy xuất; hãy đọc lại và thử vài câu thật.

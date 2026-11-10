@@ -147,7 +147,7 @@ const bondTable = (codes: string[]) => `
 test('nút lặp trên mỗi dòng bảng: ghi hình dạng dòng, tìm lại chắc chắn ở bất kỳ dòng nào', () => {
   page(bondTable(['VIC2025', 'MSN2026', 'HPG2027']));
   const loc = captureLocator(document.querySelectorAll('button')[1]);
-  assert.deepEqual(loc.list, { row: 'tr', column: 'Thao tác' });
+  assert.deepEqual(loc.list, { row: 'tr', column: 'Thao tác', index: 1 });
   assert.equal(loc.context.heading, 'Trái phiếu đang nắm giữ', 'tiêu đề lấy từ ngoài dòng');
   assert.ok(!JSON.stringify(loc).includes('MSN2026'), 'không ghi dữ liệu của dòng');
 
@@ -160,6 +160,36 @@ test('nút lặp trên mỗi dòng bảng: ghi hình dạng dòng, tìm lại ch
   assert.ok(found.matchedBy.includes('list') && found.matchedBy.includes('column'));
   page(bondTable(['TCB2030']));
   assert.equal(findByLocator(loc, document, always)?.confident, true, 'còn một dòng vẫn tìm được');
+});
+
+test('list.index: chọn đúng dòng thứ i đã ghi, danh sách ngắn hơn thì lấy dòng cuối', () => {
+  const codes = ['A1', 'B2', 'C3', 'D4', 'E5'];
+  page(bondTable(codes));
+  const loc = captureLocator(document.querySelectorAll('button')[3]);
+  assert.equal(loc.list?.index, 3);
+  // Dữ liệu khác, nhiều dòng hơn: vẫn là dòng thứ 4
+  page(bondTable(['K1', 'K2', 'K3', 'K4', 'K5', 'K6', 'K7']));
+  const found = findByLocator(loc, document, always);
+  assert.ok(found?.confident);
+  assert.equal(found.element.closest('tr')?.cells[0].textContent, 'K4');
+  // Bỏ selector dự phòng (nth-child) vẫn chọn theo index
+  const bare = findByLocator({ ...loc, css: undefined }, document, always);
+  assert.equal(bare?.element.closest('tr')?.cells[0].textContent, 'K4');
+  // Chỉ còn 2 dòng: lấy dòng cuối
+  page(bondTable(['Z1', 'Z2']));
+  assert.equal(findByLocator(loc, document, always)?.element.closest('tr')?.cells[0].textContent, 'Z2');
+  // Người duyệt đổi index
+  page(bondTable(codes));
+  assert.equal(findByLocator({ ...loc, list: { ...loc.list!, index: 0 } }, document, always)?.element.closest('tr')?.cells[0].textContent, 'A1');
+});
+
+test('list.index trong thẻ @for', () => {
+  const cards = (n: number) => Array.from({ length: n }, (_, i) => `<div class="bond-card"><h3>TP${i}</h3><button>Bán</button></div>`).join('');
+  page(`<app-bonds><h2>Danh mục</h2><div class="cards"><p>Ghi chú</p>${cards(4)}</div></app-bonds>`);
+  const loc = captureLocator(document.querySelectorAll('button')[2]);
+  assert.equal(loc.list?.index, 2, 'không đếm phần tử chen giữa không phải dòng');
+  page(`<app-bonds><h2>Danh mục</h2><div class="cards">${cards(6)}</div></app-bonds>`);
+  assert.equal(findByLocator(loc, document, always)?.element.closest('.bond-card')?.querySelector('h3')?.textContent, 'TP2');
 });
 
 test('ghim dòng bằng list.rowText', () => {
@@ -309,4 +339,63 @@ test('probeStep: tourId ghim mất nhưng locator tìm chắc thì báo đổi t
     const gone = await probeStep([{ key: 's1', locator: { tag: 'button', role: 'button', name: 'Không có', attrs: {}, context: {} } }], 0, { timeoutMs: 50 });
     assert.equal(gone.status, 'missing');
   });
+});
+
+test('web gắn (click) lên div/span thường: leo tới vùng bấm, icon không chữ lấy mục chứa nó', () => {
+  // Menu kiểu TCInvest: không role, không href, không cursor; bấm trúng icon
+  page(`<app-left-menu><h3>Tiền</h3><div class="menu-group-content">
+      <div class="m-child-item"><app-menu-icon><svg></svg></app-menu-icon><div><span class="t">Nộp tiền</span></div></div>
+      <div class="m-child-item"><app-menu-icon><svg></svg></app-menu-icon><div><span class="t">Rút tiền</span></div></div>
+    </div></app-left-menu>`);
+  const fromIcon = captureLocator(document.querySelectorAll('svg')[1]);
+  assert.equal(fromIcon.text, 'Rút tiền');
+  assert.equal(fromIcon.tag, 'div');
+  assert.ok(isUsableLocator(fromIcon));
+  const found = findByLocator(fromIcon, document, always);
+  assert.ok(found?.confident, JSON.stringify(found && { score: found.score, runnerUp: found.runnerUp }));
+  assert.equal(found.element.className, 'm-child-item');
+
+  // cursor: pointer khai báo ở thẻ ngoài, bấm trúng chữ bên trong
+  page(`<app-home><div class="tile" style="cursor:pointer"><b style="cursor:pointer"><i style="cursor:pointer">Bảng giá</i></b></div><div class="tile" style="cursor:pointer"><b style="cursor:pointer"><i style="cursor:pointer">Sổ lệnh</i></b></div></app-home>`);
+  const tile = captureLocator(document.querySelectorAll('i')[1]);
+  assert.equal(tile.tag, 'div');
+  assert.equal(tile.text, 'Sổ lệnh');
+  assert.equal(findByLocator(tile, document, always)?.element, document.querySelectorAll('.tile')[1]);
+});
+
+test('khóa hover: chặn sự kiện rời chuột của menu JS, đóng băng hiển thị của menu CSS, nhả thì trả lại', async () => {
+  const { lockHover, simulateHover } = await import('./hover-lock');
+  page(`<nav><div class="top" id="trigger">Cổ phiếu<ul class="dropdown" style="display:block"><li><a href="/dat-lenh">Đặt lệnh</a></li></ul></div></nav>
+    <div class="overlay"><div class="panel"><button>Sổ lệnh</button></div></div>`);
+  const trigger = document.getElementById('trigger')!;
+  const dropdown = document.querySelector('.dropdown') as HTMLElement;
+  const overlayButton = document.querySelector('.panel button')!;
+  let left = 0;
+  let entered = 0;
+  trigger.addEventListener('mouseleave', () => left++);
+  trigger.addEventListener('mouseenter', () => entered++);
+  document.querySelector('.panel')!.addEventListener('mouseleave', () => left++);
+
+  simulateHover(trigger);
+  assert.equal(entered, 1, 'mở menu JS bằng sự kiện hover giả');
+
+  const lock = lockHover(trigger);
+  lock.hold(document.querySelector('.dropdown a')!);
+  lock.hold(overlayButton);
+  // Chuột rời nút mở và rời khung overlay: app không được biết
+  trigger.dispatchEvent(new window.MouseEvent('mouseleave'));
+  document.querySelector('.panel')!.dispatchEvent(new window.MouseEvent('mouseleave'));
+  assert.equal(left, 0);
+  // Menu CSS: kiểu hiển thị bị ghim bằng !important nên mất :hover vẫn hiện
+  assert.equal(dropdown.style.getPropertyValue('display'), 'block');
+  assert.equal(dropdown.style.getPropertyPriority('display'), 'important');
+  assert.equal(trigger.style.getPropertyPriority('display'), '', 'không đụng tới nút mở và tổ tiên chung');
+
+  lock.release();
+  assert.equal(dropdown.style.getPropertyPriority('display'), '', 'trả style cũ');
+  assert.equal(dropdown.style.getPropertyValue('display'), 'block');
+  assert.ok(left >= 1, 'nhả khóa thì báo rời chuột để menu JS tự đóng');
+  const before = left;
+  trigger.dispatchEvent(new window.MouseEvent('mouseleave'));
+  assert.equal(left, before + 1, 'sau khi nhả, sự kiện chạy bình thường');
 });

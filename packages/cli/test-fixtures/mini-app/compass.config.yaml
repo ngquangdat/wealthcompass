@@ -1,4 +1,3 @@
-domainPack: finance-vn
 locale: vi
 discovery:
   entry: src/app/app.routes.ts

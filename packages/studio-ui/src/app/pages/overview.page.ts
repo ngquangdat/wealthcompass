@@ -7,7 +7,6 @@ import { PageHeaderComponent } from '../shared/page-header.component';
 
 // Mục kiểm tra -> trang xử lý
 const LINKS: Array<[RegExp, string, string]> = [
-  [/Gói|Style|provideCompass|getToken|compass-chat-widget|compass\.config/, '/integrate', 'Tích hợp'],
   [/AI chưa duyệt|Quét route/, '/screens', 'Màn hình'],
   [/Backend|CORS/, '/run', 'Chạy thử'],
   [/LLM/, '/settings', 'Cài đặt AI'],
@@ -19,7 +18,7 @@ const LINKS: Array<[RegExp, string, string]> = [
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (store.project(); as p) {
-      <ui-page-header [title]="p.name" [subtitle]="'Angular ' + (p.angularVersion ?? '?') + ' · ' + p.path">
+      <ui-page-header [title]="p.name" [subtitle]="(p.noSource ? 'Chưa có source · ' + (p.webUrl ?? '') : 'Angular ' + (p.angularVersion ?? '?')) + ' · ' + p.path">
         <button class="btn" (click)="store.refresh()" [disabled]="store.loading()">
           @if (store.loading()) { <span class="spinner"></span> } @else { <ui-icon name="refresh" /> } Kiểm tra lại
         </button>
@@ -30,9 +29,10 @@ const LINKS: Array<[RegExp, string, string]> = [
           <div class="hero-icon"><ui-icon name="plug" [size]="22" /></div>
           <div class="grow">
             <h2>Dự án chưa gắn WealthCompass</h2>
-            <p class="muted">Studio sẽ dò cấu trúc dự án, để AI soạn nháp dữ liệu tìm kiếm và tạo các thay đổi cần thiết. Bạn xem từng thay đổi trước khi áp.</p>
+            <p class="muted">Tích hợp làm một lần bằng dòng lệnh, không làm trong Studio. Chạy lệnh dưới đây, duyệt và áp patch, rồi bấm Kiểm tra lại.</p>
+            <pre class="cmd">npx wealthcompass setup --app {{ p.path }}
+git apply wealthcompass-setup.patch &amp;&amp; npm install</pre>
           </div>
-          <a class="btn btn-primary" routerLink="/integrate">Bắt đầu tích hợp <ui-icon name="chevron-right" /></a>
         </div>
       } @else if (store.overview(); as o) {
         @if (o.stats; as s) {
@@ -83,6 +83,7 @@ const LINKS: Array<[RegExp, string, string]> = [
         }
       }
 
+      @if (!p.noSource) {
       <div class="card">
         <div class="card-head"><h2>Cấu trúc dự án đã dò được</h2></div>
         <div class="card-body facts">
@@ -93,6 +94,7 @@ const LINKS: Array<[RegExp, string, string]> = [
           <div><span class="muted small">Cổng dev</span><span>{{ p.devPort }}</span></div>
         </div>
       </div>
+      }
     }
   `,
   styles: `
@@ -100,6 +102,7 @@ const LINKS: Array<[RegExp, string, string]> = [
     .hero { display: flex; align-items: center; gap: 16px; padding: 24px; }
     .hero-icon { width: 44px; height: 44px; border-radius: 10px; background: var(--primary-soft); color: var(--primary); display: grid; place-items: center; }
     .hero p { margin-top: 4px; max-width: 620px; }
+    .cmd { margin: 10px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--surface-2, rgba(127,127,127,.12)); font: 12.5px/1.5 'JetBrains Mono', monospace; white-space: pre-wrap; word-break: break-all; }
     .stat { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; color: inherit; }
     .stat:hover { text-decoration: none; border-color: var(--border-strong); }
     .stat b { font-size: 24px; font-weight: 600; }

@@ -30,12 +30,15 @@ tours:
     steps:
       - target: home-shortcut-iconnect
         advanceOn: click
-        text: "Bắt đầu từ trang chủ: bấm vào **Giao dịch iConnect** để vào bảng giá trái phiếu."
+        text: "Bắt đầu từ trang chủ: bấm vào **Giao dịch iConnect** để vào bảng giá trái
+          phiếu."
       - target: iconnect-tab-assets
         advanceOn: click
-        text: "Đây là bảng giá iConnect. Chuyển sang tab **Tài sản** để xem trái phiếu đang nắm giữ."
+        text: "Đây là bảng giá iConnect. Chuyển sang tab **Tài sản** để xem trái phiếu
+          đang nắm giữ."
       - target: assets-select-sell
         advanceOn: click
         text: "Bấm **CHỌN BÁN** để bật chế độ bán, mỗi trái phiếu sẽ hiện nút BÁN."
       - target: assets-sell-button
-        text: "Bấm **BÁN** ở dòng trái phiếu muốn bán. Từ đây bạn tự nhập khối lượng, giá và xác nhận lệnh; trợ lý không đặt lệnh hộ."
+        text: "Bấm **BÁN** ở dòng trái phiếu muốn bán. Từ đây bạn tự nhập khối lượng,
+          giá và xác nhận lệnh; trợ lý không đặt lệnh hộ."

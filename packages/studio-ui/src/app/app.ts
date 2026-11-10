@@ -27,7 +27,6 @@ export class App {
       title: null,
       items: [
         { path: '/overview', label: 'Tổng quan', icon: 'grid', status: 'overview' },
-        { path: '/integrate', label: 'Tích hợp', icon: 'plug', status: 'integrate' },
       ],
     },
     {
@@ -37,7 +36,6 @@ export class App {
         { path: '/permissions', label: 'Quyền', icon: 'key' },
         { path: '/tourids', label: 'Gắn tourId', icon: 'search' },
         { path: '/tours', label: 'Tour', icon: 'compass' },
-        { path: '/pack', label: 'Domain Pack', icon: 'file-text' },
       ],
     },
     {

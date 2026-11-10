@@ -1,7 +1,6 @@
 import { readFileSync, statSync } from 'node:fs';
 import { featureMapSchema, type Feature, type FeatureMap, type Tour } from '@wealthcompass/contracts';
 import { normalizeVi, tokenize } from '@wealthcompass/core';
-import type { DomainPack } from './pack.js';
 
 interface IndexedFeature {
   feature: Feature;
@@ -52,10 +51,7 @@ export class FeatureStore {
   // Tour từ kho backend (TourStore): thắng tour cùng id trong Feature Map
   private overlay: () => Array<{ tour: Tour; feature?: string }> = () => [];
 
-  constructor(
-    private readonly file: string,
-    private readonly pack: DomainPack,
-  ) {
+  constructor(private readonly file: string) {
     this.load();
   }
 
@@ -115,16 +111,9 @@ export class FeatureStore {
     return this.featureMap.features.find((f) => f.id === id);
   }
 
-  // Mở rộng câu hỏi bằng từ điển đồng nghĩa của Domain Pack
+  // Từ khóa của câu hỏi (đã bỏ từ dừng). Từ đồng nghĩa khai trong `keywords` của từng màn hình.
   private expand(query: string): string[] {
-    const normalized = normalizeVi(query);
-    const terms = new Set(tokenize(query).filter((t) => !STOPWORDS.has(t)));
-    for (const group of this.pack.glossary) {
-      if (group.some((phrase) => ` ${normalized} `.includes(` ${phrase} `))) {
-        for (const phrase of group) tokenize(phrase).forEach((t) => !STOPWORDS.has(t) && terms.add(t));
-      }
-    }
-    return [...terms];
+    return [...new Set(tokenize(query).filter((t) => !STOPWORDS.has(t)))];
   }
 
   // Chấm điểm mọi màn hình cho câu hỏi (BM25 trên các trường + thưởng cụm từ liền nhau)

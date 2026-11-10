@@ -56,6 +56,13 @@ export async function playwrightDriver(browser: Browser, base: string, layout: L
       await element.click({ timeout: 3000 }).catch(() => undefined);
       await settle();
     },
+    async hover() {
+      const element = await found();
+      if (!element) return;
+      // Chuột thật đứng yên trên nút mở nên menu hover (CSS lẫn JS) vẫn mở tới bước sau
+      await element.hover({ timeout: 3000 }).catch(() => undefined);
+      await page.waitForTimeout(250);
+    },
     async screenshot(file) {
       const element = await found();
       if (!element) return false;

@@ -32,7 +32,6 @@ function fakeTarballs(): string {
 
 const options = (app: string, extra: Partial<SetupOptions> = {}): SetupOptions => ({
   app,
-  pack: 'generic',
   backendUrl: 'http://localhost:8890',
   tarballs: fakeTarballs(),
   version: '0.1.0',
@@ -61,20 +60,20 @@ test('dò cấu trúc: route, menu khóa title/link/items, cách khởi động,
 
 test('menu khóa khác tên vẫn ra đúng menuPath; title thiếu thì lấy nhãn menu', () => {
   const dir = tempRepo('setup-app');
-  writeFileSync(join(dir, 'compass.config.yaml'), 'domainPack: generic\ndiscovery:\n  entry: src/app/app.routes.ts\n  menu: src/app/layout/nav.ts\n');
+  writeFileSync(join(dir, 'compass.config.yaml'), 'discovery:\n  entry: src/app/app.routes.ts\n  menu: src/app/layout/nav.ts\n');
   const { featureMap } = scan(join(dir, 'compass.config.yaml'));
   const returns = featureMap.features.find((f) => f.route.pattern === '/orders/returns')!;
   assert.deepEqual(returns.menuPath, ['Đơn hàng', 'Trả hàng']);
   assert.equal(returns.title, 'Trả hàng');
 });
 
-test('ánh xạ guard: đăng nhập / đọc từ code / đoán từ tên', () => {
+test('gợi ý quyền của guard: đăng nhập / đọc từ code / không rõ thì chỉ cần đăng nhập (không đoán từ tên)', () => {
   const info = detectProject(join(fixtures, 'setup-app'));
   const map = Object.fromEntries(analyzeGuards(info.project, ['authGuard', 'adminGuard', 'reportsGuard', 'ghostGuard']).map((g) => [g.name, g]));
   assert.deepEqual([map.authGuard.how, map.authGuard.requires], ['auth', []]);
   assert.deepEqual([map.adminGuard.how, map.adminGuard.requires], ['code', ['shop_admin']]);
-  assert.deepEqual([map.reportsGuard.how, map.reportsGuard.requires], ['name', ['reports']]);
-  assert.equal(map.ghostGuard.how, 'unknown');
+  assert.deepEqual([map.reportsGuard.how, map.reportsGuard.requires], ['default', []]);
+  assert.deepEqual([map.ghostGuard.how, map.ghostGuard.requires], ['default', []]);
 });
 
 test('setup (standalone): không sửa code, patch áp được, sau khi áp đủ gói/style/provider/widget', async () => {
@@ -83,9 +82,12 @@ test('setup (standalone): không sửa code, patch áp được, sau khi áp đ�
   assert.equal(git(dir, 'status', '--porcelain', '--', 'src', 'package.json', 'angular.json'), '', 'code của web chưa bị đụng');
 
   const config = readFileSync(result.configFile, 'utf8');
-  assert.match(config, /adminGuard: \{ requires: \[ shop_admin \] \} # chuỗi quyền trong code: shop_admin/);
-  assert.match(config, /reportsGuard: \{ requires: \[ reports \] \} # DRAFT: đoán từ tên "reportsGuard", kiểm tra lại/);
-  assert.ok(result.todo.some((t) => t.includes('reportsGuard')));
+  // Quyền mặc định là chỉ cần đăng nhập: setup không tự ghi quyền nào, chuỗi quyền trong code chỉ là gợi ý trong báo cáo
+  assert.doesNotMatch(config, /adminGuard|reportsGuard/);
+  assert.ok(!result.todo.some((t) => /guard/i.test(t)));
+  assert.match(readFileSync(result.reportFile, 'utf8'), /Mặc định mọi màn hình chỉ cần đăng nhập.*`adminGuard` → \[shop_admin\]/);
+  assert.ok(scan(result.configFile).featureMap.features.every((f) => f.access.requires.length === 0), 'mọi màn hình chỉ cần đăng nhập');
+  assert.ok(!scan(result.configFile).featureMap.coverage.warnings.some((w) => /guard/i.test(w)));
 
   execFileSync('git', ['apply', '--check', result.patchFile!], { cwd: dir });
   execFileSync('git', ['apply', result.patchFile!], { cwd: dir });
@@ -93,7 +95,7 @@ test('setup (standalone): không sửa code, patch áp được, sau khi áp đ�
   const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
   assert.match(pkg.dependencies['@wealthcompass/angular'], /^file:.*wealthcompass-angular-0\.1\.0\.tgz$/);
   assert.equal(pkg.dependencies['driver.js'], '^1.8.0');
-  assert.ok(pkg.devDependencies['@wealthcompass/server'] && pkg.devDependencies['@wealthcompass/cli']);
+  assert.ok(!JSON.stringify(pkg).includes('@wealthcompass/server') && !JSON.stringify(pkg).includes('@wealthcompass/cli'), 'web chỉ cài lib giao diện; backend và CLI chạy độc lập');
   const ng = JSON.parse(readFileSync(join(dir, 'angular.json'), 'utf8'));
   assert.deepEqual(ng.projects.shop.architect.build.options.styles, ['driver.js/dist/driver.css', '@wealthcompass/angular/compass-theme.scss', 'src/styles.css']);
 
@@ -182,7 +184,7 @@ test('--ai-code: LLM chọn thành viên, nhưng biểu thức do code dựng; t
   await ghost.close();
 });
 
-test('--ai-code: chỉ guard phải đoán từ tên mới được gửi cho LLM; đầu ra sai định dạng bị bỏ', async () => {
+test('AI đọc code guard: chỉ guard chưa đọc được quyền mới được gửi cho LLM; đầu ra sai định dạng bị bỏ', async () => {
   const { analyzeGuards, refineGuardsWithLlm } = await import('./guards');
   const info = detectProject(join(fixtures, 'setup-app'));
   const base = analyzeGuards(info.project, ['adminGuard', 'reportsGuard']);
@@ -196,7 +198,7 @@ test('--ai-code: chỉ guard phải đoán từ tên mới được gửi cho LL
   const bad = await fakeLlm(() => ({ requires: ['x; drop table'] }));
   const kept = await refineGuardsWithLlm(info.project, base, bad.llm, () => undefined);
   await bad.close();
-  assert.equal(kept.find((g) => g.name === 'reportsGuard')?.how, 'name', 'chuỗi quyền không hợp lệ thì giữ bản đoán cũ');
+  assert.deepEqual([kept.find((g) => g.name === 'reportsGuard')?.how, kept.find((g) => g.name === 'reportsGuard')?.requires], ['default', []], 'chuỗi quyền không hợp lệ thì vẫn là chỉ cần đăng nhập');
 });
 
 test('setup: thêm .wealthcompass/ vào .gitignore qua patch (một lần), không có .gitignore thì nhắc trong việc cần làm', async () => {

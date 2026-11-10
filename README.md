@@ -2,7 +2,7 @@
 
 *Tìm đúng tính năng, đi đúng từng bước.*
 
-WealthCompass là trợ lý AI tích hợp trực tiếp vào web đầu tư, bao quát cổ phiếu, trái phiếu và chứng chỉ quỹ. Người dùng hỏi bằng ngôn ngữ tự nhiên, ví dụ "đặt lệnh ATC ở đâu?", "cách mua chứng chỉ quỹ" hay "bán lại trái phiếu trước hạn thế nào?". WealthCompass sẽ tìm đúng tính năng, điều hướng tới màn hình và dẫn tour từng bước ngay trên giao diện. Hệ thống tự học cấu trúc web từ source code Angular và phân quyền theo loại tài khoản cùng loại sản phẩm. Hệ thống chỉ hướng dẫn, không thao tác giao dịch hay tư vấn đầu tư.
+WealthCompass là trợ lý AI tích hợp trực tiếp vào web đầu tư, bao quát cổ phiếu, trái phiếu và chứng chỉ quỹ. Người dùng hỏi bằng ngôn ngữ tự nhiên, ví dụ "đặt lệnh ATC ở đâu?", "cách mua chứng chỉ quỹ" hay "bán lại trái phiếu trước hạn thế nào?". WealthCompass sẽ tìm đúng tính năng, điều hướng tới màn hình và dẫn tour từng bước ngay trên giao diện. Hệ thống tự học cấu trúc web từ source code Angular và phân quyền theo loại tài khoản cùng loại sản phẩm. Hệ thống chỉ hướng dẫn, không thao tác giao dịch thay người dùng.
 
 ## Cách hoạt động
 
@@ -13,10 +13,12 @@ WealthCompass là trợ lý AI tích hợp trực tiếp vào web đầu tư, ba
 
 ```bash
 cd ~/wealthcompass && npm install && npm run pack        # đóng gói (một lần)
-npm run studio                                           # mở WealthCompass Studio: làm mọi bước trên giao diện web
+npm run setup -- --app ~/du-an/my-web                    # 1. cài lib vào source web (một lần): sinh patch, duyệt rồi git apply
+npm run server                                           # 2. backend: tiến trình riêng, đọc kho tour compass.tours.db của web
+npm run studio                                           # 3. Studio: soạn dữ liệu, ghi tour vào cùng kho tour đó
 ```
 
-Thích dòng lệnh: `npm run setup -- --app ~/du-an/my-web`, duyệt rồi `git apply wealthcompass-setup.patch`.
+Chưa có source của web: `npx tsx packages/cli/src/main.ts init --url <địa chỉ web> --dir <thư mục>` rồi mở thư mục đó bằng Studio để ghi tour theo URL.
 
 Chi tiết: [docs/quickstart.md](docs/quickstart.md). Thử toàn bộ quy trình trên web mẫu: `npm run e2e:setup`.
 
@@ -26,9 +28,9 @@ Chi tiết: [docs/quickstart.md](docs/quickstart.md). Thử toàn bộ quy trìn
 - [Bắt đầu nhanh: gắn vào web trong 3 bước](docs/quickstart.md)
 - [Hướng dẫn tích hợp chi tiết (làm tay, tham khảo)](docs/integration-guide.md)
 - Gắn `tourId` hàng loạt bằng `annotate` (mục 5.1) và soạn mô tả màn hình bằng `enrich` (mục 6.2b) trong hướng dẫn tích hợp
-- [Ghi tour bằng `tour:record`](docs/tour-record.md): ghi thao tác thật, không cần `tourId` trong HTML (locator nhiều manh mối), LLM soạn nháp tour vào `compass.tours.json`
+- [Ghi tour bằng `tour:record`](docs/tour-record.md): ghi thao tác thật, không cần `tourId` trong HTML (locator nhiều manh mối), LLM soạn nháp tour vào `compass.tours.db`
 - [Demo iConnect](docs/demo.md)
-- [Plan kỹ thuật tổng quát](docs/universal-plan.md): áp vào bất kỳ web Angular 20+ nào, tự host, mức A có source (hợp đồng, scanner, backend tự host, Domain Pack, lộ trình)
+- [Plan kỹ thuật tổng quát](docs/universal-plan.md): áp vào bất kỳ web Angular 20+ nào, tự host, mức A có source (hợp đồng, scanner, backend tự host, lộ trình; phần Domain Pack trong plan đã bỏ)
 
 ## Trạng thái
 

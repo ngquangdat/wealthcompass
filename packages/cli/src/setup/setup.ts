@@ -13,7 +13,6 @@ import { analyzeGuards, guessAuthWithLlm, refineGuardsWithLlm, type GuardMapping
 export interface SetupOptions {
   app: string;
   project?: string;
-  pack: string;
   backendUrl: string;
   // Thư mục chứa các file .tgz (npm run pack); null = cài từ registry theo phiên bản
   tarballs: string | null;
@@ -66,22 +65,16 @@ export async function setup(opts: SetupOptions, log: (m: string) => void = conso
     writeFileSync(overridesFile, '# Phần do người viết/duyệt: mô tả, câu hỏi mẫu, tour. Ưu tiên hơn nội dung quét từ code.\nfeatures: {}\ntours: {}\n');
   }
 
-  // 3) Quét + ánh xạ guard
-  log('3/6 Quét route và ánh xạ guard -> quyền...');
-  let scanned = scan(configFile);
+  // 3) Quét. Quyền: mặc định mọi màn hình chỉ cần đăng nhập, setup không tự ghi quyền nào vào cấu hình.
+  // Chuỗi quyền đọc được trong code guard chỉ được nêu trong báo cáo làm gợi ý; muốn dùng thì khai ở Studio > Quyền.
+  log('3/6 Quét route (quyền mặc định: chỉ cần đăng nhập)...');
+  const scanned = scan(configFile);
   const unknown = [...new Set(scanned.featureMap.features.flatMap((f) => f.access.unknownGuards))];
   let guards = analyzeGuards(scanned.project, unknown);
-  if (opts.aiCode && opts.llm?.apiKey && guards.some((g) => g.how === 'name')) {
+  if (opts.aiCode && opts.llm?.apiKey && guards.some((g) => g.how === 'default')) {
     guards = await refineGuardsWithLlm(scanned.project, guards, opts.llm, log);
   }
-  if (guards.length) {
-    writeGuards(configFile, guards);
-    scanned = scan(configFile);
-  }
-  for (const g of guards) log(`    ${g.name} -> [${g.requires.join(', ')}] (${g.evidence ?? g.how})`);
-  for (const g of guards.filter((x) => x.how === 'name' || x.how === 'unknown')) {
-    todo.push(`Kiểm tra quyền của guard \`${g.name}\` trong compass.config.yaml (${g.evidence}).`);
-  }
+  for (const g of guards.filter((x) => x.requires.length)) log(`    gợi ý (chưa áp): ${g.name} -> [${g.requires.join(', ')}] (${g.evidence ?? g.how})`);
   log(`    ${scanned.featureMap.features.length} màn hình, ${scanned.featureMap.coverage.targetsFound} tourId có sẵn.`);
 
   // 4) AI soạn nháp mô tả/từ khóa/câu hỏi mẫu cho màn hình còn trống
@@ -158,7 +151,6 @@ export async function setup(opts: SetupOptions, log: (m: string) => void = conso
 function configYaml(info: ProjectInfo, opts: SetupOptions, today: string): string {
   const lines = [
     `# Sinh bởi \`wealthcompass setup\` ngày ${today}. Sửa thoải mái; chạy lại setup không ghi đè file này (trừ khi --force).`,
-    `domainPack: ${opts.pack}`,
     'locale: vi',
     'backend:',
     `  url: ${opts.backendUrl}`,
@@ -172,22 +164,6 @@ function configYaml(info: ProjectInfo, opts: SetupOptions, today: string): strin
     '',
   ];
   return lines.join('\n');
-}
-
-function writeGuards(configFile: string, guards: GuardMapping[]): void {
-  const doc = parseDocument(readFileSync(configFile, 'utf8'));
-  if (!doc.hasIn(['access', 'guards'])) doc.setIn(['access', 'guards'], doc.createNode({}));
-  const map = doc.getIn(['access', 'guards'], true) as YAMLMap;
-  map.flow = false;
-  for (const g of guards) {
-    if (map.has(g.name)) continue; // người đã khai thì giữ
-    const value = doc.createNode({ requires: g.requires }) as YAMLMap;
-    value.flow = true;
-    // Ghi nguồn gốc ngay cạnh dòng để người duyệt thấy: đọc từ code, hay chỉ đoán từ tên
-    value.comment = g.how === 'name' || g.how === 'unknown' ? ` DRAFT: ${g.evidence}, kiểm tra lại` : ` ${g.evidence}`;
-    map.set(doc.createNode(g.name), value);
-  }
-  writeFileSync(configFile, String(doc));
 }
 
 // Mỗi màn hình lấy một câu hỏi mẫu dạng "... ở đâu?" (bỏ màn hình đăng nhập), tối đa 3 câu
@@ -210,7 +186,6 @@ function integrationEdits(info: ProjectInfo, opts: SetupOptions, auth: AuthGuess
   const pkgText = readFileSync(pkgFile, 'utf8');
   const pkg = JSON.parse(pkgText) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
   pkg.dependencies ??= {};
-  pkg.devDependencies ??= {};
   const spec = (name: string) => {
     if (!opts.tarballs) return `^${opts.version}`;
     const file = join(opts.tarballs, `wealthcompass-${name}-${opts.version}.tgz`);
@@ -231,17 +206,9 @@ function integrationEdits(info: ProjectInfo, opts: SetupOptions, auth: AuthGuess
       pkgChanged = true;
     }
   }
-  // Backend và CLI là devDependencies: để chạy thử local bằng `npx wealthcompass-server`, `npx wealthcompass doctor`.
-  // Khi chạy thật, backend triển khai như một dịch vụ riêng.
-  for (const [k, v] of Object.entries({ '@wealthcompass/server': spec('server'), '@wealthcompass/cli': spec('cli') })) {
-    if (!pkg.devDependencies[k] && !pkg.dependencies[k]) {
-      pkg.devDependencies[k] = v;
-      pkgChanged = true;
-    }
-  }
+  // Web chỉ cài lib giao diện. Backend và Studio/CLI chạy độc lập từ bản cài WealthCompass, KHÔNG cài vào web.
   if (pkgChanged) {
     pkg.dependencies = Object.fromEntries(Object.entries(pkg.dependencies).sort(([a], [b]) => a.localeCompare(b)));
-    pkg.devDependencies = Object.fromEntries(Object.entries(pkg.devDependencies).sort(([a], [b]) => a.localeCompare(b)));
     addEdit(edits, pkgFile, { pos: 0, end: pkgText.length, text: JSON.stringify(pkg, null, 2) + '\n' });
   }
 
@@ -371,14 +338,15 @@ function providerSnippet(backendUrl: string, auth: AuthGuess | null, suggestions
 function envText(info: ProjectInfo, opts: SetupOptions, featureMap: string): string {
   const port = info.devPort;
   return [
-    '# Cấu hình backend WealthCompass cho web này. Chạy: npx wealthcompass-server --env-file wealthcompass.env',
+    '# Cấu hình backend WealthCompass cho web này. Backend chạy độc lập (không cài trong web): wealthcompass-server --env-file <đường dẫn file này>',
     '# KHÔNG ghi khóa LLM vào file này; đặt COMPASS_LLM_API_KEY qua biến môi trường/secret.',
     `COMPASS_FEATURE_MAP=${featureMap}`,
-    `COMPASS_PACK=${opts.pack}`,
     `COMPASS_ORIGINS=http://localhost:${port},http://127.0.0.1:${port}`,
     `PORT=${new URL(opts.backendUrl).port || 8890}`,
     '',
-    '# Xác thực: JWKS của hệ thống đăng nhập (bắt buộc khi chạy thật)',
+    '# Xác thực: mặc định là gateway (API gateway đứng trước backend đã xác minh JWT; backend chỉ đọc sub và quyền trong token).',
+    '# Backend chỉ được nhận yêu cầu đi qua gateway. Không có gateway thì để backend tự xác minh bằng JWKS:',
+    '# COMPASS_AUTH=jwks',
     '# COMPASS_JWKS_URL=https://sso.example.com/.well-known/jwks.json',
     '# COMPASS_JWT_ISSUER=https://sso.example.com',
     '# COMPASS_JWT_AUDIENCE=my-web',
@@ -410,7 +378,7 @@ function report(r: SetupResult, opts: SetupOptions, base: string, today: string)
     `| Route | \`${i.routesFile}\` (${r.stats.screens} màn hình) |`,
     `| Menu | ${i.menuFile ? `\`${i.menuFile}\` (biến ${i.menuVar})` : 'không thấy'} |`,
     `| Đăng nhập | ${r.auth ? `${r.auth.service}: token \`${r.auth.tokenExpr}\`, quyền \`${r.auth.rolesExpr ?? '[]'}\` (${r.auth.source === 'llm' ? 'AI đọc code' : 'đoán từ tên'})` : 'không đoán được (TODO trong patch)'} |`,
-    `| Guard | ${r.guards.length ? r.guards.map((g) => `\`${g.name}\` → [${g.requires.join(', ')}]`).join('; ') : 'không có'} |`,
+    `| Quyền | Mặc định mọi màn hình chỉ cần đăng nhập.${r.guards.some((g) => g.requires.length) ? ` Gợi ý đọc từ code (chưa áp, khai ở Studio > Quyền nếu muốn trợ lý lọc theo quyền): ${r.guards.filter((g) => g.requires.length).map((g) => `\`${g.name}\` → [${g.requires.join(', ')}]`).join('; ')}` : ''} |`,
     '',
     '## Đã tạo',
     '',
@@ -429,9 +397,9 @@ function report(r: SetupResult, opts: SetupOptions, base: string, today: string)
     ...(patchRel ? [`cd ${base}`, `git apply --check ${patchRel} && git apply ${patchRel}`] : []),
     `cd ${i.appDir}`,
     'npm install',
-    `npx wealthcompass-server --env-file wealthcompass.env   # backend (cổng ${new URL(opts.backendUrl).port || 8890})`,
+    `wealthcompass-server --env-file ${join(i.appDir, 'wealthcompass.env')}   # backend: tiến trình riêng, chạy từ bản cài WealthCompass (cổng ${new URL(opts.backendUrl).port || 8890})`,
     'npm start                                              # web',
-    'npx wealthcompass doctor --app .                       # kiểm tra mọi thứ đã nối đúng',
+    `wealthcompass doctor --app ${i.appDir}   # kiểm tra mọi thứ đã nối đúng (chạy từ bản cài WealthCompass)`,
     '```',
     '',
     `Gói WealthCompass: ${opts.tarballs ? `cài từ file .tgz trong \`${rel(opts.tarballs)}\`` : `phiên bản ^${opts.version} từ registry npm`}.`,

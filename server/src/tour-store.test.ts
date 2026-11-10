@@ -24,7 +24,7 @@ const tour = (text: string): Tour => ({
 });
 
 async function admin() {
-  const store = new TourStore(mkdtempSync(join(tmpdir(), 'compass-tours-')));
+  const store = new TourStore(join(mkdtempSync(join(tmpdir(), 'compass-tours-')), 'compass.tours.db'));
   let changes = 0;
   const app = Fastify();
   await registerTourAdmin(app, { tours: store, adminToken: 'secret-token', onChange: () => changes++ });
@@ -53,7 +53,7 @@ test('kho tour: mỗi lần lưu là một phiên bản, quay về bản cũ t�
   assert.equal((await app.inject({ url: '/admin/tours/sell-bond/versions/2', headers: auth })).json().tour.steps[0].text, 'Chuyển sang tab **Tài sản**.');
 
   // Đọc lại từ đĩa
-  const reopened = new TourStore((store as unknown as { dir: string }).dir);
+  const reopened = new TourStore(store.file);
   assert.equal(reopened.list()[0].version, 3);
   assert.equal(reopened.list()[0].versions, 3);
 });

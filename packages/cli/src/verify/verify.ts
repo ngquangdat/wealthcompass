@@ -4,7 +4,7 @@ import type { Layout, Locator, Tour, TourStep } from '@wealthcompass/contracts';
 import { routeMatches, stepsForLayout, type ProbeOptions, type ProbeResult } from '@wealthcompass/core';
 import { loadConfig } from '../scan';
 import { loadFeatureMap } from '../record/run';
-import { readToursFile } from '../record/write';
+import { readToursFile, writeTours } from '../record/write';
 import { applyHealing } from './heal';
 
 // tour:verify: chạy lại từng tour trên một bản web thật (staging) bằng Playwright, ở cả bố cục desktop và mobile,
@@ -51,6 +51,8 @@ export interface VerifyDriver {
   probe(steps: TourStep[], index: number): Promise<ProbeResult>;
   // Bấm phần tử vừa tìm được ở probe
   click(): Promise<void>;
+  // Di chuột thật vào phần tử vừa tìm được (bước hover mở menu); driver giả trong test có thể bỏ qua
+  hover?(): Promise<void>;
   // Chụp phần tử vừa tìm được; false khi không chụp được
   screenshot(file: string): Promise<boolean>;
   close(): Promise<void>;
@@ -108,6 +110,7 @@ export async function verifyTour(driver: VerifyDriver, tour: Tour, layout: Layou
     }
     if (probe.proposed) report.proposed = probe.proposed;
     if (step.advanceOn === 'click' && !probe.userOnly) await driver.click();
+    else if (step.advanceOn === 'hover') await driver.hover?.();
   }
   return { id: tour.id, layout, fallback, ok: reports.every((r) => r.status === 'ok' || r.status === 'skipped'), steps: reports };
 }
@@ -215,7 +218,7 @@ export async function verifyTours(opts: VerifyOptions, log: (msg: string) => voi
     }
   }
   if (changedFile) {
-    writeFileSync(toursFile, JSON.stringify(recorded, null, 2) + '\n');
+    writeTours(toursFile, recorded, 'tour:verify', 'Tự sửa locator (--heal)');
     log(`Đã cập nhật locator trong ${toursFile}. Chạy \`scan\` để đưa vào Feature Map, xem diff rồi commit.`);
   }
 

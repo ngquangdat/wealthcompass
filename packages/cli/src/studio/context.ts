@@ -8,7 +8,9 @@ import { spawn } from 'node:child_process';
 import type { FastifyReply } from 'fastify';
 import { resolveLlmConfig, LLM_PRESETS } from '@wealthcompass/llm';
 import { findGaps } from '../enrich';
-import { loadConfig, scan, type ScanResult } from '../scan';
+import { indexIgnore, loadConfig, scan, type ScanResult } from '../scan';
+import { forgetFingerprints, indexed, sourceFingerprint } from '../index-cache';
+import { codeChecks, type Check } from '../setup/doctor';
 import { detectProject } from '../setup/detect';
 import { readEnvFile } from './env-file';
 import { readOverrides } from './overrides-edit';
@@ -80,21 +82,68 @@ export function runCommand(cmd: string, args: string[], cwd: string, log: (m: st
   });
 }
 
+// Dự án tour chưa có source của web: chỉ có compass.config.yaml với discovery.source: none (tạo bằng `wealthcompass init`)
+export function noSource(app: string): boolean {
+  if (!integrated(app)) return false;
+  try {
+    return loadConfig(configPath(app)).config.discovery.source === 'none';
+  } catch {
+    return false;
+  }
+}
+
+// Thư mục Studio mở được: web Angular, hoặc dự án tour chưa có source
+export const isProject = (dir: string) => existsSync(join(dir, 'angular.json')) || noSource(dir);
+
+export function webUrl(app: string): string | null {
+  try {
+    return loadConfig(configPath(app)).config.web?.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function projectSummary(app: string) {
-  const info = detectProject(app);
+  if (noSource(app)) {
+    return {
+      path: app,
+      name: basename(app),
+      angularVersion: null,
+      devPort: 4200,
+      bootstrap: null,
+      routesFile: null,
+      menuFile: null,
+      auth: null,
+      notes: [] as string[],
+      integrated: true,
+      installed: false,
+      patchPending: false,
+      noSource: true,
+      webUrl: webUrl(app),
+    };
+  }
+  // Dò cấu trúc dự án phải nạp ts-morph: lưu vào chỉ mục, chỉ dò lại khi source đổi
+  const detected = indexed(app, 'detect', appFingerprint(app), () => {
+    const info = detectProject(app);
+    return {
+      name: info.projectName,
+      angularVersion: info.angularVersion,
+      devPort: info.devPort,
+      bootstrap: info.bootstrap ? { kind: info.bootstrap.kind, root: info.bootstrap.root.className } : null,
+      routesFile: info.routesFile,
+      menuFile: info.menuFile,
+      auth: info.auth ? { service: info.auth.service, tokenExpr: info.auth.tokenExpr, rolesExpr: info.auth.rolesExpr } : null,
+      notes: info.notes,
+    };
+  });
   return {
     path: app,
-    name: info.projectName,
-    angularVersion: info.angularVersion,
-    devPort: info.devPort,
-    bootstrap: info.bootstrap ? { kind: info.bootstrap.kind, root: info.bootstrap.root.className } : null,
-    routesFile: info.routesFile,
-    menuFile: info.menuFile,
-    auth: info.auth ? { service: info.auth.service, tokenExpr: info.auth.tokenExpr, rolesExpr: info.auth.rolesExpr } : null,
-    notes: info.notes,
+    ...detected,
     integrated: integrated(app),
     installed: existsSync(join(app, 'node_modules', '@wealthcompass', 'angular', 'package.json')),
     patchPending: existsSync(join(app, 'wealthcompass-setup.patch')),
+    noSource: false,
+    webUrl: webUrl(app),
   };
 }
 
@@ -163,35 +212,37 @@ export function featureRows(app: string) {
 // Dấu vân tay = thời điểm sửa mới nhất của config, overrides và mọi file trong thư mục nguồn.
 // ---------------------------------------------------------------------------
 
-let cache: { key: string; fingerprint: number; result: ScanResult } | null = null;
+let cache: { key: string; fingerprint: string; result: ScanResult } | null = null;
 
-function newestMtime(dir: string): number {
-  let newest = 0;
-  const walk = (d: string) => {
-    let entries;
-    try {
-      entries = readdirSync(d, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
-      const p = join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else newest = Math.max(newest, statSync(p).mtimeMs);
-    }
-  };
-  walk(dir);
-  return newest;
+
+// Dấu vân tay source của dự án (bỏ qua file dữ liệu của WealthCompass)
+export function appFingerprint(app: string): string {
+  let ignore = ['compass.overrides.yaml', 'compass.tours.json', 'compass.tours.db', 'feature-map.json', 'compass.lock.json'];
+  try {
+    if (integrated(app)) ignore = indexIgnore(loadConfig(configPath(app)).config);
+  } catch {
+    // cấu hình hỏng: dùng tên mặc định
+  }
+  return sourceFingerprint(app, ignore);
 }
 
-export function cachedScan(app: string): ScanResult {
+// Các mục kiểm cần đọc mã nguồn: lấy từ chỉ mục, source đổi mới quét đầy đủ và kiểm lại
+export function cachedCodeChecks(app: string): Check[] {
+  return indexed(app, 'doctor-code', appFingerprint(app), () => codeChecks(app, undefined, cachedScan(app, true)));
+}
+
+// `full`: cần đối tượng ts-morph (phân tích guard, gợi ý tourId, enrich). Mặc định dùng chỉ mục source: mở Studio
+// hay lưu một tour không phải nạp lại toàn bộ mã nguồn.
+export function cachedScan(app: string, full = false): ScanResult {
   const config = configPath(app);
   const { config: cfg, root } = loadConfig(config);
-  const files = [config, join(root, cfg.discovery.overrides)].filter(existsSync);
-  const fingerprint = Math.max(...files.map((f) => statSync(f).mtimeMs), newestMtime(join(root, cfg.discovery.srcRoot)));
-  if (cache && cache.key === config && cache.fingerprint === fingerprint) return cache.result;
-  const result = scan(config);
+  // Kho tour: file .db (hoặc compass.tours.json của bản trước khi chưa chuyển)
+  const toursDb = join(root, cfg.discovery.tours).replace(/\.json$/, '.db');
+  const files = [config, join(root, cfg.discovery.overrides), toursDb, toursDb.replace(/\.db$/, '.json')].filter(existsSync);
+  // File dữ liệu theo mtime; source theo commit + file đang sửa dở (không duyệt cả cây thư mục mỗi lần)
+  const fingerprint = `${Math.max(0, ...files.map((f) => statSync(f).mtimeMs))}|${cfg.discovery.source === 'none' ? '' : appFingerprint(app)}`;
+  if (cache && cache.key === config && cache.fingerprint === fingerprint && (!full || !cache.result.fromIndex)) return cache.result;
+  const result = scan(config, { useIndex: !full });
   // scan ghi lại feature-map.json/lock (không nằm trong thư mục nguồn nên không làm đổi dấu vân tay)
   cache = { key: config, fingerprint, result };
   return result;
@@ -199,6 +250,7 @@ export function cachedScan(app: string): ScanResult {
 
 export function invalidateScan(): void {
   cache = null;
+  forgetFingerprints();
 }
 
 // Các patch Studio sinh ra để người xem trước khi áp

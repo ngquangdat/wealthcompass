@@ -12,17 +12,14 @@ import { backendUrl, cachedScan, configPath, eventLogFile, httpError, llm, loadD
 
 const evalCaseSchema = z.object({
   q: z.string().trim().min(2).max(300),
-  // Màn hình đúng (một trong các id); bỏ trống khi câu phải bị chặn
+  // Màn hình đúng (một trong các id)
   expect: z.array(z.string()).default([]),
-  // Câu này phải bị chặn bởi chủ đề cấm của Domain Pack
-  blocked: z.boolean().optional(),
   // Quyền của người hỏi; bỏ trống = có mọi quyền (chỉ kiểm tra tìm kiếm)
   roles: z.array(z.string()).optional(),
 });
 type EvalCase = z.infer<typeof evalCaseSchema>;
 
 interface DebugSearch {
-  verdict: { blocked: boolean; topic?: string };
   terms: string[];
   threshold: number;
   ranked: Array<{ id: string; title: string; score: number; allowed: boolean }>;
@@ -31,9 +28,8 @@ interface DebugSearch {
 export interface EvalRow {
   q: string;
   expect: string[];
-  blocked: boolean;
   rank: number | null; // thứ hạng của màn hình đúng trong kết quả trợ lý thấy được (1 = đầu)
-  pass: boolean; // đúng trong top 3 (hoặc bị chặn đúng)
+  pass: boolean; // đúng trong top 3
   reason: string | null;
   top: Array<{ id: string; title: string; score: number }>;
 }
@@ -43,7 +39,8 @@ const lastEvalFile = (app: string) => join(app, '.wealthcompass', 'eval-last.jso
 
 function readCases(app: string): EvalCase[] {
   const raw = (loadDoc(evalFile(app)).toJSON() as { cases?: unknown[] } | null)?.cases ?? [];
-  return raw.map((c) => {
+  // File cũ có thể còn câu `blocked: true` (bộ lọc chủ đề đã bỏ): bỏ qua các câu đó
+  return raw.filter((c) => !(c as Record<string, unknown>)['blocked']).map((c) => {
     const r = c as Record<string, unknown>;
     // Cho phép viết tay gọn: expect là một chuỗi
     return evalCaseSchema.parse({ ...r, expect: typeof r['expect'] === 'string' ? [r['expect']] : r['expect'] });
@@ -69,8 +66,8 @@ async function backendHealth(app: string): Promise<{ running: boolean; debug: bo
 
 async function requireDebugBackend(app: string): Promise<string> {
   const h = await backendHealth(app);
-  if (!h.running) throw httpError(400, 'Backend chưa chạy. Bật backend ở trang Chạy thử.');
-  if (!h.debug) throw httpError(400, 'Backend đang chạy không có chế độ debug. Khởi động lại backend từ trang Chạy thử (cần gói WealthCompass 0.2.0 trở lên).');
+  if (!h.running) throw httpError(400, 'Backend chưa chạy. Backend chạy độc lập với Studio: bật nó bằng lệnh ở trang Chạy thử.');
+  if (!h.debug) throw httpError(400, 'Backend đang chạy không có chế độ debug. Khởi động lại backend với COMPASS_DEBUG=1 (lệnh đầy đủ ở trang Chạy thử).');
   return h.url;
 }
 
@@ -78,12 +75,6 @@ export function scoreCase(c: EvalCase, res: DebugSearch): EvalRow {
   // Trợ lý chỉ thấy màn hình đủ quyền và vượt ngưỡng điểm
   const visible = res.ranked.filter((r) => r.allowed && r.score >= res.threshold);
   const top = visible.slice(0, 3).map(({ id, title, score }) => ({ id, title, score }));
-  if (c.blocked) {
-    return { q: c.q, expect: c.expect, blocked: true, rank: null, pass: res.verdict.blocked, reason: res.verdict.blocked ? null : 'không bị chặn', top };
-  }
-  if (res.verdict.blocked) {
-    return { q: c.q, expect: c.expect, blocked: false, rank: null, pass: false, reason: `bị chặn nhầm (chủ đề ${res.verdict.topic})`, top };
-  }
   const index = visible.findIndex((r) => c.expect.includes(r.id));
   const rank = index === -1 ? null : index + 1;
   let reason: string | null = null;
@@ -93,19 +84,17 @@ export function scoreCase(c: EvalCase, res: DebugSearch): EvalRow {
   } else if (rank > 3) {
     reason = `xếp thứ ${rank}`;
   }
-  return { q: c.q, expect: c.expect, blocked: false, rank, pass: rank !== null && rank <= 3, reason, top };
+  return { q: c.q, expect: c.expect, rank, pass: rank !== null && rank <= 3, reason, top };
 }
 
 export function summarize(rows: EvalRow[]) {
-  const search = rows.filter((r) => !r.blocked);
+  const search = rows;
   const n = search.length || 1;
   return {
     total: rows.length,
     hit1: search.filter((r) => r.rank === 1).length / n,
     hit3: search.filter((r) => r.rank !== null && r.rank <= 3).length / n,
     mrr: search.reduce((s, r) => s + (r.rank ? 1 / r.rank : 0), 0) / n,
-    blockedOk: rows.filter((r) => r.blocked && r.pass).length,
-    blockedTotal: rows.filter((r) => r.blocked).length,
     failed: rows.filter((r) => !r.pass).length,
   };
 }
@@ -129,8 +118,6 @@ interface LogEntry {
 export function logStats(entries: LogEntry[], tourIds: Set<string>) {
   const chats = entries.filter((e) => e.event === 'chat');
   const count = (k: string) => chats.filter((e) => e.outcome === k).length;
-  const byTopic: Record<string, number> = {};
-  for (const e of chats) if (e.outcome === 'refused' && e.topic) byTopic[e.topic] = (byTopic[e.topic] ?? 0) + 1;
 
   // Câu không tìm thấy: gom theo dạng chuẩn hóa để thấy câu nào lặp lại nhiều
   const notFound = new Map<string, { q: string; count: number; last: string }>();
@@ -162,7 +149,6 @@ export function logStats(entries: LogEntry[], tourIds: Set<string>) {
     outcomes: { offered: count('offered'), answered: count('answered'), not_found: count('not_found'), refused: count('refused'), error: count('error') },
     fallback: chats.filter((e) => e.fallback).length,
     latency: { p50: pct(0.5), p95: pct(0.95) },
-    byTopic,
     notFound: [...notFound.values()].sort((a, b) => b.count - a.count || b.last.localeCompare(a.last)).slice(0, 30),
     funnel: [...funnel.values()].sort((a, b) => b.offered - a.offered),
     daily: [...days].sort(([a], [b]) => a.localeCompare(b)).map(([day, n]) => ({ day, n })),
@@ -213,8 +199,8 @@ export function registerPhase3(app: FastifyInstance): void {
     const dir = requireApp();
     const cases = z.array(evalCaseSchema).max(1000).parse((req.body as { cases: unknown }).cases);
     const doc = loadDoc(evalFile(dir));
-    if (!doc.commentBefore) doc.commentBefore = ' Bộ câu hỏi kiểm thử tìm kiếm của WealthCompass (Studio > Kiểm thử).\n expect: id màn hình đúng; blocked: true nếu câu phải bị chặn; roles: quyền người hỏi (bỏ trống = mọi quyền)';
-    doc.set('cases', doc.createNode(cases.map((c) => ({ q: c.q, ...(c.blocked ? { blocked: true } : { expect: c.expect.length === 1 ? c.expect[0] : c.expect }), ...(c.roles?.length ? { roles: c.roles } : {}) }))));
+    if (!doc.commentBefore) doc.commentBefore = ' Bộ câu hỏi kiểm thử tìm kiếm của WealthCompass (Studio > Kiểm thử).\n expect: id màn hình đúng; roles: quyền người hỏi (bỏ trống = mọi quyền)';
+    doc.set('cases', doc.createNode(cases.map((c) => ({ q: c.q, expect: c.expect.length === 1 ? c.expect[0] : c.expect, ...(c.roles?.length ? { roles: c.roles } : {}) }))));
     writeFileSync(evalFile(dir), String(doc));
     return { ok: true, count: cases.length };
   });

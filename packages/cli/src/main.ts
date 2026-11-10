@@ -1,4 +1,4 @@
-import { scan } from './scan';
+import { loadConfig, scan } from './scan';
 import { recordTour } from './record/run';
 import { rerecordStep } from './record/rerecord';
 import { verifyTours } from './verify/verify';
@@ -6,7 +6,9 @@ import { pushTours } from './verify/push';
 import { enrich, resolveOnly } from './enrich';
 import { annotate, formatReport } from './annotate';
 import { dirname, join, relative, resolve } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { toursFileSchema } from '@wealthcompass/contracts';
+import { readToursFile, writeTours } from './record/write';
 import { fileURLToPath } from 'node:url';
 import { setup } from './setup/setup';
 import { doctor, formatChecks } from './setup/doctor';
@@ -44,10 +46,43 @@ if (command === 'doctor' && arg('app')) {
     (await import('node:child_process')).spawn(opener, [url], { stdio: 'ignore', detached: true, shell: process.platform === 'win32' }).unref();
   }
   process.on('SIGINT', () => process.exit(0));
+} else if (command === 'init') {
+  // Chưa có source của web: tạo cấu hình tối thiểu để ghi tour bằng URL (màn hình sinh từ tour đã ghi)
+  const url = arg('url');
+  if (!url || !/^https?:\/\//.test(url)) {
+    console.error('Cách dùng: wealthcompass init --url <địa chỉ web> [--dir <thư mục dự án tour>]');
+    process.exit(1);
+  }
+  const dir = resolve(arg('dir', '.')!);
+  const file = join(dir, 'compass.config.yaml');
+  if (existsSync(file) && !process.argv.includes('--force')) {
+    console.error(`${file} đã có. Dùng --force để ghi đè.`);
+    process.exit(1);
+  }
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    file,
+    [
+      '# WealthCompass: dự án tour chưa có source của web. Khi có source, chạy `wealthcompass setup --app <thư mục web>`',
+      '# rồi chép compass.tours.db và compass.overrides.yaml sang.',
+      'locale: vi',
+      `web: { url: ${JSON.stringify(new URL(url).origin)} }`,
+      'discovery:',
+      '  source: none',
+      'safety:',
+      '  # Nút có chữ này chỉ được tô sáng, không bao giờ bấm thật khi ghi hay kiểm tour. Thêm chữ của các nút gây giao dịch trên web của bạn.',
+      '  userOnlyText: [đặt lệnh, gửi lệnh, xác nhận]',
+      '',
+    ].join('\n'),
+  );
+  if (!existsSync(join(dir, 'compass.overrides.yaml'))) {
+    writeFileSync(join(dir, 'compass.overrides.yaml'), '# Mô tả màn hình cho trợ lý. Khai màn hình có tham số: features: { orders.detail: { route: /orders/:id, title: ... } }\nfeatures: {}\n');
+  }
+  console.log(`Đã tạo ${file}\nGhi tour: wealthcompass tour:record --config ${file} --id <tour-id>   (hoặc: wealthcompass studio --app ${dir})`);
 } else if (command === 'setup') {
   const app = arg('app');
   if (!app) {
-    console.error('Cách dùng: wealthcompass setup --app <thư mục web Angular> [--pack generic|finance-vn] [--backend-url http://localhost:8890] [--tarballs <thư mục .tgz> | --registry] [--annotate all|màn-hình,...] [--ai-code] [--no-llm] [--force] [--project <tên>]');
+    console.error('Cách dùng: wealthcompass setup --app <thư mục web Angular> [--backend-url http://localhost:8890] [--tarballs <thư mục .tgz> | --registry] [--annotate all|màn-hình,...] [--ai-code] [--no-llm] [--force] [--project <tên>]');
     process.exit(1);
   }
   // Gói .tgz: --tarballs, biến COMPASS_TARBALLS, hoặc dist/tarballs của repo (khi chạy từ source)
@@ -63,7 +98,6 @@ if (command === 'doctor' && arg('app')) {
   const result = await setup({
     app,
     project: arg('project'),
-    pack: arg('pack', 'generic')!,
     backendUrl: arg('backend-url', 'http://localhost:8890')!,
     tarballs,
     version: VERSION,
@@ -120,8 +154,16 @@ if (command === 'doctor' && arg('app')) {
     llm: resolveLlmConfig(),
   });
 } else if (command === 'tour:record') {
-  const url = arg('url');
   const id = arg('id');
+  // --url bỏ qua được khi compass.config.yaml có web.url
+  let url = arg('url');
+  if (!url) {
+    try {
+      url = loadConfig(arg('config', 'compass.config.yaml')!).config.web?.url;
+    } catch {
+      url = undefined;
+    }
+  }
   if (!url || !id) {
     console.error('Cách dùng: compass tour:record --config <yaml> --url <địa chỉ web> --id <tour-id> [--title "..."] [--about "mô tả tính năng"] [--feature <id>] [--mobile] [--force] [--no-llm] [--dry-run]');
     process.exit(1);
@@ -138,6 +180,24 @@ if (command === 'doctor' && arg('app')) {
     dryRun: process.argv.includes('--dry-run'),
     mobile: process.argv.includes('--mobile'),
   });
+} else if (command === 'tour:export' || command === 'tour:import') {
+  // Kho tour là SQLite (nhị phân): xuất ra JSON để xem/sửa tay các trường nâng cao (list.index, rowText, chữ bản mobile), rồi nhập lại
+  const { config, root } = loadConfig(arg('config', 'compass.config.yaml')!);
+  const db = join(root, config.discovery.tours);
+  const file = resolve(arg('file', 'compass.tours.export.json')!);
+  if (command === 'tour:export') {
+    writeFileSync(file, JSON.stringify(readToursFile(db), null, 2) + '\n');
+    console.log(`Đã xuất ${Object.keys(readToursFile(db).tours).length} tour ra ${file}. Sửa xong chạy: wealthcompass tour:import --file ${file}`);
+  } else {
+    if (!existsSync(file)) {
+      console.error(`Không thấy ${file}. Cách dùng: wealthcompass tour:import --config <yaml> --file <json đã xuất bằng tour:export>`);
+      process.exit(1);
+    }
+    const data = toursFileSchema.parse(JSON.parse(readFileSync(file, 'utf8')));
+    // Chỉ thêm/cập nhật tour có trong file; tour khác trong kho giữ nguyên
+    writeTours(db, { tours: { ...readToursFile(db).tours, ...data.tours } }, 'tour:import', `Nhập từ ${file}`);
+    console.log(`Đã nhập ${Object.keys(data.tours).length} tour vào kho. Chạy \`scan\` để cập nhật Feature Map.`);
+  }
 } else if (command === 'tour:verify') {
   // Chạy lại mọi tour trên một bản web thật (staging), báo bước hỏng; --heal sửa locator đã lệch
   const url = arg('url');
@@ -202,6 +262,6 @@ if (command === 'doctor' && arg('app')) {
     dryRun: process.argv.includes('--dry-run'),
   });
 } else {
-  console.log('Cách dùng: wealthcompass studio [--app <dir>] | setup --app <dir> | doctor --app <dir> | scan --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--dry-run] | annotate --config <yaml> [--only ...] [--out file] [--print] | tour:record ... | tour:verify ... | tour:auth ... | tour:rerecord ... | tour:push ...');
+  console.log('Cách dùng: wealthcompass studio [--app <dir>] | setup --app <dir> | init --url <web> [--dir <dir>] | doctor --app <dir> | scan --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--dry-run] | annotate --config <yaml> [--only ...] [--out file] [--print] | tour:record ... | tour:verify ... | tour:auth ... | tour:rerecord ... | tour:push ... | tour:export [--file x.json] | tour:import --file x.json');
   process.exit(command ? 1 : 0);
 }

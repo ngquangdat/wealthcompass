@@ -5,6 +5,7 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync, copyFileSync, mkdirSy
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { readToursFile } from './write';
 import { draftTour } from './draft';
 import { finishRecording, loadFeatureMap } from './run';
 import { mergeTourIntoOverrides, mergeTourIntoToursFile } from './write';
@@ -139,7 +140,7 @@ const locatorSteps: RecordedStep[] = [
   { tourId: null, route: '/loans', advanceOn: 'click', userOnly: false, tag: 'div', text: '', locator: { tag: 'div', attrs: {}, context: {}, css: 'div:nth-child(3)' } },
 ];
 
-test('ghi tour không cần tourId: giữ bước có locator, bỏ bước không nhận ra, ghi vào compass.tours.json', async () => {
+test('ghi tour không cần tourId: giữ bước có locator, bỏ bước không nhận ra, ghi vào kho tour', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'compass-loc-'));
   cpSync(resolve(import.meta.dirname, '../../test-fixtures/mini-app'), dir, { recursive: true });
   const config = join(dir, 'compass.config.yaml');
@@ -151,7 +152,7 @@ test('ghi tour không cần tourId: giữ bước có locator, bỏ bước khô
     (m) => logs.push(m),
   );
   assert.equal(result.written, true);
-  const file = JSON.parse(readFileSync(join(dir, 'compass.tours.json'), 'utf8'));
+  const file = JSON.parse(JSON.stringify(readToursFile(join(dir, 'compass.tours.db'))));
   const tour = file.tours['settle-loan'];
   assert.equal(tour.draft, true);
   assert.equal(tour.feature, 'loans');
@@ -228,7 +229,7 @@ test('cùng id ghi ở bố cục khác: lưu thành bản mobile, bước mở 
     },
     quiet,
   );
-  const tour = JSON.parse(readFileSync(join(dir, 'compass.tours.json'), 'utf8')).tours['settle-loan'];
+  const tour = JSON.parse(JSON.stringify(readToursFile(join(dir, 'compass.tours.db')))).tours['settle-loan'];
   assert.equal(tour.layout, 'desktop');
   assert.equal(tour.steps.length, 1);
   assert.equal(tour.variants.mobile.length, 2);

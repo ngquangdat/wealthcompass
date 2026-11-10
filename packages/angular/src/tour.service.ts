@@ -7,15 +7,18 @@ import {
   describeLocator,
   isBlockedRoute,
   isUserOnly,
+  lockHover,
   renderLiteMarkdown,
   resolveStep,
   resumeStep,
   routeMatches,
   shouldSkipStep,
+  simulateHover,
   stepsForLayout,
   waitForIdle,
   waitForRoute,
   waitForStep,
+  type HoverLock,
   type StepResolution,
 } from '@wealthcompass/core';
 import { COMPASS_CONFIG } from './compass.config';
@@ -42,6 +45,8 @@ export class TourService {
   private current: Driver | null = null;
   private runId = 0;
   private detachClick: (() => void) | null = null;
+  // Khóa hover đang giữ menu mở (bước hover lồng nhau: menu rồi menu con); nhả khi xong bước không-hover kế tiếp
+  private hoverLocks: HoverLock[] = [];
 
   async start(input: Tour): Promise<TourOutcome> {
     this.stop();
@@ -76,6 +81,8 @@ export class TourService {
         continue;
       }
       const result = await this.runStep(tour, index, run);
+      // Xong mục bên trong menu hover (bước không-hover): nhả khóa để menu đóng lại như bình thường
+      if (tour.steps[index].advanceOn !== 'hover') this.releaseHover();
       if (result === 'cancelled') return this.finish(tour, run, 'cancelled', index);
       if (result === 'missing') return this.finish(tour, run, 'failed', index, 'target_missing');
     }
@@ -86,8 +93,13 @@ export class TourService {
     return this.router.url.split(/[?#]/)[0];
   }
 
+  private releaseHover(): void {
+    for (const lock of this.hoverLocks.splice(0)) lock.release();
+  }
+
   stop(): void {
     this.runId++;
+    this.releaseHover();
     this.teardown();
     this.active.set(null);
   }
@@ -104,6 +116,7 @@ export class TourService {
 
   private finish(tour: Tour, run: number, status: TourOutcome['status'], lastStep: number, reason?: ToolResultStatus): TourOutcome {
     if (run === this.runId) {
+      this.releaseHover();
       this.teardown();
       this.active.set(null);
       this.message.set(
@@ -188,6 +201,8 @@ export class TourService {
     if (!found.confident) return this.showUnanchored(tour, index, run);
 
     const element = found.element;
+    // Phần tử nằm trong menu đang được giữ mở: giữ luôn nó (và menu con chứa nó)
+    for (const lock of this.hoverLocks) lock.hold(element);
     // Phần tử nhạy cảm: giữ nguyên chỉ-highlight; không có nhánh nào can thiệp vào nó
     const sensitive = isUserOnly(element, this.config.safety);
     element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -202,6 +217,21 @@ export class TourService {
       };
 
       const waitsForClick = step.advanceOn === 'click' && !sensitive;
+      // Bước hover: chờ người dùng di chuột vào nút mở menu, rồi khóa hover để menu không đóng khi tour sang mục bên trong
+      const waitsForHover = step.advanceOn === 'hover' && !sensitive;
+      const next = tour.steps[index + 1];
+      let opening = false;
+      const openMenu = async (simulate: boolean) => {
+        if (opening || settled) return;
+        opening = true;
+        if (simulate) simulateHover(element);
+        const lock = lockHover(element);
+        this.hoverLocks.push(lock);
+        // Chờ mục của bước sau hiện ra trong menu rồi giữ nó; không thấy thì vẫn đi tiếp (bước sau tự báo)
+        const inside = next ? await waitForStep(next, 1500) : null;
+        if (inside?.confident) lock.hold(inside.element);
+        settle('next');
+      };
       this.current = driver({
         popoverClass: 'compass-popover',
         overlayColor: '#000',
@@ -219,16 +249,26 @@ export class TourService {
         element,
         popover: {
           title: step.label ?? `Bước ${index + 1}/${tour.steps.length}`,
-          description: renderLiteMarkdown(step.text) + (waitsForClick ? '<br><small>Bấm vào phần được tô sáng để tiếp tục.</small>' : ''),
+          description:
+            renderLiteMarkdown(step.text) +
+            (waitsForClick ? '<br><small>Bấm vào phần được tô sáng để tiếp tục.</small>' : waitsForHover ? '<br><small>Di chuột vào phần được tô sáng để mở menu.</small>' : ''),
           side: 'top',
           align: 'center',
           showButtons: waitsForClick ? ['close'] : ['next', 'close'],
           nextBtnText: isLast ? 'Xong' : 'Tiếp',
-          onNextClick: () => settle('next'),
+          // Bước hover: "Tiếp" mở menu thay người dùng (màn hình cảm ứng không có hover); chỉ là sự kiện hover, không click
+          onNextClick: () => (waitsForHover ? void openMenu(true) : settle('next')),
           onCloseClick: () => settle('cancelled'),
         },
       });
 
+      if (waitsForHover) {
+        const onEnter = () => void openMenu(false);
+        element.addEventListener('mouseenter', onEnter, { once: true });
+        this.detachClick = () => element.removeEventListener('mouseenter', onEnter);
+        // Chuột đã ở sẵn trên phần tử (vừa bấm bước trước ngay tại đó): không có mouseenter mới
+        if (element.matches(':hover')) onEnter();
+      }
       if (waitsForClick) {
         const onClick = () => {
           // Chờ app xử lý click (đổi route, đổi tab) rồi mới sang bước sau

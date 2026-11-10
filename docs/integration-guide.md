@@ -37,19 +37,18 @@ COMPASS_JWT_AUDIENCE=web-dau-tu \
 COMPASS_CAPABILITIES_CLAIM=roles \
 COMPASS_ORIGINS=https://web.congty.vn \
 COMPASS_FEATURE_MAP=/duong/dan/feature-map.json \
-COMPASS_PACK=packs/finance-vn \
 COMPASS_LLM_PROVIDER=deepseek COMPASS_LLM_API_KEY=... \
 npm run server
 ```
 
 | Biến | Ý nghĩa | Mặc định |
 | --- | --- | --- |
-| `COMPASS_MOCK_IDP` | `0` để tắt IdP giả lập (**bắt buộc tắt ngoài demo**) | `1` |
+| `COMPASS_MOCK_IDP` | `1` bật IdP giả lập để thử (**không bật ngoài demo**) | tắt (bật sẵn với web demo trong repo) |
+| `COMPASS_AUTH` | `gateway` (mặc định): đã có API gateway xác minh JWT đứng trước backend; backend chỉ đọc `sub` và quyền trong token, **không kiểm chữ ký**, không cần JWKS. Backend chỉ được nhận yêu cầu đi qua gateway (mạng nội bộ), nếu không ai cũng tự tạo được token. Token thiếu, hỏng, hết hạn vẫn bị từ chối. `jwks`: backend tự xác minh chữ ký bằng JWKS, dùng khi không có gateway | `gateway` |
 | `COMPASS_JWKS_URL`, `COMPASS_JWT_ISSUER`, `COMPASS_JWT_AUDIENCE` | Xác minh chữ ký, nhà phát hành, đối tượng của JWT | trỏ IdP giả lập |
 | `COMPASS_CAPABILITIES_CLAIM` | Tên claim chứa quyền; chấp nhận mảng hoặc chuỗi cách nhau bằng dấu cách/phẩy | `roles` |
 | `COMPASS_ORIGINS` | Origin được gọi (CORS), phân tách bằng dấu phẩy | `localhost:4200` |
 | `COMPASS_FEATURE_MAP` | File Feature Map; tự nạp lại khi file đổi | file của demo |
-| `COMPASS_PACK` | Thư mục Domain Pack | `packs/finance-vn` |
 | `COMPASS_LLM_PROVIDER` | `deepseek` hoặc `gemini` (preset base URL + model + tên biến khóa) | `deepseek` |
 | `COMPASS_LLM_BASE_URL`, `COMPASS_LLM_MODEL`, `COMPASS_LLM_API_KEY` | Ghi đè preset, dùng cho endpoint tương thích OpenAI bất kỳ (vLLM, Ollama on-prem...) | theo preset |
 | `COMPASS_LLM_REASONING_EFFORT` | `low`/`high`/`max` cho mô hình suy luận, `low` nhanh hơn | không đặt |
@@ -84,7 +83,7 @@ Scanner đọc source nên chất lượng câu trả lời phụ thuộc vào m
     title: 'Tài sản trái phiếu iConnect',                 // nên có; thiếu thì lấy nhãn menu
     description: 'Danh mục trái phiếu đang nắm giữ...',   // nên có; mô tả nghiệp vụ, không mô tả kỹ thuật (thiếu thì chạy enrich)
     keywords: ['ban trai phieu', 'danh muc'],            // cách người dùng hay gọi, có thể không dấu
-    facets: { product: 'bond' },                          // tùy chọn, do Domain Pack định nghĩa
+    facets: { product: 'bond' },                          // tùy chọn, nhãn tự do của dự án
     // compassId: 'bond.assets',                          // tùy chọn: cố định id, không đổi khi đổi route
     // hidden: true,                                      // bỏ khỏi trợ lý (trang đăng nhập, trang lỗi...)
   },
@@ -102,7 +101,7 @@ access:
     bondAccountGuard: { requires: [bond_account] }   # tên quyền phải trùng giá trị trong claim của JWT
 ```
 
-Guard chưa ánh xạ sẽ báo cảnh báo và ghi vào `unknownGuards`.
+**Mặc định mọi màn hình chỉ cần đăng nhập.** Bảng `access.guards` là tùy chọn: chỉ khai khi muốn trợ lý không chỉ đường tới màn hình mà người dùng thiếu quyền không vào được. Guard không khai trong bảng không gây cảnh báo (tên guard vẫn ghi vào `unknownGuards` để Studio liệt kê). `setup` không tự ghi quyền nào; chuỗi quyền đọc được trong code guard chỉ là gợi ý trong báo cáo và ở Studio > Quyền.
 
 ## 4. Bước 3: Gắn widget vào web
 
@@ -256,7 +255,6 @@ npm run scan                             # xác nhận scanner thấy các tourI
 `compass.config.yaml` đặt cùng thư mục với `tsconfig.app.json` của web:
 
 ```yaml
-domainPack: finance-vn
 locale: vi
 discovery:
   entry: src/app/app.routes.ts                 # file khai báo mảng Routes gốc
@@ -343,7 +341,7 @@ npm run enrich -- --only iconnect.assets,money.deposit
 Cách hoạt động:
 
 1. Chạy `scan`, tìm các màn hình thiếu `description`, `keywords` hoặc `sampleQuestions`. Chỉ **điền chỗ trống**, không bao giờ đè thứ đã viết (trong `route.data` hay overrides).
-2. Với mỗi màn hình, gửi LLM: tiêu đề, đường dẫn menu, nhóm sản phẩm, **chữ tĩnh trong template** (tiêu đề, nhãn, tên nút, placeholder; bỏ phần nội suy `{{ }}`), phần đã có, danh sách trường cần soạn, và từ điển thuật ngữ của Domain Pack nếu có. Không gửi dữ liệu hiển thị trên màn hình khi chạy; mọi chuỗi qua lọc PII cả chiều gửi và chiều nhận.
+2. Với mỗi màn hình, gửi LLM: tiêu đề, đường dẫn menu, nhóm sản phẩm, **chữ tĩnh trong template** (tiêu đề, nhãn, tên nút, placeholder; bỏ phần nội suy `{{ }}`), phần đã có và danh sách trường cần soạn. Không gửi dữ liệu hiển thị trên màn hình khi chạy; mọi chuỗi qua lọc PII cả chiều gửi và chiều nhận.
 3. Gửi theo lô 6 màn hình mỗi lần. Kết quả được kiểm bằng schema; sai định dạng thì thử lại một lần rồi bỏ qua lô đó.
 4. LLM được dặn: chỉ dùng thông tin trong đầu vào, không bịa tính năng; **nếu đầu vào quá ít thì trả mô tả rỗng**. Màn hình như vậy được báo "không đủ thông tin để soạn" và bỏ qua thay vì đoán.
 5. Ghi vào `compass.overrides.yaml` (giữ nguyên chú thích và phần viết tay), kèm khóa `llmDraft` liệt kê các trường do LLM soạn:
@@ -377,19 +375,14 @@ Kết quả là `feature-map.json` và `compass.lock.json` (giữ `id` ổn đ�
 
 Thêm `?compassTour=<id tour>` vào bất kỳ địa chỉ nào của web (ví dụ `https://web/dashboard?compassTour=tao-don-nghi`): khi trang mở và người dùng đã đăng nhập, widget tự chạy tour đó, rồi bỏ tham số khỏi thanh địa chỉ. Dùng cho nút "Chạy thử" của Studio, link trong email hướng dẫn hoặc trang trợ giúp. Id tour chỉ nhận chữ thường, số và gạch nối; tour không tồn tại thì widget báo lỗi trong khung chat, không làm gì khác. Nếu web chuyển sang trang đăng nhập rồi về trang chủ mà không giữ lại query, tham số sẽ mất: mở lại link sau khi đăng nhập.
 
-## 7. Domain Pack (nội dung theo ngành)
+## 7. Lời dặn cho AI và từ đồng nghĩa
 
-`COMPASS_PACK` trỏ tới một thư mục:
+Domain Pack (thư mục `packs/`, biến `COMPASS_PACK`, khóa `domainPack`, tùy chọn `--pack`, trang Domain Pack của Studio) **đã bỏ**. Còn lại:
 
-| File | Nội dung |
-| --- | --- |
-| `pack.yaml` | Tên, phiên bản, locale |
-| `glossary.yaml` | Nhóm từ đồng nghĩa (CCQ = chứng chỉ quỹ...), dùng mở rộng câu hỏi khi tìm |
-| `topics.yaml` | Mẫu regex (trên văn bản không dấu) cho chủ đề bị chặn **trước khi gọi LLM** |
-| `refusals.vi.md` | Câu từ chối cho từng chủ đề bị chặn, do pháp chế duyệt |
-| `prompt.vi.md` | System prompt của agent |
-
-Web ngành khác: sao chép `packs/finance-vn`, sửa từ điển, chủ đề chặn, mẫu từ chối và prompt. Sau khi sửa luôn chạy lại `npm run test` và thử tay vài câu hỏi để chắc mẫu chặn không chặn nhầm câu hỏi "ở đâu/làm sao" bình thường.
+- **Lời dặn cho AI** là một bản chung cố định trong backend (`server/src/prompt.ts`): chỉ đường tới tính năng, chỉ dựa vào kết quả tra cứu, không thao tác hay nhập mật khẩu/OTP thay người dùng.
+- **Không còn bộ lọc chủ đề chặn trước khi gọi LLM** (trước đây chặn câu xin tư vấn đầu tư, dự đoán giá, nhờ làm hộ bằng mẫu regex và trả câu từ chối soạn sẵn). Mọi câu hỏi đều tới LLM; engine tour vẫn không bao giờ tự bấm, và phần tử nhạy cảm vẫn chỉ được tô sáng.
+- **Từ đồng nghĩa** không còn từ điển chung: thêm cách gọi khác vào `keywords` và `sampleQuestions` của từng màn hình (trang Màn hình của Studio, hoặc `compass.overrides.yaml`).
+- Cấu hình cũ còn `domainPack:` hay `COMPASS_PACK=` vẫn chạy, hai khóa này bị bỏ qua.
 
 ## 8. Kiểm tra sau khi tích hợp
 
@@ -403,7 +396,7 @@ Web ngành khác: sao chép `packs/finance-vn`, sửa từ điển, chủ đề 
 - [ ] Tắt LLM (sai khóa): vẫn trả lời ở chế độ dự phòng, có ghi chú rõ.
 - [ ] Mở trên điện thoại và máy tính; widget không che nút quan trọng của web.
 - [ ] Bộ kiểm thử `compass.eval.yaml` (Studio > Kiểm thử) đạt hit@3 từ 90% trở lên, mọi câu phải chặn đều bị chặn.
-- [ ] Dùng kho tour ở backend thì đặt `COMPASS_ADMIN_TOKEN` (khóa dài, chỉ CI biết) và `COMPASS_TOUR_STORE` trên ổ bền; không đặt khóa thì `/admin/tours` tắt. `tour:verify` chạy trên staging, không trên bản thật (xem `docs/tour-record.md` mục 9b).
+- [ ] Dùng kho tour ở backend thì đặt `COMPASS_ADMIN_TOKEN` (khóa dài, chỉ CI biết); kho tour là file `compass.tours.db` cạnh `feature-map.json` (đổi bằng `COMPASS_TOUR_DB`).
 - [ ] Máy chủ thật **không** đặt `COMPASS_DEBUG`; nếu cần thống kê thì đặt `COMPASS_LOG_FILE` (file JSONL, tự xoay vòng ở 20 MB, chỉ chứa câu hỏi đã che và mã người dùng đã băm).
 
 ## 9. Giới hạn hiện tại của scanner và widget

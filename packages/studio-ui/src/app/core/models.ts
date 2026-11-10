@@ -2,6 +2,10 @@ export interface ProjectSummary {
   path: string;
   name: string;
   angularVersion: string | null;
+  // Dự án tour chưa có source của web (discovery.source: none)
+  noSource?: boolean;
+  // web.url trong compass.config.yaml
+  webUrl?: string | null;
   devPort: number;
   bootstrap: { kind: 'standalone' | 'ngmodule'; root: string } | null;
   routesFile: string | null;
@@ -70,10 +74,22 @@ export interface ProcState {
   exitCode?: number | null;
   port: number;
   available: boolean;
+  // Đang chạy nhưng không do Studio bật (terminal khác): Studio không dừng hay xem log được
+  external?: boolean;
 }
 
 export interface RunState {
-  backend: ProcState & { health: { features?: number; llmConfigured?: boolean; provider?: string; model?: string; pack?: string } | null };
+  // Backend chạy độc lập với Studio; Studio chỉ kết nối tới
+  backend: {
+    running: boolean;
+    port: number;
+    health: { features?: number; storedTours?: number; llmConfigured?: boolean; provider?: string; model?: string; debug?: boolean; tourDb?: string } | null;
+    command: { cwd: string; run: string; withStudio: string } | null;
+    // Kho tour của dự án (Studio ghi vào đây)
+    tourDb: string;
+    // Backend có đọc đúng kho đó không; null khi backend không báo (không chạy debug)
+    sameTourDb: boolean | null;
+  };
   web: ProcState & { url: string };
 }
 
@@ -98,7 +114,10 @@ export interface RoleRow {
 export interface GuardRow {
   name: string;
   requires: string[] | null;
-  status: 'unmapped' | 'draft' | 'reviewed' | 'code' | 'auth' | 'manual';
+  // default: chưa khai, chỉ cần đăng nhập. draft: cấu hình cũ còn quyền đoán từ tên, cần xem lại
+  status: 'default' | 'draft' | 'reviewed' | 'code' | 'auth' | 'manual';
+  // Chuỗi quyền thấy trong code của guard (gợi ý, chưa áp)
+  suggested?: string[];
   evidence: string | null;
   how: string;
   screens: string[];
@@ -127,7 +146,7 @@ export interface TourStep {
   target: string;
   // Mô tả phần tử đã ghi, vd. button "Bán" · app-bond-sell-panel
   element?: string;
-  advanceOn: 'click' | 'next';
+  advanceOn: 'click' | 'next' | 'hover';
   text: string;
   known?: boolean;
   label?: string;
@@ -166,16 +185,6 @@ export interface TourDef {
   errors: string[];
 }
 
-export interface PackState {
-  name: string;
-  dir: string | null;
-  editable: boolean;
-  error?: string;
-  glossary: string[][];
-  topics: Array<{ id: string; patterns: string[]; refusal: string }>;
-  prompt: string;
-}
-
 export interface AssistantMeta {
   backend: { running: boolean; debug: boolean; url: string };
   roles: string[];
@@ -185,14 +194,13 @@ export interface AssistantMeta {
 }
 
 export interface DebugStage {
-  stage: 'guardrail' | 'prefetch' | 'llm' | 'tool' | 'error' | 'done';
+  stage: 'prefetch' | 'llm' | 'tool' | 'error' | 'done';
   data: Record<string, any>;
 }
 
 export interface EvalCase {
   q: string;
   expect: string[];
-  blocked?: boolean;
   roles?: string[];
   draft?: boolean; // AI vừa đề xuất, chưa lưu
 }
@@ -200,7 +208,6 @@ export interface EvalCase {
 export interface EvalRow {
   q: string;
   expect: string[];
-  blocked: boolean;
   rank: number | null;
   pass: boolean;
   reason: string | null;
@@ -209,7 +216,7 @@ export interface EvalRow {
 
 export interface EvalRun {
   at: string;
-  summary: { total: number; hit1: number; hit3: number; mrr: number; blockedOk: number; blockedTotal: number; failed: number };
+  summary: { total: number; hit1: number; hit3: number; mrr: number; failed: number };
   rows: EvalRow[];
 }
 
@@ -222,7 +229,6 @@ export interface LogStats {
   outcomes: { offered: number; answered: number; not_found: number; refused: number; error: number };
   fallback: number;
   latency: { p50: number | null; p95: number | null };
-  byTopic: Record<string, number>;
   notFound: Array<{ q: string; count: number; last: string }>;
   funnel: Array<{ tourId: string; offered: number; started: number; completed: number; cancelled: number; failed: number }>;
   daily: Array<{ day: string; n: number }>;

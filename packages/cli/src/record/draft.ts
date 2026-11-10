@@ -40,7 +40,7 @@ interface StepContext {
   label: string | null;
   hint: string | null;
   screen: string | null;
-  advanceOn: 'click' | 'next';
+  advanceOn: 'click' | 'next' | 'hover';
   sensitive: boolean;
 }
 
@@ -79,7 +79,7 @@ function templateDraft(input: DraftInput, ctx: StepContext[], note?: string): To
     title: input.title ?? (purpose ? purpose.slice(0, 70) : input.id),
     description: purpose,
     steps: ctx.map((c) => ({
-      text: c.advanceOn === 'click' ? `Bấm **${c.label ?? c.key}**.` : `Đây là **${c.label ?? c.key}**. Bạn tự thao tác và xác nhận ở bước này.`,
+      text: c.advanceOn === 'hover' ? `Di chuột vào **${c.label ?? c.key}** để mở menu.` : c.advanceOn === 'click' ? `Bấm **${c.label ?? c.key}**.` : `Đây là **${c.label ?? c.key}**. Bạn tự thao tác và xác nhận ở bước này.`,
     })),
     sampleQuestions: [],
     source: 'template',
@@ -95,6 +95,7 @@ Trường "operatorDescription" là lời mô tả của CHÍNH người đang g
 
 Quy tắc:
 - "steps" có ĐÚNG số phần tử bằng số bước đầu vào, cùng thứ tự. Mỗi "text" 1-2 câu, xưng "bạn", in đậm tên nút/tab bằng **...** (dùng đúng nhãn đầu vào).
+- Bước advanceOn="hover": bảo người dùng DI CHUỘT vào phần tử đó để mở menu (không bấm).
 - Bước advanceOn="click": nói rõ bấm vào đâu và (nếu biết) để làm gì. Bước advanceOn="next" hoặc sensitive=true: chỉ giải thích phần tử đó và nhắc người dùng TỰ nhập, TỰ xác nhận; tuyệt đối không bảo hệ thống hay trợ lý làm hộ.
 - "title": ngắn, dạng việc cần làm ("Bán trái phiếu trên iConnect"). "description": một câu nêu tour dẫn tới đâu.
 - "sampleQuestions": 4-6 câu hỏi người dùng thật sự sẽ gõ để tìm chức năng này; thêm 1-2 câu viết không dấu, ngắn; không câu nào xin tư vấn đầu tư.

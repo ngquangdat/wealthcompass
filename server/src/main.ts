@@ -5,12 +5,10 @@ import { chatRequestSchema } from '@wealthcompass/contracts';
 import { z } from 'zod';
 import { runAgent } from './agent.js';
 import { createAuthHook, type Principal } from './auth.js';
-import { classifyInput } from './guardrails.js';
 import { createEventLog } from './event-log.js';
 import { loadConfig } from './config.js';
 import { FeatureStore } from './feature-store.js';
 import { registerMockIdp } from './idp.js';
-import { loadPack } from './pack.js';
 import { TourStore } from './tour-store.js';
 import { registerTourAdmin } from './tour-admin.js';
 
@@ -19,10 +17,9 @@ const envFlag = process.argv.indexOf('--env-file');
 if (envFlag !== -1 && process.argv[envFlag + 1]) process.loadEnvFile(process.argv[envFlag + 1]);
 
 const config = loadConfig();
-const pack = loadPack(config.packDir);
-const store = new FeatureStore(config.featureMapPath, pack);
+const store = new FeatureStore(config.featureMapPath);
 // Kho tour của backend: tour lưu ở đây thắng tour cùng id trong Feature Map (sửa tour không cần deploy web)
-const tourStore = new TourStore(config.tourStoreDir);
+const tourStore = new TourStore(config.tourDbPath);
 store.useTours(() => tourStore.list().map((t) => tourStore.current(t.id)!).map((v) => ({ tour: v.tour, feature: v.feature })));
 
 const app = Fastify({ logger: { level: 'info' } });
@@ -55,13 +52,15 @@ const log = (entry: Record<string, unknown>) => {
 
 app.get('/v1/health', async () => ({
   ok: true,
-  pack: pack.name,
   features: store.featureMap.features.length,
   tours: store.featureMap.tours.length,
   storedTours: tourStore.list().length,
   llmConfigured: Boolean(config.llm.apiKey),
   provider: config.llm.provider, model: config.llm.model,
+  auth: config.authMode,
   debug: config.debug,
+  // Chỉ báo đường dẫn kho tour khi chạy debug (trên máy dev) để Studio kiểm hai bên có dùng chung một file không
+  ...(config.debug ? { tourDb: config.tourDbPath } : {}),
 }));
 
 // Quyền xem tour = quyền vào tính năng sở hữu tour
@@ -119,7 +118,7 @@ app.post('/v1/chat', { preHandler: authenticate }, async (request, reply) => {
   if (!allowed(principal.id)) return reply.code(429).send({ error: 'rate_limited' });
 
   const signal = openSse(reply);
-  for await (const event of runAgent({ config, store, pack, log }, principal, parsed.data, signal)) {
+  for await (const event of runAgent({ config, store, log }, principal, parsed.data, signal)) {
     if (reply.raw.writableEnded) break;
     reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
   }
@@ -146,7 +145,7 @@ if (config.debug) {
     const parsed = debugBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
     const { text, roles } = parsed.data;
-    return { verdict: classifyInput(text, pack), ...store.explain(text, roles) };
+    return store.explain(text, roles);
   });
 
   app.post('/debug/chat', async (request, reply) => {
@@ -159,7 +158,6 @@ if (config.debug) {
     const deps = {
       config,
       store,
-      pack,
       // Câu hỏi thử trong Studio vẫn ghi nhật ký nhưng gắn nguồn để thống kê tách riêng
       log: (entry: Record<string, unknown>) => log({ ...entry, source: 'studio' }),
       trace: (stage: string, data: Record<string, unknown>) => write({ type: 'debug', stage, data }),
@@ -171,4 +169,5 @@ if (config.debug) {
 }
 
 await app.listen({ port: config.port, host: config.host });
-app.log.info(`WealthCompass server: http://${config.host}:${config.port} (pack ${pack.name}, model ${config.llm.model}, llm ${config.llm.apiKey ? 'ok' : 'THIẾU KHÓA'}${config.debug ? ', DEBUG: /debug/* chỉ nhận từ máy này' : ''}${config.logFile ? `, nhật ký: ${config.logFile}` : ''}${config.adminToken ? ', API quản trị tour: /admin/tours' : ''})`);
+if (config.authMode === 'gateway') app.log.warn('Xác thực: chế độ gateway (mặc định). Backend KHÔNG kiểm chữ ký JWT; chỉ cho yêu cầu đi qua API gateway tới cổng này. Không có gateway thì đặt COMPASS_AUTH=jwks.');
+app.log.info(`WealthCompass server: http://${config.host}:${config.port} (model ${config.llm.model}, llm ${config.llm.apiKey ? 'ok' : 'THIẾU KHÓA'}${config.debug ? ', DEBUG: /debug/* chỉ nhận từ máy này' : ''}${config.logFile ? `, nhật ký: ${config.logFile}` : ''}${config.adminToken ? ', API quản trị tour: /admin/tours' : ''})`);

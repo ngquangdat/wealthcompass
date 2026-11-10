@@ -55,6 +55,9 @@ export const locatorSchema = z.object({
       column: z.string().optional(),
       // Người duyệt có thể ghim một dòng cụ thể: chỉ chọn dòng chứa chữ này (không tự ghi vì có thể là dữ liệu khách)
       rowText: z.string().optional(),
+      // Thứ tự (từ 0) của dòng người ghi đã bấm, tính trong các dòng cùng hình dạng. Lúc chạy chọn đúng dòng thứ i;
+      // danh sách ngắn hơn thì lấy dòng cuối. rowText (nếu có) được ưu tiên hơn.
+      index: z.number().int().min(0).optional(),
     })
     .optional(),
 });
@@ -70,7 +73,9 @@ export const tourStepSchema = z
     text: z.string(),
     // click: chờ người dùng tự bấm vào phần tử rồi mới tiến (engine không bao giờ tự click)
     // next: người dùng bấm nút "Tiếp" của popover
-    advanceOn: z.enum(['next', 'click']).default('next'),
+    // hover: chờ người dùng di chuột vào phần tử (nút mở menu hover trên desktop); engine giữ menu mở (khóa hover)
+    // cho tới khi xong bước không-hover kế tiếp
+    advanceOn: z.enum(['next', 'click', 'hover']).default('next'),
     // Route chứa phần tử; scanner điền từ target. Engine chỉ điều hướng khi phần tử chưa hiện.
     route: z.string().optional(),
     // Tiêu đề ngắn của popover (lấy từ nhãn của target)
@@ -114,7 +119,7 @@ export const tourSchema = z.object({
 });
 export type Tour = z.infer<typeof tourSchema>;
 
-// File tour do `tour:record` ghi (compass.tours.json): dữ liệu nằm cạnh cấu hình, không sửa template.
+// Tour lưu trong kho tour (compass.tours.db): dữ liệu nằm cạnh cấu hình, không sửa template.
 // Scanner gộp vào Feature Map; bước dùng locator không cần tourId tồn tại trong HTML.
 export const recordedTourSchema = z.object({
   title: z.string(),
@@ -122,6 +127,8 @@ export const recordedTourSchema = z.object({
   // Id tính năng đích (tour được đề xuất khi người dùng hỏi về tính năng này)
   feature: z.string().optional(),
   startRoute: z.string(),
+  // Màn hình người ghi đứng lúc dừng (màn hình đích). Khi chưa có source, scanner lấy nó làm màn hình của tính năng đích.
+  endRoute: z.string().optional(),
   // Nháp chưa duyệt: `scan --strict` báo lỗi tới khi người duyệt xóa cờ này
   draft: z.boolean().optional(),
   draftSource: z.enum(['llm', 'template']).optional(),
@@ -242,17 +249,22 @@ export type ToolResultStatus =
 // ---------------------------------------------------------------------------
 
 export const compassConfigSchema = z.object({
-  domainPack: z.string().default('finance-vn'),
   locale: z.string().default('vi'),
   // Địa chỉ backend để `doctor` kiểm tra kết nối (widget dùng apiBaseUrl trong provideCompass)
   backend: z.object({ url: z.string() }).optional(),
+  // Địa chỉ web để ghi/kiểm tour (bắt buộc có ích khi chưa có source: Studio và tour:record lấy làm mặc định)
+  web: z.object({ url: z.string() }).optional(),
   discovery: z.object({
-    entry: z.string(),
+    // angular: quét source Angular (route, menu, template). none: chưa có source, màn hình lấy từ tour đã ghi
+    // và từ `features.<id>.route` trong overrides.
+    source: z.enum(['angular', 'none']).default('angular'),
+    // File route gốc; bắt buộc khi source là angular
+    entry: z.string().optional(),
     menu: z.string().optional(),
     srcRoot: z.string().default('src'),
     overrides: z.string().default('compass.overrides.yaml'),
-    // Tour ghi bằng `tour:record` (dữ liệu, không phải mã nguồn)
-    tours: z.string().default('compass.tours.json'),
+    // Kho tour (file SQLite): tour:record, Studio và backend cùng đọc/ghi file này; commit cùng dự án
+    tours: z.string().default('compass.tours.db'),
     out: z.string().default('feature-map.json'),
   }),
   access: z

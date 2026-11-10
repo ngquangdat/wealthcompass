@@ -14,6 +14,7 @@ import {
   columnOf,
   isAppComponentTag,
   isVisible,
+  rowIndex,
   rowOf,
   rowSignature,
   stripIconText,
@@ -26,9 +27,48 @@ export interface CaptureOptions {
   mobileBreakpoint?: number;
 }
 
-// Lần bấm trúng icon/span bên trong nút: lấy phần tử tương tác gần nhất
+function cursorOf(element: Element): string {
+  try {
+    return getComputedStyle(element).cursor;
+  } catch {
+    return '';
+  }
+}
+
+function shortText(element: Element): string {
+  return cleanText((element as HTMLElement).innerText ?? element.textContent, 200);
+}
+
+// Vùng bấm quá lớn (cả thẻ, cả trang) không phải "một nút": dừng leo ở đây
+const MAX_TARGET_TEXT = 120;
+
+// Phần tử thật sự nhận lần bấm.
+// 1. Thẻ/role tương tác gần nhất (bấm trúng icon/span bên trong nút).
+// 2. Web gắn (click) lên div/span thường (không role, không href): leo lên tổ tiên ngoài cùng còn `cursor: pointer`
+//    (cursor kế thừa xuống con, nên phần tử ngoài cùng là nơi khai báo), miễn vùng đó không quá lớn.
+// 3. Bấm trúng icon/ảnh không có chữ và không có cursor: leo tối đa 4 cấp tới tổ tiên gần nhất có chữ ngắn,
+//    để locator có manh mối tìm lại.
 export function interactiveTarget(element: Element): Element {
-  return element.closest(INTERACTIVE_SELECTOR) ?? element;
+  const semantic = element.closest(INTERACTIVE_SELECTOR);
+  if (semantic) return semantic;
+  if (cursorOf(element) === 'pointer') {
+    let target = element;
+    for (let depth = 0; depth < 6; depth++) {
+      const parent = target.parentElement;
+      if (!parent || parent === document.body || cursorOf(parent) !== 'pointer' || shortText(parent).length > MAX_TARGET_TEXT) break;
+      target = parent;
+    }
+    return target;
+  }
+  if (!shortText(element)) {
+    let scope = element.parentElement;
+    for (let depth = 0; scope && scope !== document.body && depth < 4; depth++, scope = scope.parentElement) {
+      const text = shortText(scope);
+      if (text.length > MAX_TARGET_TEXT) break;
+      if (text) return scope;
+    }
+  }
+  return element;
 }
 
 // Chữ an toàn để ghi: không lấy trong vùng nhạy cảm, không lấy chuỗi toàn số, đã che PII
@@ -142,7 +182,7 @@ function listOf(element: Element): Locator['list'] {
   );
   if (!twin) return undefined;
   const column = columnOf(element);
-  return { row: signature, ...(column ? { column } : {}) };
+  return { row: signature, ...(column ? { column } : {}), index: rowIndex(row) };
 }
 
 export interface VisibleSnapshot {
@@ -168,6 +208,8 @@ export function snapshotVisible(root: ParentNode = document): VisibleSnapshot {
 export function appearedSince(snapshot: VisibleSnapshot | null | undefined, clicked: Element): boolean {
   if (!snapshot || snapshot.path !== location.pathname) return false;
   const element = interactiveTarget(clicked);
+  // Ảnh chụp chỉ gồm thẻ/role tương tác; div/span có (click) không nằm trong đó nên không kết luận được
+  if (!element.matches(INTERACTIVE_SELECTOR)) return false;
   return !snapshot.elements.has(element) && !snapshot.keys.has(quickKey(element));
 }
 

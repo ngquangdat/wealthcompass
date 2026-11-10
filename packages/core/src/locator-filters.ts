@@ -64,7 +64,9 @@ const ICON_SELECTOR = 'mat-icon, .material-icons, .material-icons-outlined, .mat
 
 export function stripIconText(element: Element, text: string): string {
   let out = ` ${text} `;
-  for (const icon of Array.from(element.querySelectorAll(ICON_SELECTOR))) {
+  // Thêm thẻ icon riêng của app (tcbs-icon, app-menu-icon...): tên thẻ kết thúc bằng "-icon"
+  const icons = new Set([...Array.from(element.querySelectorAll(ICON_SELECTOR)), ...Array.from(element.querySelectorAll('*')).filter((e) => /-icon$/i.test(e.tagName))]);
+  for (const icon of icons) {
     const word = (icon.textContent ?? '').trim();
     if (word && /^[a-z0-9_]+$/.test(word)) out = out.replace(` ${word} `, ' ');
   }
@@ -94,6 +96,12 @@ function isRepeated(element: Element): boolean {
   if (!parent || element === document.body || element === document.documentElement) return false;
   const signature = rowSignature(element);
   return Array.from(parent.children).some((c) => c !== element && rowSignature(c) === signature);
+}
+
+// Thứ tự của dòng trong các anh em cùng hình dạng (bỏ qua tiêu đề, dòng ngăn cách chen giữa)
+export function rowIndex(row: Element): number {
+  const signature = rowSignature(row);
+  return Array.from(row.parentElement?.children ?? []).filter((c) => rowSignature(c) === signature).indexOf(row);
 }
 
 // Dòng chứa phần tử: thẻ dòng quen thuộc (tr, [role=row], mat-row...) hoặc tổ tiên gần nhất (≤6 cấp) lặp lại

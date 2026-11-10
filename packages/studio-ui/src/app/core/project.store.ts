@@ -22,7 +22,6 @@ export class ProjectStore {
     const warns = o?.checks.filter((c) => c.status === 'warn').length ?? 0;
     return {
       overview: !p?.integrated ? 'none' : fails ? 'danger' : warns ? 'warning' : 'success',
-      integrate: !p?.integrated ? 'warning' : p.patchPending || !p.installed ? 'warning' : 'success',
       screens: !o?.stats ? 'none' : o.stats.drafts || o.stats.missing ? 'warning' : 'success',
     } as Record<string, 'none' | 'success' | 'warning' | 'danger'>;
   });

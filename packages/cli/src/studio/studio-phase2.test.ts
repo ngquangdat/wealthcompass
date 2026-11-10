@@ -5,6 +5,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { readToursFile } from '../record/write';
 import { setup } from '../setup/setup';
 import { startStudio } from './server';
 
@@ -22,18 +23,18 @@ async function integratedApp(): Promise<string> {
   mkdirSync(tgz, { recursive: true });
   for (const n of ['angular', 'core', 'contracts', 'cli', 'server']) writeFileSync(join(tgz, `wealthcompass-${n}-0.1.0.tgz`), '');
   const result = await setup(
-    { app: dir, pack: 'generic', backendUrl: 'http://localhost:8890', tarballs: tgz, version: '0.1.0', llm: null, aiCode: false, annotate: null, force: false, today: '2026-10-03' },
+    { app: dir, backendUrl: 'http://localhost:8890', tarballs: tgz, version: '0.1.0', llm: null, aiCode: false, annotate: null, force: false, today: '2026-10-03' },
     () => undefined,
   );
   git('apply', result.patchFile!);
   return dir;
 }
 
-function client(port: number, token: string) {
+function client(port: number) {
   return (method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> =>
     new Promise((ok, fail) => {
       const data = body === undefined ? undefined : JSON.stringify(body);
-      const headers: Record<string, string> = { Host: `127.0.0.1:${port}`, 'X-Studio-Token': token };
+      const headers: Record<string, string> = { Host: `127.0.0.1:${port}` };
       if (data) headers['Content-Type'] = 'application/json';
       const req = request({ host: '127.0.0.1', port, path, method, headers }, (res) => {
         let text = '';
@@ -46,16 +47,16 @@ function client(port: number, token: string) {
     });
 }
 
-test('Studio đợt 2: quyền, gắn tourId, tour, domain pack qua API', async () => {
+test('Studio đợt 2: quyền, gắn tourId, tour qua API', async () => {
   const dir = await integratedApp();
   const port = 5440 + Math.floor(Math.random() * 50);
-  const { url, close } = await startStudio({ port, tarballs: null, open: dir });
-  const api = client(port, new URL(url).searchParams.get('t')!);
+  const { close } = await startStudio({ port, tarballs: null, open: dir });
+  const api = client(port);
   try {
-    // --- Quyền: guard đoán từ tên là nháp; duyệt xong ghi chú "đã duyệt"
-    let guards = (await api('GET', '/api/guards')).json as Array<{ name: string; status: string; requires: string[] }>;
-    assert.equal(guards.find((g) => g.name === 'reportsGuard')?.status, 'draft');
-    assert.equal(guards.find((g) => g.name === 'adminGuard')?.status, 'code');
+    // --- Quyền: mặc định chỉ cần đăng nhập (không guard nào được tự gán quyền); chuỗi quyền trong code chỉ là gợi ý; khai xong ghi chú "đã duyệt"
+    let guards = (await api('GET', '/api/guards')).json as Array<{ name: string; status: string; requires: string[] | null; suggested: string[] }>;
+    assert.deepEqual([guards.find((g) => g.name === 'reportsGuard')?.status, guards.find((g) => g.name === 'reportsGuard')?.requires], ['default', null]);
+    assert.deepEqual([guards.find((g) => g.name === 'adminGuard')?.status, guards.find((g) => g.name === 'adminGuard')?.suggested], ['default', ['shop_admin']]);
     assert.equal((await api('PUT', '/api/guards/reportsGuard', { requires: ['bad role!'] })).status, 400);
     assert.equal((await api('PUT', '/api/guards/reportsGuard', { requires: ['reports_viewer', 'reports_viewer'] })).status, 200);
     guards = (await api('GET', '/api/guards')).json;
@@ -99,25 +100,6 @@ test('Studio đợt 2: quyền, gắn tourId, tour, domain pack qua API', async 
     assert.equal((await api('DELETE', '/api/tours/huy-don')).status, 200);
     tours = (await api('GET', '/api/tours')).json;
     assert.equal(tours.tours.length, 0);
-
-    // --- Domain Pack: pack đóng kèm chỉ xem; tạo bản riêng (đường dẫn tương đối) rồi sửa và thử
-    let pack = (await api('GET', '/api/pack')).json as { editable: boolean; glossary: string[][] };
-    assert.equal(pack.editable, false);
-    assert.equal((await api('PUT', '/api/pack', { prompt: 'x' })).status, 400);
-    pack = (await api('POST', '/api/pack/fork')).json;
-    assert.equal(pack.editable, true);
-    assert.ok(existsSync(join(dir, 'compass-pack', 'pack.yaml')));
-    assert.match(readFileSync(join(dir, 'compass.config.yaml'), 'utf8'), /domainPack: \.\/compass-pack/);
-    if (existsSync(join(dir, 'wealthcompass.env'))) assert.match(readFileSync(join(dir, 'wealthcompass.env'), 'utf8'), /^COMPASS_PACK=\.\/compass-pack$/m);
-    const put = await api('PUT', '/api/pack', { glossary: [...pack.glossary, ['trả hàng', 'hoàn hàng', 'refund'], ['một mình']] });
-    assert.equal(put.status, 200);
-    assert.equal(put.json.glossary.length, pack.glossary.length + 1, 'nhóm chỉ có một từ bị bỏ');
-    assert.equal((await api('PUT', '/api/pack', { topics: [{ id: 'x', patterns: ['('], refusal: 'r' }] })).status, 400, 'mẫu regex hỏng');
-    const tried = (await api('POST', '/api/pack/test', { text: 'Muốn hoàn hàng thì làm sao' })).json as { blocked: unknown; expansions: string[][] };
-    assert.equal(tried.blocked, null);
-    assert.ok(tried.expansions.some((g) => g.includes('refund')));
-    const blocked = (await api('POST', '/api/pack/test', { text: 'nhập mật khẩu giúp mình' })).json as { blocked: { topic: string } | null };
-    assert.equal(blocked.blocked?.topic, 'act_on_behalf');
   } finally {
     await close();
   }
@@ -126,8 +108,8 @@ test('Studio đợt 2: quyền, gắn tourId, tour, domain pack qua API', async 
 test('Studio: ghi đè quyền cho riêng màn hình, bỏ ghi đè quay về guard; API chỉ nhận trường sửa được', async () => {
   const dir = await integratedApp();
   const port = 5500 + Math.floor(Math.random() * 50);
-  const { url, close } = await startStudio({ port, tarballs: null, open: dir });
-  const api = client(port, new URL(url).searchParams.get('t')!);
+  const { close } = await startStudio({ port, tarballs: null, open: dir });
+  const api = client(port);
   try {
     type Row = { id: string; requires: string[]; guardRequires: string[]; guards: string[]; requiresOverride: boolean };
     const row = async (id: string) => ((await api('GET', '/api/features')).json as Row[]).find((r) => r.id === id)!;
@@ -153,11 +135,14 @@ test('Studio: ghi đè quyền cho riêng màn hình, bỏ ghi đè quay về gu
 test('Studio: danh mục quyền — thêm có mô tả, liệt kê cả quyền đang dùng chưa khai, không xóa quyền đang dùng', async () => {
   const dir = await integratedApp();
   const port = 5550 + Math.floor(Math.random() * 50);
-  const { url, close } = await startStudio({ port, tarballs: null, open: dir });
-  const api = client(port, new URL(url).searchParams.get('t')!);
+  const { close } = await startStudio({ port, tarballs: null, open: dir });
+  const api = client(port);
   try {
     type Role = { name: string; description: string; inCatalog: boolean; guards: string[]; screens: string[] };
     const roles = async () => (await api('GET', '/api/roles')).json as Role[];
+    // Setup không tự gán quyền (mặc định chỉ cần đăng nhập): người vận hành khai quyền cho guard
+    assert.equal((await roles()).some((r) => r.name === 'shop_admin'), false);
+    assert.equal((await api('PUT', '/api/guards/adminGuard', { requires: ['shop_admin'] })).status, 200);
     const used = (await roles()).find((r) => r.name === 'shop_admin')!;
     assert.deepEqual([used.inCatalog, used.guards], [false, ['adminGuard']], 'quyền của guard hiện dù chưa khai');
 
@@ -198,8 +183,8 @@ test('Studio: đề xuất sửa locator của tour:verify hiện ở danh sách
     }),
   );
   const port = 5600 + Math.floor(Math.random() * 50);
-  const { url, close } = await startStudio({ port, tarballs: null, open: dir });
-  const api = client(port, new URL(url).searchParams.get('t')!);
+  const { close } = await startStudio({ port, tarballs: null, open: dir });
+  const api = client(port);
   try {
     const find = async () => ((await api('GET', '/api/tours')).json.tours as Array<{ id: string; steps: Array<{ key: string; healedAt?: string }>; proposals: Array<{ key: string; layout: string; from: string; to: string; changed: string[] }> }>).find((t) => t.id === 'huy-don-loc')!;
     let tour = await find();
@@ -213,7 +198,8 @@ test('Studio: đề xuất sửa locator của tour:verify hiện ở danh sách
     assert.equal(tour.steps[0].healedAt, '2026-11-01');
 
     assert.equal((await api('POST', '/api/tours/huy-don-loc/steps/s2/proposal', { approve: true })).status, 200);
-    const file = JSON.parse(readFileSync(join(dir, 'compass.tours.json'), 'utf8')).tours['huy-don-loc'];
+    const file = JSON.parse(JSON.stringify(readToursFile(join(dir, 'compass.tours.db')))).tours['huy-don-loc'];
+    assert.equal(existsSync(join(dir, 'compass.tours.json')), false, 'file JSON của bản trước đã được chuyển vào kho SQLite');
     assert.equal(file.steps[1].locator.name, 'Hủy đơn');
     assert.equal(file.steps[1].proposal, undefined);
     assert.equal(file.steps[1].text, 'Bấm **Hủy**.');

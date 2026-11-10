@@ -1,4 +1,3 @@
-import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Layout } from '@wealthcompass/contracts';
 import { describeLocator, isUsableLocator } from '@wealthcompass/core';
@@ -6,7 +5,7 @@ import { loadConfig, scan } from '../scan';
 import { mainLayout, replaceStep, stepsOf } from '../verify/heal';
 import { recordSession, type RecordedStep } from './recorder';
 import { loadFeatureMap, matchRoutePattern } from './run';
-import { readToursFile } from './write';
+import { readToursFile, writeTours } from './write';
 
 export interface RerecordOptions {
   config: string;
@@ -36,9 +35,9 @@ export function applyRerecord(opts: RerecordOptions, step: RecordedStep, log: (m
     route: matchRoutePattern(featureMap, step.route) ?? step.route,
     today: opts.today ?? new Date().toISOString().slice(0, 10),
   });
-  writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+  writeTours(file, data, 'tour:rerecord', `Ghi lại bước ${opts.key} của ${opts.id}`);
   log(`Đã thay phần tử của bước ${opts.key}: ${next.tourId ?? (next.locator ? describeLocator(next.locator) : '')}${step.userOnly ? ' (nhạy cảm: chỉ tô sáng)' : ''}`);
-  const ok = scan(opts.config).featureMap.tours.some((t) => t.id === opts.id);
+  const ok = scan(opts.config, { useIndex: true }).featureMap.tours.some((t) => t.id === opts.id);
   log(ok ? `✔ scan: tour "${opts.id}" hợp lệ.` : `✘ scan: tour "${opts.id}" bị loại.`);
 }
 

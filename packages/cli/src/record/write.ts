@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { Document, YAMLMap, YAMLSeq, isMap, isSeq, parseDocument } from 'yaml';
-import { toursFileSchema, type Layout, type Locator, type RecordedTour, type ToursFile, type TourStep } from '@wealthcompass/contracts';
+import { TourDb } from '@wealthcompass/tourdb';
+import { type Layout, type Locator, type RecordedTour, type ToursFile, type TourStep } from '@wealthcompass/contracts';
 import type { RecordedStep } from './recorder';
 import type { TourDraft } from './draft';
 
@@ -97,6 +98,8 @@ export interface ToursMergeInput {
   // Bước đã lọc (có tourId hoặc locator dùng được); route đã đổi sang mẫu route của tính năng nếu khớp
   steps: Array<RecordedStep & { routePattern?: string }>;
   startRoute: string;
+  // Màn hình lúc dừng ghi (chỉ ghi vào file khi chưa có source, để scanner dựng màn hình đích)
+  endRoute?: string;
   featureId?: string;
   purpose?: string;
   // Bố cục lúc ghi (theo bề rộng khung nhìn)
@@ -105,15 +108,14 @@ export interface ToursMergeInput {
   today?: string;
 }
 
+// Mọi tour (phiên bản hiện tại) trong kho tour SQLite của dự án. `file` là đường dẫn kho (discovery.tours).
 export function readToursFile(file: string): ToursFile {
-  if (!existsSync(file)) return { tours: {} };
-  const raw = readFileSync(file, 'utf8');
-  if (!raw.trim()) return { tours: {} };
-  try {
-    return toursFileSchema.parse(JSON.parse(raw));
-  } catch (e) {
-    throw new Error(`${file} không hợp lệ: ${e instanceof Error ? e.message : String(e)}`);
-  }
+  return new TourDb(file).all();
+}
+
+// Ghi lại tập tour vào kho: tour đổi nội dung thành một phiên bản mới, tour không còn trong tập bị xóa
+export function writeTours(file: string, data: ToursFile, by: string, note?: string): void {
+  new TourDb(file).replaceAll(data, by, note);
 }
 
 // Bố cục của một lần ghi: bố cục ghi trên đa số locator (mỗi locator ghi bề rộng khung nhìn lúc bấm)
@@ -161,6 +163,7 @@ export function mergeTourIntoToursFile(file: string, input: ToursMergeInput): { 
     ...(input.draft.description ? { description: input.draft.description } : {}),
     ...(input.featureId ? { feature: input.featureId } : {}),
     startRoute: input.startRoute,
+    ...(input.endRoute ? { endRoute: input.endRoute } : {}),
     draft: true,
     draftSource: input.draft.source,
     recordedAt,

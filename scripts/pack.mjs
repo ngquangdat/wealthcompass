@@ -106,7 +106,6 @@ async function buildBin(dir, { name, entry, bin }) {
     sourcemap: true,
     logLevel: 'warning',
   });
-  cpSync(join(root, 'packs'), join(dest, 'packs'), { recursive: true });
   // CLI kèm giao diện Studio đã build (phục vụ bởi lệnh `wealthcompass studio`)
   if (name === 'cli') {
     run('npm', ['run', 'build', '-w', 'studio-ui', '--silent']);
@@ -118,7 +117,7 @@ async function buildBin(dir, { name, entry, bin }) {
     version: VERSION,
     type: 'module',
     bin: { [bin]: `./bin/${bin}.mjs` },
-    files: name === 'cli' ? ['bin', 'packs', 'studio-ui'] : ['bin', 'packs'],
+    files: name === 'cli' ? ['bin', 'studio-ui'] : ['bin'],
     engines: { node: '>=20' },
     dependencies: deps,
   });

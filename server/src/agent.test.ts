@@ -4,12 +4,10 @@ import type { ChatEvent, ChatRequest } from '@wealthcompass/contracts';
 import { runAgent, type AgentDeps } from './agent.js';
 import { loadConfig } from './config.js';
 import { FeatureStore } from './feature-store.js';
-import { loadPack } from './pack.js';
 import { startMockLlm, type MockTurn } from './test/mock-llm.js';
 
 const base = loadConfig();
-const pack = loadPack(base.packDir);
-const store = new FeatureStore(base.featureMapPath, pack);
+const store = new FeatureStore(base.featureMapPath);
 
 const request = (message: string): ChatRequest => ({
   message,
@@ -19,7 +17,7 @@ const request = (message: string): ChatRequest => ({
 
 async function run(script: MockTurn[], message: string, roles = ['bond_account']) {
   const llm = await startMockLlm(script);
-  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store, pack, log: () => undefined };
+  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store, log: () => undefined };
   const events: ChatEvent[] = [];
   for await (const e of runAgent(deps, { id: 't', name: 't', roles }, request(message), new AbortController().signal)) events.push(e);
   await llm.close();
@@ -51,21 +49,10 @@ test('thiếu quyền trái phiếu: không phát nút tour dù LLM gọi', asyn
   assert.equal(events.some((e) => e.type === 'offer_tour'), false);
 });
 
-test('câu hỏi tư vấn đầu tư bị chặn trước khi gọi LLM', async () => {
-  const { events, llm } = await run([{ text: 'không được gọi' }], 'Có nên mua trái phiếu VHM12607 không?');
-  assert.equal(events[0].type, 'refusal');
-  assert.equal(llm.requests.length, 0);
-});
-
 test('"đặt lệnh bán ở đâu" không bị chặn nhầm là nhờ đặt hộ', async () => {
   const { events, llm } = await run([{ text: 'Vào tab Tài sản.' }], 'Đặt lệnh bán trái phiếu ở đâu?');
   assert.notEqual(events[0].type, 'refusal');
   assert.equal(llm.requests.length, 1);
-});
-
-test('nhờ đặt lệnh hộ bị từ chối', async () => {
-  const { events } = await run([{ text: 'x' }], 'Đặt giúp tôi lệnh bán trái phiếu');
-  assert.equal(events[0].type, 'refusal');
 });
 
 test('PII bị che trước khi gửi LLM', async () => {
@@ -76,7 +63,7 @@ test('PII bị che trước khi gửi LLM', async () => {
 });
 
 test('LLM lỗi: chuyển sang trả lời dự phòng từ bản đồ tính năng, vẫn có nút tour', async () => {
-  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: 'http://127.0.0.1:1', apiKey: 'x', model: 'm' } }, store, pack, log: () => undefined };
+  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: 'http://127.0.0.1:1', apiKey: 'x', model: 'm' } }, store, log: () => undefined };
   const events: ChatEvent[] = [];
   for await (const e of runAgent(deps, { id: 't', name: 't', roles: ['bond_account'] }, request('bán trái phiếu ở đâu'), new AbortController().signal)) events.push(e);
   assert.match(text(events), /Tài sản trái phiếu/);
@@ -86,7 +73,7 @@ test('LLM lỗi: chuyển sang trả lời dự phòng từ bản đồ tính n�
 });
 
 test('dự phòng: tài khoản thiếu quyền trái phiếu được giải thích, không bị dẫn sang màn hình khác', async () => {
-  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: 'http://127.0.0.1:1', apiKey: 'x', model: 'm' } }, store, pack, log: () => undefined };
+  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: 'http://127.0.0.1:1', apiKey: 'x', model: 'm' } }, store, log: () => undefined };
   const events: ChatEvent[] = [];
   for await (const e of runAgent(deps, { id: 't', name: 't', roles: ['stock_account'] }, request('bán trái phiếu ở đâu'), new AbortController().signal)) events.push(e);
   assert.match(text(events), /cần quyền bond_account/);
@@ -110,13 +97,12 @@ test('debug: trace đủ các bước, nhật ký ghi kết quả; explain trả
   const deps: AgentDeps = {
     config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } },
     store,
-    pack,
     log: (e) => logs.push(e),
     trace: (stage) => stages.push(stage),
   };
   for await (const _ of runAgent(deps, { id: 't', name: 't', roles: ['bond_account'] }, request('Bán trái phiếu ở đâu?'), new AbortController().signal));
   await llm.close();
-  assert.deepEqual(stages, ['guardrail', 'prefetch', 'llm', 'tool', 'llm', 'done']);
+  assert.deepEqual(stages, ['prefetch', 'llm', 'tool', 'llm', 'done']);
   const chat = logs.find((e) => e['event'] === 'chat')!;
   assert.equal(chat['outcome'], 'offered');
   assert.deepEqual(chat['offered'], ['sell-bond', 'iconnect.assets']);
@@ -130,7 +116,7 @@ test('debug: trace đủ các bước, nhật ký ghi kết quả; explain trả
 test('nhật ký: AI chuyển hỗ trợ mà không có nút thì tính là không tìm thấy', async () => {
   const llm = await startMockLlm([{ toolCalls: [{ name: 'handoff_support', args: {} }] }, { text: 'Mình chưa thấy tính năng này trên web.' }]);
   const logs: Array<Record<string, unknown>> = [];
-  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store, pack, log: (e) => logs.push(e) };
+  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store, log: (e) => logs.push(e) };
   for await (const _ of runAgent(deps, { id: 't', name: 't', roles: [] }, request('Đăng ký bảo hiểm trái phiếu ở đâu?'), new AbortController().signal));
   await llm.close();
   const chat = logs.find((e) => e['event'] === 'chat')!;
@@ -139,7 +125,7 @@ test('nhật ký: AI chuyển hỗ trợ mà không có nút thì tính là khô
 
 test('đang ở đúng màn hình đích: vẫn có nút tour, không có nút "Mở thẳng" tới chính màn hình đó', async () => {
   const llm = await startMockLlm([{ toolCalls: [{ name: 'offer_tour', args: { tour_id: 'sell-bond' } }, { name: 'offer_navigate', args: { feature_id: 'iconnect.assets' } }] }, { text: 'Bấm CHỌN BÁN ở dòng trái phiếu.' }]);
-  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store, pack, log: () => undefined };
+  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store, log: () => undefined };
   const req = { ...request('Bán trái phiếu ở đâu?'), context: { route: '/iconnect/assets?tab=1', visibleTargets: [], locale: 'vi', capabilities: [] } };
   const events: ChatEvent[] = [];
   for await (const e of runAgent(deps, { id: 't', name: 't', roles: ['bond_account'] }, req, new AbortController().signal)) events.push(e);
@@ -162,9 +148,9 @@ test('tour chỉ có locator (web chưa gắn tourId): vẫn được đề xu�
   map.features.find((f) => f.id === 'iconnect.assets')!.tourIds.push('sell-bond-loc');
   const file = join(mkdtempSync(join(tmpdir(), 'compass-agent-')), 'feature-map.json');
   writeFileSync(file, JSON.stringify(map));
-  const locStore = new FeatureStore(file, pack);
+  const locStore = new FeatureStore(file);
   const llm = await startMockLlm([{ toolCalls: [{ name: 'offer_tour', args: { tour_id: 'sell-bond-loc' } }] }, { text: 'Bấm nút bên dưới.' }]);
-  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store: locStore, pack, log: () => undefined };
+  const deps: AgentDeps = { config: { ...base, llm: { provider: 'mock', baseUrl: llm.url, apiKey: 'test', model: 'mock' } }, store: locStore, log: () => undefined };
   const collect = async (roles: string[]) => {
     const events: ChatEvent[] = [];
     for await (const e of runAgent(deps, { id: 't', name: 't', roles }, request('bán trái phiếu'), new AbortController().signal)) events.push(e);

@@ -4,14 +4,14 @@ import type { FastifyInstance } from 'fastify';
 import { YAMLMap, isMap, isScalar } from 'yaml';
 import { z } from 'zod';
 import { describeLocator, normalizeVi, redactPii } from '@wealthcompass/core';
-import { completeText, resolvePackDir } from '@wealthcompass/llm';
+import { completeText } from '@wealthcompass/llm';
 import { annotate, annotationEdits, type AnnotateResult, type Candidate } from '../annotate';
 import { buildGitPatch } from '../codemod';
 import { loadConfig } from '../scan';
 import { analyzeGuards, refineGuardsWithLlm } from '../setup/guards';
 import { finishRecording } from '../record/run';
 import { recordSession } from '../record/recorder';
-import { layoutOfSteps, readToursFile } from '../record/write';
+import { layoutOfSteps, readToursFile, writeTours } from '../record/write';
 import { rerecordStep } from '../record/rerecord';
 import { mainLayout, resolveProposal } from '../verify/heal';
 import { verifyTours } from '../verify/verify';
@@ -20,7 +20,7 @@ import { updateEnvFile } from './env-file';
 import { readOverrides } from './overrides-edit';
 import { cachedScan, configPath, httpError, invalidateScan, llm, loadDoc, parseJson, patchFile, requireApp, state, stream } from './context';
 
-// Đợt 2 của Studio: quyền, gắn tourId (có AI), tour, Domain Pack
+// Đợt 2 của Studio: quyền, gắn tourId (có AI), tour
 
 const today = () => new Date().toISOString().slice(0, 10);
 const ROLE = /^[\w:.-]{1,60}$/;
@@ -45,7 +45,7 @@ export function registerPhase2(app: FastifyInstance): void {
   // ======================= Quyền (guard) =======================
   app.get('/api/guards', async () => {
     const dir = requireApp();
-    const scanned = cachedScan(dir);
+    const scanned = cachedScan(dir, true);
     const titles = new Map(scanned.featureMap.features.map((f) => [f.id, f.title]));
     const usage = new Map<string, string[]>();
     for (const ctx of Object.values(scanned.contexts)) {
@@ -66,8 +66,9 @@ export function registerPhase2(app: FastifyInstance): void {
     return names.map((name) => {
       const c = configured.get(name);
       const a = analysis.get(name);
-      const status = !c ? 'unmapped' : /DRAFT/.test(c.comment) ? 'draft' : /đã duyệt/i.test(c.comment) ? 'reviewed' : a?.how === 'code' ? 'code' : a?.how === 'auth' ? 'auth' : 'manual';
-      return { name, requires: c?.requires ?? null, status, evidence: a?.evidence ?? null, how: a?.how ?? 'unknown', screens: (usage.get(name) ?? []).sort() };
+      // Chưa khai: chỉ cần đăng nhập (mặc định). `suggested`: chuỗi quyền thấy trong code, chỉ để gợi ý khi người sửa.
+      const status = !c ? 'default' : /DRAFT/.test(c.comment) ? 'draft' : /đã duyệt/i.test(c.comment) ? 'reviewed' : a?.how === 'code' ? 'code' : a?.how === 'auth' ? 'auth' : 'manual';
+      return { name, requires: c?.requires ?? null, status, evidence: a?.evidence ?? null, how: a?.how ?? 'default', suggested: a?.how === 'code' ? a.requires : [], screens: (usage.get(name) ?? []).sort() };
     });
   });
 
@@ -152,8 +153,8 @@ export function registerPhase2(app: FastifyInstance): void {
     const c = llm();
     if (!c.apiKey) throw httpError(400, 'Chưa có khóa AI');
     await stream(reply, async (log) => {
-      const scanned = cachedScan(dir);
-      const [g] = await refineGuardsWithLlm(scanned.project, [{ name, requires: [], how: 'name' }], c, log);
+      const scanned = cachedScan(dir, true);
+      const [g] = await refineGuardsWithLlm(scanned.project, [{ name, requires: [], how: 'default' }], c, log);
       return { requires: g.requires, evidence: g.evidence, fromAi: g.how === 'llm' };
     });
   });
@@ -389,7 +390,7 @@ export function registerPhase2(app: FastifyInstance): void {
         description: z.string().optional(),
         feature: z.string().optional(),
         startRoute: z.string().startsWith('/'),
-        steps: z.array(z.object({ key: z.string().optional(), target: z.string().default(''), advanceOn: z.enum(['click', 'next']).default('next'), text: z.string().min(1) })).min(1),
+        steps: z.array(z.object({ key: z.string().optional(), target: z.string().default(''), advanceOn: z.enum(['click', 'next', 'hover']).default('next'), text: z.string().min(1) })).min(1),
       })
       .parse(req.body);
 
@@ -425,7 +426,7 @@ export function registerPhase2(app: FastifyInstance): void {
         startRoute: body.startRoute,
         steps,
       };
-      writeFileSync(recordedFile, JSON.stringify(recorded, null, 2) + '\n');
+      writeTours(recordedFile, recorded, 'studio');
       invalidateScan();
       return { ok: true };
     }
@@ -440,7 +441,7 @@ export function registerPhase2(app: FastifyInstance): void {
       ...(body.description?.trim() ? { description: body.description.trim() } : {}),
       ...(body.feature ? { feature: body.feature } : {}),
       startRoute: body.startRoute,
-      steps: body.steps.map((s) => ({ target: s.target, ...(s.advanceOn === 'click' ? { advanceOn: 'click' } : {}), text: s.text.trim() })),
+      steps: body.steps.map((s) => ({ target: s.target, ...(s.advanceOn !== 'next' ? { advanceOn: s.advanceOn } : {}), text: s.text.trim() })),
     };
     // Lưu từ Studio = người đã duyệt: tạo lại nút, bỏ chú thích DRAFT của bản ghi tự động
     doc.setIn(['tours', id], doc.createNode(data));
@@ -460,7 +461,7 @@ export function registerPhase2(app: FastifyInstance): void {
     const recorded = readToursFile(recordedFile);
     if (recorded.tours[id]) {
       delete recorded.tours[id];
-      writeFileSync(recordedFile, JSON.stringify(recorded, null, 2) + '\n');
+      writeTours(recordedFile, recorded, 'studio');
     }
     invalidateScan();
     return { ok: true };
@@ -530,7 +531,7 @@ export function registerPhase2(app: FastifyInstance): void {
     } catch (e) {
       throw httpError(400, (e as Error).message);
     }
-    writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+    writeTours(file, data, 'studio', `Duyệt đề xuất locator của ${id}/${key}`);
     invalidateScan();
     return { ok: true };
   });
@@ -549,112 +550,8 @@ export function registerPhase2(app: FastifyInstance): void {
       return { id, key };
     });
   });
-
-  // ======================= Domain Pack =======================
-  app.get('/api/pack', async () => {
-    const dir = requireApp();
-    const { config, root } = loadConfig(configPath(dir));
-    const packDir = resolvePackDir(config.domainPack, root);
-    if (!packDir) return { name: config.domainPack, dir: null, editable: false, error: `Không tìm thấy pack "${config.domainPack}"` };
-    return readPack(dir, config.domainPack, packDir);
-  });
-
-  // Tạo bản riêng của pack trong dự án để sửa (pack đóng kèm gói thì không sửa trực tiếp)
-  app.post('/api/pack/fork', async () => {
-    const dir = requireApp();
-    const { config, root } = loadConfig(configPath(dir));
-    const source = resolvePackDir(config.domainPack, root);
-    if (!source) throw httpError(400, `Không tìm thấy pack "${config.domainPack}"`);
-    const target = join(dir, 'compass-pack');
-    if (existsSync(target)) throw httpError(400, 'Đã có thư mục compass-pack trong dự án');
-    cpSync(source, target, { recursive: true });
-    const doc = loadDoc(configPath(dir));
-    doc.set('domainPack', './compass-pack');
-    writeFileSync(configPath(dir), String(doc));
-    if (existsSync(join(dir, 'wealthcompass.env'))) updateEnvFile(join(dir, 'wealthcompass.env'), { COMPASS_PACK: './compass-pack' });
-    invalidateScan();
-    return readPack(dir, './compass-pack', target);
-  });
-
-  app.put('/api/pack', async (req) => {
-    const dir = requireApp();
-    const { config, root } = loadConfig(configPath(dir));
-    const packDir = resolvePackDir(config.domainPack, root);
-    if (!packDir || !isOwnPack(packDir, dir)) throw httpError(400, 'Chỉ sửa được pack riêng của dự án; hãy tạo bản riêng trước');
-    const body = req.body as { glossary?: string[][]; topics?: Array<{ id: string; patterns: string[]; refusal: string }>; prompt?: string };
-    if (body.glossary) {
-      const groups = body.glossary.map((g) => [...new Set(g.map((t) => t.trim()).filter(Boolean))]).filter((g) => g.length >= 2);
-      const doc = loadDoc(join(packDir, 'glossary.yaml'));
-      doc.set('groups', doc.createNode(groups.map((g) => Object.assign(doc.createNode(g), { flow: true }))));
-      writeFileSync(join(packDir, 'glossary.yaml'), String(doc));
-    }
-    if (body.topics) {
-      for (const t of body.topics) {
-        if (!/^[a-z_]{2,40}$/.test(t.id)) throw httpError(400, `Id chủ đề không hợp lệ: ${t.id}`);
-        for (const p of t.patterns) {
-          try {
-            new RegExp(p);
-          } catch {
-            throw httpError(400, `Mẫu không hợp lệ ở chủ đề ${t.id}: ${p}`);
-          }
-        }
-      }
-      const doc = loadDoc(join(packDir, 'topics.yaml'));
-      doc.set('topics', doc.createNode(body.topics.map((t) => ({ id: t.id, refusal: t.id, patterns: t.patterns.filter((p) => p.trim()) }))));
-      writeFileSync(join(packDir, 'topics.yaml'), String(doc));
-      writeFileSync(join(packDir, 'refusals.vi.md'), body.topics.map((t) => `## ${t.id}\n${t.refusal.trim()}\n`).join('\n'));
-    }
-    if (typeof body.prompt === 'string' && body.prompt.trim()) writeFileSync(join(packDir, 'prompt.vi.md'), body.prompt.trim() + '\n');
-    return readPack(dir, config.domainPack, packDir);
-  });
-
-  // Thử một câu: có bị chặn không, từ điển mở rộng thế nào
-  app.post('/api/pack/test', async (req) => {
-    const dir = requireApp();
-    const { text } = req.body as { text: string };
-    const { config, root } = loadConfig(configPath(dir));
-    const packDir = resolvePackDir(config.domainPack, root);
-    if (!packDir) throw httpError(400, 'Không tìm thấy pack');
-    const pack = readPack(dir, config.domainPack, packDir);
-    const normalized = normalizeVi(text);
-    let blocked: { topic: string; pattern: string; refusal: string } | null = null;
-    for (const t of pack.topics) {
-      const hit = t.patterns.find((p) => new RegExp(p).test(normalized));
-      if (hit) {
-        blocked = { topic: t.id, pattern: hit, refusal: t.refusal };
-        break;
-      }
-    }
-    const expansions = pack.glossary.filter((g) => g.some((phrase) => ` ${normalized} `.includes(` ${normalizeVi(phrase)} `)));
-    return { normalized, blocked, expansions };
-  });
 }
 
-// Pack riêng = nằm trong dự án nhưng không phải pack đóng kèm gói trong node_modules
-function isOwnPack(packDir: string, appDir: string): boolean {
-  const rel = relative(resolve(appDir), resolve(packDir));
-  return !rel.startsWith('..') && !isAbsolute(rel) && !rel.split(sep).includes('node_modules');
-}
-
-function readPack(appDir: string, name: string, packDir: string) {
-  const glossary = (loadDoc(join(packDir, 'glossary.yaml')).toJSON() as { groups?: string[][] } | null)?.groups ?? [];
-  const topicsRaw = (loadDoc(join(packDir, 'topics.yaml')).toJSON() as { topics?: Array<{ id: string; refusal: string; patterns: string[] }> } | null)?.topics ?? [];
-  const refusals: Record<string, string> = {};
-  const md = existsSync(join(packDir, 'refusals.vi.md')) ? readFileSync(join(packDir, 'refusals.vi.md'), 'utf8') : '';
-  for (const block of md.split(/^## /m).slice(1)) {
-    const [head, ...rest] = block.split('\n');
-    refusals[head.trim()] = rest.join('\n').trim();
-  }
-  const prompt = existsSync(join(packDir, 'prompt.vi.md')) ? readFileSync(join(packDir, 'prompt.vi.md'), 'utf8') : '';
-  return {
-    name,
-    dir: packDir,
-    editable: isOwnPack(packDir, appDir),
-    glossary,
-    topics: topicsRaw.map((t) => ({ id: t.id, patterns: t.patterns ?? [], refusal: refusals[t.refusal] ?? '' })),
-    prompt,
-  };
-}
 
 // Tìm vị trí khai báo tourId (chuỗi tĩnh) và [tourMenu] trong mã nguồn: id -> "file:dòng"
 function locateTourIds(srcDir: string, appDir: string): Map<string, string> {

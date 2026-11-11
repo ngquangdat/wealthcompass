@@ -1,5 +1,0 @@
-name: finance-vn
-version: 0.1.0
-locale: vi
-description: Domain Pack cho web đầu tư chứng khoán Việt Nam (cổ phiếu, trái phiếu, chứng chỉ quỹ)
-contracts: "2"

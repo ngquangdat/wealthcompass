@@ -1,5 +1,17 @@
-<div class="phone">
-  <router-outlet />
+<div class="phone" [class.desktop-layout]="desktopShell()">
+  <div class="app-shell">
+    @if (desktopShell()) {
+      <div class="app-logo">TC</div>
+      <app-toolbar />
+      <app-menu-sidebar />
+    }
+    <!-- Popup menu đóng khi chuột ĐI VÀO vùng nội dung (giống web thật), không đóng khi rời mục gốc hay popup -->
+    <div class="tcbs-body" (mouseenter)="overlay.close()">
+      <div class="contained-content">
+        <router-outlet />
+      </div>
+    </div>
+  </div>
   @if (auth.user()) {
     <!-- Nằm trong khung điện thoại để đúng giao diện web thật -->
     <compass-chat-widget />

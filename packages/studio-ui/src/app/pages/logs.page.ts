@@ -45,7 +45,6 @@ const OUTCOME: Record<string, { label: string; cls: string }> = {
             <div class="m-label">Tìm được</div><div class="m-value">{{ s.questions ? pct(foundRate()) : '—' }}</div><div class="m-sub">{{ s.outcomes.offered }} câu có nút dẫn đường</div>
           </div>
           <div class="card metric" [class.bad]="s.outcomes.not_found > 0"><div class="m-label">Không tìm thấy</div><div class="m-value">{{ s.outcomes.not_found }}</div><div class="m-sub">xem danh sách bên dưới</div></div>
-          <div class="card metric"><div class="m-label">Bị chặn</div><div class="m-value">{{ s.outcomes.refused }}</div><div class="m-sub">theo chủ đề cấm của pack</div></div>
           <div class="card metric" [class.bad]="s.outcomes.error + s.fallback > 0"><div class="m-label">Lỗi / dự phòng</div><div class="m-value">{{ s.outcomes.error }} / {{ s.fallback }}</div><div class="m-sub">AI lỗi giữa chừng / trả lời không cần AI</div></div>
           <div class="card metric"><div class="m-label">Thời gian trả lời</div><div class="m-value">{{ sec(s.latency.p50) }}</div><div class="m-sub">trung vị · 95%: {{ sec(s.latency.p95) }}</div></div>
         </div>
@@ -84,7 +83,7 @@ const OUTCOME: Record<string, { label: string; cls: string }> = {
                 } @empty { <tr><td class="empty">Không có câu nào. Tốt!</td></tr> }
               </tbody>
             </table>
-            @if (s.notFound.length) { <p class="hint pad">Cách sửa thường gặp: thêm từ khóa/câu hỏi mẫu cho màn hình ở trang <a routerLink="/screens">Màn hình</a>, hoặc thêm từ đồng nghĩa ở <a routerLink="/pack">Domain Pack</a>; rồi chạy lại <a routerLink="/eval">Kiểm thử</a>.</p> }
+            @if (s.notFound.length) { <p class="hint pad">Cách sửa thường gặp: thêm từ khóa/câu hỏi mẫu cho màn hình ở trang <a routerLink="/screens">Màn hình</a>; rồi chạy lại <a routerLink="/eval">Kiểm thử</a>.</p> }
           </section>
 
           <section class="card">
@@ -104,10 +103,6 @@ const OUTCOME: Record<string, { label: string; cls: string }> = {
                 } @empty { <tr><td colspan="6" class="empty">Chưa có tour nào được đề xuất.</td></tr> }
               </tbody>
             </table>
-            @if (topics().length) {
-              <div class="sec-head"><h3>Chủ đề bị chặn</h3></div>
-              <div class="topics">@for (t of topics(); track t[0]) { <span class="badge">{{ t[0] }} · {{ t[1] }}</span> }</div>
-            }
           </section>
         </div>
 
@@ -154,7 +149,6 @@ const OUTCOME: Record<string, { label: string; cls: string }> = {
     .add-row .select { width: 180px; }
     .num { text-align: right; width: 70px; white-space: nowrap; }
     .err { color: var(--danger-text); font-weight: 600; }
-    .topics { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 16px; }
     .c-time { width: 110px; white-space: nowrap; } .c-out { width: 130px; } .c-off { width: 200px; }
     .tiny-badge { font-size: 10.5px; margin-left: 4px; }
     .empty { text-align: center; color: var(--text-3); padding: 20px !important; }
@@ -180,7 +174,6 @@ export class LogsPage implements OnInit {
     return asked ? (s.outcomes.offered + s.outcomes.answered) / asked : 0;
   });
   protected readonly maxDaily = computed(() => Math.max(1, ...(this.stats()?.daily ?? []).map((d) => d.n)));
-  protected readonly topics = computed(() => Object.entries(this.stats()?.byTopic ?? {}).sort((a, b) => b[1] - a[1]));
 
   async ngOnInit(): Promise<void> {
     await this.load();
@@ -219,7 +212,7 @@ export class LogsPage implements OnInit {
         this.toast.show('Câu này đã có trong bộ kiểm thử.');
       } else {
         await this.api.put('/api/eval', { cases: [...data.cases, { q, expect: [feature] }] });
-        this.toast.success('Đã thêm vào Kiểm thử. Sửa mô tả hoặc từ đồng nghĩa rồi chạy lại để xác nhận.');
+        this.toast.success('Đã thêm vào Kiểm thử. Sửa mô tả hoặc từ khóa của màn hình rồi chạy lại để xác nhận.');
       }
       this.adding.set(null);
     } catch (e) {

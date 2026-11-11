@@ -1,11 +1,12 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// Quản lý tiến trình Studio mở hộ dev: backend WealthCompass và dev server của web.
+// Quản lý tiến trình Studio mở hộ dev: dev server của web (backend chạy độc lập, Studio không bật).
 // Giữ một ít log gần nhất để hiện trên giao diện; tắt hết khi Studio thoát.
 
-export type ProcName = 'backend' | 'web' | 'task';
+export type ProcName = 'web';
 
 export interface ProcInfo {
   name: ProcName;
@@ -79,13 +80,32 @@ export function stopAll(): void {
   for (const name of procs.keys()) stopProc(name);
 }
 
-// Backend dùng đúng gói @wealthcompass/server đã cài trong dự án (giống khi chạy thật)
-export function backendBin(appDir: string): string | null {
-  const bin = join(appDir, 'node_modules', '@wealthcompass', 'server', 'bin', 'wealthcompass-server.mjs');
-  return existsSync(bin) ? bin : null;
+// Tìm một file trong node_modules của dự án hoặc của thư mục cha (workspace npm đưa gói lên node_modules gốc)
+function findInNodeModules(appDir: string, ...path: string[]): string | null {
+  for (let dir = resolve(appDir); ; dir = dirname(dir)) {
+    const file = join(dir, 'node_modules', ...path);
+    if (existsSync(file)) return file;
+    if (dirname(dir) === dir) return null;
+  }
+}
+
+// Studio đang chạy từ source của repo WealthCompass (có sẵn source backend): trả về thư mục repo để in lệnh `npm run server`.
+// Chạy từ gói đã build thì trả null (backend là lệnh `wealthcompass-server` của gói @wealthcompass/server cài riêng).
+export function sourceRepo(): string | null {
+  const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+  return existsSync(join(repo, 'server', 'src', 'main.ts')) && existsSync(join(repo, 'node_modules', 'tsx', 'dist', 'cli.mjs')) ? repo : null;
 }
 
 export function ngBin(appDir: string): string | null {
-  const bin = join(appDir, 'node_modules', '@angular', 'cli', 'bin', 'ng.js');
-  return existsSync(bin) ? bin : null;
+  return findInNodeModules(appDir, '@angular', 'cli', 'bin', 'ng.js');
+}
+
+// Cổng đã có tiến trình trả lời HTTP (vd. web hay backend chạy sẵn ngoài Studio)
+export async function portAnswers(url: string, timeoutMs = 800): Promise<boolean> {
+  try {
+    await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    return true;
+  } catch {
+    return false;
+  }
 }

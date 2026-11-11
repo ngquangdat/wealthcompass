@@ -1,0 +1,168 @@
+{
+  "features": {
+    "home": {
+      "route": "/home",
+      "component": "HomePage"
+    },
+    "iconnect.price-board": {
+      "route": "/iconnect/price-board",
+      "component": "PriceBoardPage"
+    },
+    "iconnect.assets": {
+      "route": "/iconnect/assets",
+      "component": "AssetsPage"
+    },
+    "iconnect.orders": {
+      "route": "/iconnect/orders",
+      "component": "PlaceholderPage"
+    },
+    "iconnect.cashflow": {
+      "route": "/iconnect/cashflow",
+      "component": "PlaceholderPage"
+    },
+    "iconnect.pnl": {
+      "route": "/iconnect/pnl",
+      "component": "PlaceholderPage"
+    },
+    "money.deposit": {
+      "route": "/money/deposit",
+      "component": "PlaceholderPage"
+    },
+    "money.transfer": {
+      "route": "/money/transfer",
+      "component": "PlaceholderPage"
+    },
+    "market.price-board": {
+      "route": "/market/price-board",
+      "component": "PlaceholderPage"
+    },
+    "analysis": {
+      "route": "/analysis",
+      "component": "PlaceholderPage"
+    },
+    "ipower": {
+      "route": "/ipower",
+      "component": "PlaceholderPage"
+    },
+    "invest": {
+      "route": "/invest",
+      "component": "PlaceholderPage"
+    },
+    "assets": {
+      "route": "/assets",
+      "component": "PlaceholderPage"
+    },
+    "money.advance": {
+      "route": "/money/advance",
+      "component": "PlaceholderPage"
+    },
+    "money.history": {
+      "route": "/money/history",
+      "component": "PlaceholderPage"
+    },
+    "stock.order": {
+      "route": "/stock/order",
+      "component": "PlaceholderPage"
+    },
+    "stock.trade-station": {
+      "route": "/stock/trade-station",
+      "component": "PlaceholderPage"
+    },
+    "stock.conditional-order": {
+      "route": "/stock/conditional-order",
+      "component": "PlaceholderPage"
+    },
+    "stock.ipo": {
+      "route": "/stock/ipo",
+      "component": "PlaceholderPage"
+    },
+    "stock.darkpool": {
+      "route": "/stock/darkpool",
+      "component": "PlaceholderPage"
+    },
+    "stock.margin": {
+      "route": "/stock/margin",
+      "component": "PlaceholderPage"
+    },
+    "stock.performance": {
+      "route": "/stock/performance",
+      "component": "PlaceholderPage"
+    },
+    "stock.screener": {
+      "route": "/stock/screener",
+      "component": "PlaceholderPage"
+    },
+    "stock.backtest": {
+      "route": "/stock/backtest",
+      "component": "PlaceholderPage"
+    },
+    "stock.rights": {
+      "route": "/stock/rights",
+      "component": "PlaceholderPage"
+    },
+    "stock.transfer": {
+      "route": "/stock/transfer",
+      "component": "PlaceholderPage"
+    },
+    "stock.custody": {
+      "route": "/stock/custody",
+      "component": "PlaceholderPage"
+    },
+    "stock.icopy": {
+      "route": "/stock/icopy",
+      "component": "PlaceholderPage"
+    },
+    "derivatives.price-board": {
+      "route": "/derivatives/price-board",
+      "component": "PlaceholderPage"
+    },
+    "derivatives.order": {
+      "route": "/derivatives/order",
+      "component": "PlaceholderPage"
+    },
+    "derivatives.margin": {
+      "route": "/derivatives/margin",
+      "component": "PlaceholderPage"
+    },
+    "bond.ibond": {
+      "route": "/bond/ibond",
+      "component": "PlaceholderPage"
+    },
+    "fund.trade": {
+      "route": "/fund/trade",
+      "component": "PlaceholderPage"
+    },
+    "fund.sip": {
+      "route": "/fund/sip",
+      "component": "PlaceholderPage"
+    },
+    "fund.assets": {
+      "route": "/fund/assets",
+      "component": "PlaceholderPage"
+    },
+    "utilities.calendar": {
+      "route": "/utilities/calendar",
+      "component": "PlaceholderPage"
+    },
+    "utilities.news": {
+      "route": "/utilities/news",
+      "component": "PlaceholderPage"
+    },
+    "partners.tcwealth": {
+      "route": "/partners/tcwealth",
+      "component": "PlaceholderPage"
+    },
+    "partners.insurance": {
+      "route": "/partners/insurance",
+      "component": "PlaceholderPage"
+    },
+    "favorites": {
+      "route": "/favorites",
+      "component": "PlaceholderPage"
+    },
+    "feedback": {
+      "route": "/feedback",
+      "component": "PlaceholderPage"
+    }
+  }
+}

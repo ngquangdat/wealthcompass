@@ -24,12 +24,12 @@ export interface ScannedRoute {
   // Chữ tĩnh của chính màn hình (component của route và component con), KHÔNG gồm layout cha
   // vì chữ của layout (thanh tab...) chung cho mọi màn hình và làm loãng ngữ cảnh
   uiText: string[];
-  // Các component có template thuộc màn hình này (component của route và component con); annotate dùng để sửa template
+  // Các component có template thuộc màn hình này (component của route và component con)
   classes: ClassDeclaration[];
 }
 
 export interface ScannedLayout {
-  // Route khung (có children) và các component của nó; annotate cần để gắn tourId cho thanh tab, header chung...
+  // Route khung (có children) và các component của nó
   path: string;
   classes: ClassDeclaration[];
 }
@@ -138,23 +138,119 @@ export function templateOf(cls: ClassDeclaration): string | undefined {
 }
 
 function selectorOf(cls: ClassDeclaration): string | undefined {
-  const arg = cls.getDecorator('Component')?.getArguments()[0];
-  if (!arg || !Node.isObjectLiteralExpression(arg)) return undefined;
+  const arg = decoratorArg(cls, 'Component');
+  if (!arg) return undefined;
   const sel = evalLiteral(prop(arg, 'selector'));
   return typeof sel === 'string' ? sel : undefined;
 }
 
-function importedClasses(cls: ClassDeclaration): ClassDeclaration[] {
-  const arg = cls.getDecorator('Component')?.getArguments()[0];
-  if (!arg || !Node.isObjectLiteralExpression(arg)) return [];
-  const list = resolveArray(prop(arg, 'imports'));
+function decoratorArg(cls: ClassDeclaration, name: string): ObjectLiteralExpression | undefined {
+  const arg = cls.getDecorator(name)?.getArguments()[0];
+  return arg && Node.isObjectLiteralExpression(arg) ? arg : undefined;
+}
+
+// Các class trong một mảng của decorator (imports, declarations, exports); phần tử kiểu
+// RouterModule.forChild(...) thì lấy class RouterModule
+function classesIn(obj: ObjectLiteralExpression | undefined, key: string): ClassDeclaration[] {
+  const list = obj && resolveArray(prop(obj, key));
   if (!list) return [];
   const out: ClassDeclaration[] = [];
-  for (const el of list.getElements()) {
+  for (const raw of list.getElements()) {
+    let el: Node = raw;
+    if (Node.isCallExpression(el)) el = el.getExpression();
+    if (Node.isPropertyAccessExpression(el)) el = el.getExpression();
     if (!Node.isIdentifier(el)) continue;
     for (const def of el.getDefinitionNodes()) if (Node.isClassDeclaration(def)) out.push(def);
   }
   return out;
+}
+
+function classKey(cls: ClassDeclaration): string {
+  return cls.getSourceFile().getFilePath() + '#' + cls.getName();
+}
+
+// NgModule khai báo từng component (theo declarations), lập một lần cho mỗi project
+const declaringModules = new WeakMap<Project, Map<string, ClassDeclaration>>();
+
+function declaringModule(cls: ClassDeclaration): ClassDeclaration | undefined {
+  const project = cls.getProject();
+  let index = declaringModules.get(project);
+  if (!index) {
+    index = new Map();
+    for (const file of project.getSourceFiles()) {
+      if (file.isDeclarationFile() || file.getFilePath().includes('/node_modules/')) continue;
+      for (const mod of file.getClasses()) {
+        for (const c of classesIn(decoratorArg(mod, 'NgModule'), 'declarations')) index.set(classKey(c), mod);
+      }
+    }
+    declaringModules.set(project, index);
+  }
+  return index.get(classKey(cls));
+}
+
+// Class mà module đưa ra ngoài: exports, và exports của module được re-export
+function moduleExports(mod: ClassDeclaration, seen = new Set<string>()): ClassDeclaration[] {
+  if (seen.has(classKey(mod))) return [];
+  seen.add(classKey(mod));
+  const out: ClassDeclaration[] = [];
+  for (const c of classesIn(decoratorArg(mod, 'NgModule'), 'exports')) {
+    out.push(c);
+    if (c.getDecorator('NgModule')) out.push(...moduleExports(c, seen));
+  }
+  return out;
+}
+
+// Component có thể dùng trong template: imports của component standalone; component trong NgModule thì
+// là declarations của module đó cộng exports của các module nó import
+function importedClasses(cls: ClassDeclaration): ClassDeclaration[] {
+  const out = classesIn(decoratorArg(cls, 'Component'), 'imports');
+  const mod = declaringModule(cls);
+  if (mod) {
+    const meta = decoratorArg(mod, 'NgModule');
+    out.push(...classesIn(meta, 'declarations'));
+    for (const imp of classesIn(meta, 'imports')) {
+      if (imp.getDecorator('NgModule')) out.push(...moduleExports(imp));
+      else out.push(imp); // component/directive standalone import vào module
+    }
+  }
+  for (const c of [...out]) if (c.getDecorator('NgModule')) out.push(...moduleExports(c));
+  return out.filter((c) => c.getDecorator('Component'));
+}
+
+// Mảng route trong RouterModule.forChild(...)/forRoot(...) của một NgModule hoặc module nó import
+// (thường là XxxRoutingModule nằm ở file riêng)
+function moduleRoutes(mod: ClassDeclaration, seen = new Set<string>()): ArrayLiteralExpression | undefined {
+  if (seen.has(classKey(mod))) return undefined;
+  seen.add(classKey(mod));
+  const meta = decoratorArg(mod, 'NgModule');
+  const list = meta && resolveArray(prop(meta, 'imports'));
+  if (!list) return undefined;
+  for (const el of list.getElements()) {
+    if (!Node.isCallExpression(el)) continue;
+    const callee = el.getExpression();
+    if (Node.isPropertyAccessExpression(callee) && /^for(Child|Root)$/.test(callee.getName()) && callee.getExpression().getText() === 'RouterModule') {
+      const arr = resolveArray(el.getArguments()[0]);
+      if (arr) return arr;
+    }
+  }
+  for (const imp of classesIn(meta, 'imports')) {
+    if (!imp.getDecorator('NgModule')) continue;
+    const arr = moduleRoutes(imp, seen);
+    if (arr) return arr;
+  }
+  return undefined;
+}
+
+// Mảng route con của loadChildren: biến/export default là mảng Routes, hoặc NgModule có RouterModule.forChild
+function lazyRoutes(file: SourceFile, member: string | undefined): ArrayLiteralExpression | undefined {
+  const decl = member && member !== 'default' ? file.getVariableDeclaration(member) : undefined;
+  const arr = resolveArray(decl?.getInitializer() ?? file.getDefaultExportSymbol()?.getDeclarations()[0]);
+  if (arr) return arr;
+  const mod = member && member !== 'default'
+    ? file.getClass(member)
+    : file.getClasses().find((c) => c.isDefaultExport() && c.getDecorator('NgModule')) ??
+      file.getClasses().find((c) => c.getDecorator('NgModule'));
+  return mod?.getDecorator('NgModule') ? moduleRoutes(mod) : undefined;
 }
 
 export interface ComponentInfo {
@@ -185,10 +281,6 @@ export function collectComponent(cls: ClassDeclaration, seen = new Set<string>()
     }
   }
   return { targets, uiText, classes };
-}
-
-export function collectComponentTargets(cls: ClassDeclaration): TemplateTarget[] {
-  return collectComponent(cls).targets;
 }
 
 function readRoutes(
@@ -263,14 +355,13 @@ function readRoutes(
 
     const lazyChildren = prop(el, 'loadChildren');
     if (lazyChildren) {
-      const dyn = findDynamicImport(lazyChildren);
+      // () => import('./x').then(m => m.X) hoặc chuỗi kiểu cũ './x.module#XModule'
+      const legacy = evalLiteral(lazyChildren);
+      const dyn = typeof legacy === 'string'
+        ? { specifier: legacy.split('#')[0], member: legacy.split('#')[1] }
+        : findDynamicImport(lazyChildren);
       const file = dyn && loadModule(el.getSourceFile(), dyn.specifier, ctx);
-      let arr: ArrayLiteralExpression | undefined;
-      if (file) {
-        const name = dyn?.member;
-        const decl = name && name !== 'default' ? file.getVariableDeclaration(name) : undefined;
-        arr = resolveArray(decl?.getInitializer() ?? file.getDefaultExportSymbol()?.getDeclarations()[0]);
-      }
+      const arr = file ? lazyRoutes(file, dyn.member) : undefined;
       if (arr) readRoutes(arr, normalized === '/' ? '' : normalized, nextInherited, allGuards, ctx, out);
       else ctx.warnings.push(`${ref(el, ctx.root)}: không resolve được loadChildren của ${normalized}`);
     }

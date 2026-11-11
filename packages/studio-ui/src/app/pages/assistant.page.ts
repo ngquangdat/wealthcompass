@@ -115,12 +115,6 @@ const OUTCOME_HINT: Record<string, string> = {
               @for (s of t.stages; track $index) {
                 <li [class]="s.stage">
                   @switch (s.stage) {
-                    @case ('guardrail') {
-                      <div class="st-title">Bộ lọc chủ đề cấm</div>
-                      @if (s.data['blocked']) { <span class="badge danger">Chặn: {{ s.data['topic'] }}</span> <div class="small muted">Không gửi tới AI, trả câu từ chối của Domain Pack.</div> }
-                      @else { <span class="badge success">Cho qua</span> }
-                      <code class="tiny">{{ s.data['normalized'] }}</code>
-                    }
                     @case ('prefetch') {
                       <div class="st-title">Tra cứu ban đầu</div>
                       @for (r of s.data['results']; track r.id) {

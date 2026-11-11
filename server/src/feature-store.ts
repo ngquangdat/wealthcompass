@@ -1,7 +1,6 @@
-import { readFileSync, statSync } from 'node:fs';
+import { mtime, readText } from '@wealthcompass/tourdb';
 import { featureMapSchema, type Feature, type FeatureMap, type Tour } from '@wealthcompass/contracts';
 import { normalizeVi, tokenize } from '@wealthcompass/core';
-import type { DomainPack } from './pack.js';
 
 interface IndexedFeature {
   feature: Feature;
@@ -49,23 +48,32 @@ export class FeatureStore {
   private idf = new Map<string, number>();
   private avgLength = 1;
   private mtime = 0;
+  // Tour từ kho backend (TourStore): thắng tour cùng id trong Feature Map
+  private overlay: () => Array<{ tour: Tour; feature?: string }> = () => [];
 
-  constructor(
-    private readonly file: string,
-    private readonly pack: DomainPack,
-  ) {
+  constructor(private readonly file: string) {
     this.load();
   }
 
   // Tự nạp lại khi scanner ghi file mới, để demo không cần restart server
   private refresh(): void {
-    const mtime = statSync(this.file).mtimeMs;
-    if (mtime !== this.mtime) this.load();
+    const changedAt = mtime(this.file);
+    if (changedAt !== this.mtime) this.load();
+  }
+
+  // Nguồn tour bổ sung (kho tour của backend); gọi lại reloadTours() sau mỗi lần kho đổi
+  useTours(source: () => Array<{ tour: Tour; feature?: string }>): void {
+    this.overlay = source;
+    this.load();
+  }
+
+  reloadTours(): void {
+    this.load();
   }
 
   private load(): void {
-    this.mtime = statSync(this.file).mtimeMs;
-    this.map = featureMapSchema.parse(JSON.parse(readFileSync(this.file, 'utf8')));
+    this.mtime = mtime(this.file);
+    this.map = withTours(featureMapSchema.parse(JSON.parse(readText(this.file))), this.overlay());
     this.docs = this.map.features.map((feature) => this.index(feature));
     const df = new Map<string, number>();
     for (const d of this.docs) for (const t of d.tokens.keys()) df.set(t, (df.get(t) ?? 0) + 1);
@@ -84,8 +92,15 @@ export class FeatureStore {
     feature.menuPath.forEach((m) => add(m, 2));
     Object.values(feature.facets).forEach((v) => add(v, 1));
     add(feature.description, 1);
+    // Tour dẫn tới màn hình này: tiêu đề và mô tả của tour nói đúng việc người dùng muốn làm ("Đổi số điện thoại"),
+    // dù màn hình đích không có chữ đó (việc làm trong hộp thoại mở từ trang chủ, màn hình chung nhiều chức năng)
+    const tours = feature.tourIds.map((id) => this.map.tours.find((t) => t.id === id)).filter((t): t is Tour => Boolean(t));
+    for (const t of tours) {
+      add(t.title, 4);
+      if (t.description) add(t.description, 2);
+    }
     const phrase = normalizeVi(
-      [feature.title, ...feature.keywords, ...feature.sampleQuestions, ...feature.menuPath, feature.description].join(' | '),
+      [feature.title, ...feature.keywords, ...feature.sampleQuestions, ...feature.menuPath, feature.description, ...tours.flatMap((t) => [t.title, t.description ?? ''])].join(' | '),
     );
     return { feature, tokens, phrase, length: [...tokens.values()].reduce((a, b) => a + b, 0) };
   }
@@ -103,16 +118,9 @@ export class FeatureStore {
     return this.featureMap.features.find((f) => f.id === id);
   }
 
-  // Mở rộng câu hỏi bằng từ điển đồng nghĩa của Domain Pack
+  // Từ khóa của câu hỏi (đã bỏ từ dừng). Từ đồng nghĩa khai trong `keywords` của từng màn hình.
   private expand(query: string): string[] {
-    const normalized = normalizeVi(query);
-    const terms = new Set(tokenize(query).filter((t) => !STOPWORDS.has(t)));
-    for (const group of this.pack.glossary) {
-      if (group.some((phrase) => ` ${normalized} `.includes(` ${phrase} `))) {
-        for (const phrase of group) tokenize(phrase).forEach((t) => !STOPWORDS.has(t) && terms.add(t));
-      }
-    }
-    return [...terms];
+    return [...new Set(tokenize(query).filter((t) => !STOPWORDS.has(t)))];
   }
 
   // Chấm điểm mọi màn hình cho câu hỏi (BM25 trên các trường + thưởng cụm từ liền nhau)
@@ -194,4 +202,22 @@ export class FeatureStore {
       tours,
     };
   }
+}
+
+// Gộp tour của kho backend vào Feature Map: thay tour cùng id, gắn tour vào tính năng sở hữu để tìm kiếm và
+// kiểm quyền (offer_tour, /v1/tours/:id) dùng chung một đường như tour quét từ repo
+export function withTours(map: FeatureMap, extra: Array<{ tour: Tour; feature?: string }>): FeatureMap {
+  if (!extra.length) return map;
+  const ids = new Set(extra.map((e) => e.tour.id));
+  const owners = new Map(extra.filter((e) => e.feature).map((e) => [e.tour.id, e.feature!]));
+  return {
+    ...map,
+    tours: [...map.tours.filter((t) => !ids.has(t.id)), ...extra.map((e) => e.tour)],
+    features: map.features.map((f) => {
+      // Tour trong kho có ghi tính năng: chỉ tính năng đó sở hữu; không ghi thì giữ chủ sở hữu cũ trong Feature Map
+      const kept = f.tourIds.filter((id) => !owners.has(id) || owners.get(id) === f.id);
+      const added = [...owners].filter(([id, owner]) => owner === f.id && !kept.includes(id)).map(([id]) => id);
+      return kept.length === f.tourIds.length && !added.length ? f : { ...f, tourIds: [...kept, ...added] };
+    }),
+  };
 }

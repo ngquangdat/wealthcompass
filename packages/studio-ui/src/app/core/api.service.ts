@@ -1,22 +1,10 @@
 import { Injectable } from '@angular/core';
 
-// Gọi API của Studio (cùng máy). Token lấy từ link mở Studio (?t=...) và giữ trong sessionStorage của tab.
+// Gọi API của Studio (cùng máy, cùng origin). Không dùng token: máy chủ Studio chỉ nhận yêu cầu từ chính giao diện này.
 @Injectable({ providedIn: 'root' })
 export class ApiService {
-  private readonly token: string;
-
-  constructor() {
-    const fromUrl = new URLSearchParams(location.search).get('t');
-    if (fromUrl) {
-      sessionStorage.setItem('studio.token', fromUrl);
-      // Bỏ token khỏi thanh địa chỉ để không lộ khi chụp màn hình/chia sẻ
-      history.replaceState(null, '', location.pathname);
-    }
-    this.token = fromUrl ?? sessionStorage.getItem('studio.token') ?? '';
-  }
-
   private headers(json = true): HeadersInit {
-    return { 'X-Studio-Token': this.token, ...(json ? { 'Content-Type': 'application/json' } : {}) };
+    return json ? { 'Content-Type': 'application/json' } : {};
   }
 
   private async handle<T>(res: Response): Promise<T> {

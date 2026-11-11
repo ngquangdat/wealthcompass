@@ -5,20 +5,35 @@ import { chatRequestSchema } from '@wealthcompass/contracts';
 import { z } from 'zod';
 import { runAgent } from './agent.js';
 import { createAuthHook, type Principal } from './auth.js';
-import { classifyInput } from './guardrails.js';
 import { createEventLog } from './event-log.js';
-import { loadConfig } from './config.js';
+import { join } from 'node:path';
+import { parseEnv } from 'node:util';
+import { exists, readText } from '@wealthcompass/tourdb';
+import { loadConfig, projectDb } from './config.js';
 import { FeatureStore } from './feature-store.js';
 import { registerMockIdp } from './idp.js';
-import { loadPack } from './pack.js';
+import { TourStore } from './tour-store.js';
+import { registerTourAdmin } from './tour-admin.js';
 
 // --env-file <file>: nạp cấu hình do `wealthcompass setup` sinh ra (file của chính dự án, không phải .env chứa bí mật khác)
+// Cấu hình backend lưu trong kho dự án (tài liệu wealthcompass.env): nạp trước khi đọc cấu hình; biến môi trường đã đặt thắng
+const projectFlag = process.argv.indexOf('--project');
+if (projectFlag !== -1 && process.argv[projectFlag + 1]) process.env['COMPASS_PROJECT'] = process.argv[projectFlag + 1];
+{
+  const db = projectDb();
+  const envDoc = db ? join(db, 'wealthcompass.env') : null;
+  if (envDoc && exists(envDoc)) {
+    for (const [key, value] of Object.entries(parseEnv(readText(envDoc)))) if (process.env[key] === undefined && value !== undefined) process.env[key] = value;
+  }
+}
 const envFlag = process.argv.indexOf('--env-file');
 if (envFlag !== -1 && process.argv[envFlag + 1]) process.loadEnvFile(process.argv[envFlag + 1]);
 
 const config = loadConfig();
-const pack = loadPack(config.packDir);
-const store = new FeatureStore(config.featureMapPath, pack);
+const store = new FeatureStore(config.featureMapPath);
+// Kho tour của backend: tour lưu ở đây thắng tour cùng id trong Feature Map (sửa tour không cần deploy web)
+const tourStore = new TourStore(config.tourDbPath);
+store.useTours(() => tourStore.list().map((t) => tourStore.current(t.id)!).map((v) => ({ tour: v.tour, feature: v.feature })));
 
 const app = Fastify({ logger: { level: 'info' } });
 await app.register(cors, {
@@ -50,28 +65,47 @@ const log = (entry: Record<string, unknown>) => {
 
 app.get('/v1/health', async () => ({
   ok: true,
-  pack: pack.name,
   features: store.featureMap.features.length,
   tours: store.featureMap.tours.length,
+  storedTours: tourStore.list().length,
   llmConfigured: Boolean(config.llm.apiKey),
   provider: config.llm.provider, model: config.llm.model,
+  auth: config.authMode,
   debug: config.debug,
+  // Chỉ báo đường dẫn kho tour khi chạy debug (trên máy dev) để Studio kiểm hai bên có dùng chung một file không
+  ...(config.debug ? { tourDb: tourStore.dbFile } : {}),
 }));
+
+// Quyền xem tour = quyền vào tính năng sở hữu tour
+function canSeeTour(id: string, roles: string[]): boolean {
+  const owner = store.featureMap.features.find((f) => f.tourIds.includes(id));
+  return !owner || owner.access.requires.every((r) => roles.includes(r));
+}
 
 app.get('/v1/tours/:id', { preHandler: authenticate }, async (request, reply) => {
   const { id } = request.params as { id: string };
   const tour = store.getTour(id);
   if (!tour) return reply.code(404).send({ error: 'not_found' });
-  const owner = store.featureMap.features.find((f) => f.tourIds.includes(id));
-  const roles = request.principal!.roles;
-  if (owner && !owner.access.requires.every((r) => roles.includes(r))) return reply.code(403).send({ error: 'forbidden' });
-  return tour;
+  if (!canSeeTour(id, request.principal!.roles)) return reply.code(403).send({ error: 'forbidden' });
+  // Bước có ảnh chụp trong kho: kèm đường dẫn để widget hiện khi không chắc phần tử
+  return tourStore.withShots(tour);
 });
+
+app.get('/v1/tours/:id/shots/:layout/:key', { preHandler: authenticate }, async (request, reply) => {
+  const { id, layout, key } = request.params as { id: string; layout: string; key: string };
+  if (!store.getTour(id)) return reply.code(404).send({ error: 'not_found' });
+  if (!canSeeTour(id, request.principal!.roles)) return reply.code(403).send({ error: 'forbidden' });
+  const png = tourStore.readShot(id, layout, key);
+  if (!png) return reply.code(404).send({ error: 'not_found' });
+  return reply.header('Content-Type', 'image/png').header('Cache-Control', 'private, max-age=300').send(png);
+});
+
+if (config.adminToken) await registerTourAdmin(app, { tours: tourStore, adminToken: config.adminToken, onChange: () => store.reloadTours() });
 
 app.post('/v1/telemetry', { preHandler: authenticate }, async (request, reply) => {
   // Chỉ ghi các trường đã biết, không ghi nguyên body
   const body = (request.body ?? {}) as Record<string, unknown>;
-  log({ event: 'telemetry', user: request.principal!.id, what: body['event'], tourId: body['tourId'], status: body['status'], lastStep: body['lastStep'], reason: body['reason'] });
+  log({ event: 'telemetry', user: request.principal!.id, what: body['event'], tourId: body['tourId'], status: body['status'], lastStep: body['lastStep'], reason: body['reason'], stepKey: body['stepKey'], matchedBy: body['matchedBy'], score: body['score'] });
   return reply.code(204).send();
 });
 
@@ -97,7 +131,7 @@ app.post('/v1/chat', { preHandler: authenticate }, async (request, reply) => {
   if (!allowed(principal.id)) return reply.code(429).send({ error: 'rate_limited' });
 
   const signal = openSse(reply);
-  for await (const event of runAgent({ config, store, pack, log }, principal, parsed.data, signal)) {
+  for await (const event of runAgent({ config, store, log }, principal, parsed.data, signal)) {
     if (reply.raw.writableEnded) break;
     reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
   }
@@ -124,7 +158,7 @@ if (config.debug) {
     const parsed = debugBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
     const { text, roles } = parsed.data;
-    return { verdict: classifyInput(text, pack), ...store.explain(text, roles) };
+    return store.explain(text, roles);
   });
 
   app.post('/debug/chat', async (request, reply) => {
@@ -137,7 +171,6 @@ if (config.debug) {
     const deps = {
       config,
       store,
-      pack,
       // Câu hỏi thử trong Studio vẫn ghi nhật ký nhưng gắn nguồn để thống kê tách riêng
       log: (entry: Record<string, unknown>) => log({ ...entry, source: 'studio' }),
       trace: (stage: string, data: Record<string, unknown>) => write({ type: 'debug', stage, data }),
@@ -149,4 +182,5 @@ if (config.debug) {
 }
 
 await app.listen({ port: config.port, host: config.host });
-app.log.info(`WealthCompass server: http://${config.host}:${config.port} (pack ${pack.name}, model ${config.llm.model}, llm ${config.llm.apiKey ? 'ok' : 'THIẾU KHÓA'}${config.debug ? ', DEBUG: /debug/* chỉ nhận từ máy này' : ''}${config.logFile ? `, nhật ký: ${config.logFile}` : ''})`);
+if (config.authMode === 'gateway') app.log.warn('Xác thực: chế độ gateway (mặc định). Backend KHÔNG kiểm chữ ký JWT; chỉ cho yêu cầu đi qua API gateway tới cổng này. Không có gateway thì đặt COMPASS_AUTH=jwks.');
+app.log.info(`WealthCompass server: http://${config.host}:${config.port} (model ${config.llm.model}, llm ${config.llm.apiKey ? 'ok' : 'THIẾU KHÓA'}${config.debug ? ', DEBUG: /debug/* chỉ nhận từ máy này' : ''}${config.logFile ? `, nhật ký: ${config.logFile}` : ''}${config.adminToken ? ', API quản trị tour: /admin/tours' : ''})`);

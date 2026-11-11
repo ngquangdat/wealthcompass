@@ -36,6 +36,11 @@ const FIELD_LABEL: Record<string, string> = { description: 'mô tả', keywords:
           @if (enriching()) { <span class="spinner"></span> Đang soạn... } @else { <ui-icon name="sparkles" /> AI soạn cho {{ missingCount() }} màn hình còn thiếu }
         </button>
       }
+      @if (counts().draft) {
+        <button class="btn" (click)="enrich(undefined, true)" [disabled]="enriching() || !ai()?.hasKey" title="Soạn lại phần AI đã soạn mà chưa duyệt (vd. sau khi tiêu đề được dịch từ khóa i18n). Phần bạn đã viết hoặc đã duyệt giữ nguyên.">
+          <ui-icon name="sparkles" /> Soạn lại {{ counts().draft }} nháp chưa duyệt
+        </button>
+      }
     </ui-page-header>
 
     @if (enrichLogs().length) { <ui-log-console [lines]="enrichLogs()" height="140px" /> }
@@ -320,11 +325,11 @@ export class ScreensPage implements OnInit {
     }
   }
 
-  protected async enrich(ids?: string[]): Promise<void> {
+  protected async enrich(ids?: string[], redraft = false): Promise<void> {
     this.enriching.set(true);
     this.enrichLogs.set([]);
     try {
-      const res = await this.api.stream<{ drafted: number }>('/api/features/enrich', { ids }, (l) => this.enrichLogs.update((x) => [...x, l]));
+      const res = await this.api.stream<{ drafted: number }>('/api/features/enrich', { ids, redraft }, (l) => this.enrichLogs.update((x) => [...x, l]));
       await this.load();
       void this.store.refreshOverview();
       this.toast.success(res.drafted ? `AI đã soạn nháp ${res.drafted} màn hình` : 'Không có màn hình nào cần soạn');

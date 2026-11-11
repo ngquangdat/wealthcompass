@@ -1,0 +1,1642 @@
+{
+  "schemaVersion": "2",
+  "appVersion": "dev",
+  "generatedAt": "2026-11-10T15:59:08.817Z",
+  "features": [
+    {
+      "id": "home",
+      "route": {
+        "pattern": "/home"
+      },
+      "title": "Trang chủ",
+      "description": "Tổng quan tài khoản: tổng tiền, nộp tiền, chuyển tiền, tính năng ưa thích, cơ cấu tài sản, khám phá sản phẩm và chỉ số chứng khoán.",
+      "keywords": [
+        "trang chu",
+        "tong quan",
+        "tai khoan",
+        "dashboard"
+      ],
+      "menuPath": [
+        "Trang chủ"
+      ],
+      "facets": {},
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [
+        {
+          "tourId": "home-deposit",
+          "label": "Nộp tiền",
+          "hint": "Nộp tiền vào tài khoản giao dịch",
+          "sensitivity": "normal",
+          "route": "/home"
+        },
+        {
+          "tourId": "home-shortcut-iconnect",
+          "label": "Giao dịch iConnect",
+          "hint": "Lối vào bảng giá và giao dịch trái phiếu iConnect",
+          "sensitivity": "normal",
+          "route": "/home"
+        }
+      ],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:15"
+      }
+    },
+    {
+      "id": "iconnect.price-board",
+      "route": {
+        "pattern": "/iconnect/price-board"
+      },
+      "title": "Bảng giá trái phiếu iConnect",
+      "description": "Theo dõi giá mua, giá bán, lãi suất và khối lượng của trái phiếu doanh nghiệp riêng lẻ giao dịch thỏa thuận trên iConnect.",
+      "keywords": [
+        "bang gia",
+        "trai phieu",
+        "iconnect",
+        "lai suat",
+        "gia mua",
+        "gia ban"
+      ],
+      "menuPath": [
+        "Trái phiếu",
+        "Giao dịch trái phiếu iConnect"
+      ],
+      "facets": {
+        "product": "bond"
+      },
+      "access": {
+        "requires": [
+          "bond_account"
+        ],
+        "unknownGuards": []
+      },
+      "targets": [
+        {
+          "tourId": "iconnect-tab-board",
+          "label": "Tab Bảng giá",
+          "hint": "Bảng giá trái phiếu iConnect",
+          "sensitivity": "normal",
+          "route": "/iconnect/price-board"
+        },
+        {
+          "tourId": "iconnect-tab-orders",
+          "label": "Tab Sổ lệnh",
+          "hint": "Sổ lệnh trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/price-board"
+        },
+        {
+          "tourId": "iconnect-tab-assets",
+          "label": "Tab Tài sản",
+          "hint": "Danh mục trái phiếu đang nắm giữ",
+          "sensitivity": "normal",
+          "route": "/iconnect/price-board"
+        },
+        {
+          "tourId": "iconnect-tab-cashflow",
+          "label": "Tab Dòng tiền",
+          "hint": "Dòng tiền trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/price-board"
+        },
+        {
+          "tourId": "iconnect-tab-pnl",
+          "label": "Tab Lãi lỗ",
+          "hint": "Lãi lỗ trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/price-board"
+        }
+      ],
+      "sampleQuestions": [
+        "xem bảng giá trái phiếu",
+        "mua trái phiếu iConnect ở đâu"
+      ],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static",
+          "manual"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:30"
+      }
+    },
+    {
+      "id": "iconnect.assets",
+      "route": {
+        "pattern": "/iconnect/assets"
+      },
+      "title": "Tài sản trái phiếu iConnect",
+      "description": "Danh mục trái phiếu đang nắm giữ (gốc đầu tư, lãi khi đến hạn, ngày đáo hạn). Từ đây chọn trái phiếu muốn bán lại.",
+      "keywords": [
+        "tai san",
+        "danh muc",
+        "trai phieu",
+        "ban trai phieu",
+        "chon ban",
+        "ban lai"
+      ],
+      "menuPath": [
+        "Trái phiếu",
+        "Tài sản trái phiếu"
+      ],
+      "facets": {
+        "product": "bond"
+      },
+      "access": {
+        "requires": [
+          "bond_account"
+        ],
+        "unknownGuards": []
+      },
+      "targets": [
+        {
+          "tourId": "iconnect-tab-board",
+          "label": "Tab Bảng giá",
+          "hint": "Bảng giá trái phiếu iConnect",
+          "sensitivity": "normal",
+          "route": "/iconnect/assets"
+        },
+        {
+          "tourId": "iconnect-tab-orders",
+          "label": "Tab Sổ lệnh",
+          "hint": "Sổ lệnh trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/assets"
+        },
+        {
+          "tourId": "iconnect-tab-assets",
+          "label": "Tab Tài sản",
+          "hint": "Danh mục trái phiếu đang nắm giữ",
+          "sensitivity": "normal",
+          "route": "/iconnect/assets"
+        },
+        {
+          "tourId": "iconnect-tab-cashflow",
+          "label": "Tab Dòng tiền",
+          "hint": "Dòng tiền trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/assets"
+        },
+        {
+          "tourId": "iconnect-tab-pnl",
+          "label": "Tab Lãi lỗ",
+          "hint": "Lãi lỗ trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/assets"
+        },
+        {
+          "tourId": "assets-select-sell",
+          "label": "Chọn bán",
+          "hint": "Bật chế độ chọn trái phiếu để bán",
+          "sensitivity": "normal",
+          "route": "/iconnect/assets"
+        },
+        {
+          "tourId": "assets-sell-button",
+          "label": "Bán",
+          "hint": "Nút bán trái phiếu, người dùng tự bấm và tự xác nhận lệnh",
+          "sensitivity": "user-only",
+          "route": "/iconnect/assets"
+        }
+      ],
+      "sampleQuestions": [
+        "bán trái phiếu ở đâu",
+        "cách bán lại trái phiếu trước hạn",
+        "xem trái phiếu đang nắm giữ"
+      ],
+      "tourIds": [
+        "sell-bond"
+      ],
+      "provenance": {
+        "source": [
+          "static",
+          "manual"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:40"
+      }
+    },
+    {
+      "id": "iconnect.orders",
+      "route": {
+        "pattern": "/iconnect/orders"
+      },
+      "title": "Sổ lệnh trái phiếu",
+      "description": "Theo dõi các lệnh mua bán trái phiếu iConnect đã đặt, trạng thái khớp và lịch sử lệnh.",
+      "keywords": [
+        "so lenh",
+        "lenh da dat",
+        "huy lenh"
+      ],
+      "menuPath": [
+        "Trái phiếu",
+        "Sổ lệnh trái phiếu"
+      ],
+      "facets": {
+        "product": "bond"
+      },
+      "access": {
+        "requires": [
+          "bond_account"
+        ],
+        "unknownGuards": []
+      },
+      "targets": [
+        {
+          "tourId": "iconnect-tab-board",
+          "label": "Tab Bảng giá",
+          "hint": "Bảng giá trái phiếu iConnect",
+          "sensitivity": "normal",
+          "route": "/iconnect/orders"
+        },
+        {
+          "tourId": "iconnect-tab-orders",
+          "label": "Tab Sổ lệnh",
+          "hint": "Sổ lệnh trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/orders"
+        },
+        {
+          "tourId": "iconnect-tab-assets",
+          "label": "Tab Tài sản",
+          "hint": "Danh mục trái phiếu đang nắm giữ",
+          "sensitivity": "normal",
+          "route": "/iconnect/orders"
+        },
+        {
+          "tourId": "iconnect-tab-cashflow",
+          "label": "Tab Dòng tiền",
+          "hint": "Dòng tiền trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/orders"
+        },
+        {
+          "tourId": "iconnect-tab-pnl",
+          "label": "Tab Lãi lỗ",
+          "hint": "Lãi lỗ trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/orders"
+        }
+      ],
+      "sampleQuestions": [
+        "xem lệnh đã đặt",
+        "hủy lệnh trái phiếu"
+      ],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static",
+          "manual"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:50"
+      }
+    },
+    {
+      "id": "iconnect.cashflow",
+      "route": {
+        "pattern": "/iconnect/cashflow"
+      },
+      "title": "Dòng tiền trái phiếu",
+      "description": "Lịch nhận lãi coupon và gốc đáo hạn của các trái phiếu đang nắm giữ.",
+      "keywords": [
+        "dong tien",
+        "lai coupon",
+        "dao han"
+      ],
+      "menuPath": [
+        "Trái phiếu",
+        "Dòng tiền trái phiếu"
+      ],
+      "facets": {
+        "product": "bond"
+      },
+      "access": {
+        "requires": [
+          "bond_account"
+        ],
+        "unknownGuards": []
+      },
+      "targets": [
+        {
+          "tourId": "iconnect-tab-board",
+          "label": "Tab Bảng giá",
+          "hint": "Bảng giá trái phiếu iConnect",
+          "sensitivity": "normal",
+          "route": "/iconnect/cashflow"
+        },
+        {
+          "tourId": "iconnect-tab-orders",
+          "label": "Tab Sổ lệnh",
+          "hint": "Sổ lệnh trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/cashflow"
+        },
+        {
+          "tourId": "iconnect-tab-assets",
+          "label": "Tab Tài sản",
+          "hint": "Danh mục trái phiếu đang nắm giữ",
+          "sensitivity": "normal",
+          "route": "/iconnect/cashflow"
+        },
+        {
+          "tourId": "iconnect-tab-cashflow",
+          "label": "Tab Dòng tiền",
+          "hint": "Dòng tiền trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/cashflow"
+        },
+        {
+          "tourId": "iconnect-tab-pnl",
+          "label": "Tab Lãi lỗ",
+          "hint": "Lãi lỗ trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/cashflow"
+        }
+      ],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:55"
+      }
+    },
+    {
+      "id": "iconnect.pnl",
+      "route": {
+        "pattern": "/iconnect/pnl"
+      },
+      "title": "Lãi lỗ trái phiếu",
+      "description": "Báo cáo lãi lỗ đã thực hiện và chưa thực hiện của danh mục trái phiếu.",
+      "keywords": [
+        "lai lo",
+        "loi nhuan",
+        "bao cao"
+      ],
+      "menuPath": [
+        "Trái phiếu",
+        "Lãi lỗ trái phiếu"
+      ],
+      "facets": {
+        "product": "bond"
+      },
+      "access": {
+        "requires": [
+          "bond_account"
+        ],
+        "unknownGuards": []
+      },
+      "targets": [
+        {
+          "tourId": "iconnect-tab-board",
+          "label": "Tab Bảng giá",
+          "hint": "Bảng giá trái phiếu iConnect",
+          "sensitivity": "normal",
+          "route": "/iconnect/pnl"
+        },
+        {
+          "tourId": "iconnect-tab-orders",
+          "label": "Tab Sổ lệnh",
+          "hint": "Sổ lệnh trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/pnl"
+        },
+        {
+          "tourId": "iconnect-tab-assets",
+          "label": "Tab Tài sản",
+          "hint": "Danh mục trái phiếu đang nắm giữ",
+          "sensitivity": "normal",
+          "route": "/iconnect/pnl"
+        },
+        {
+          "tourId": "iconnect-tab-cashflow",
+          "label": "Tab Dòng tiền",
+          "hint": "Dòng tiền trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/pnl"
+        },
+        {
+          "tourId": "iconnect-tab-pnl",
+          "label": "Tab Lãi lỗ",
+          "hint": "Lãi lỗ trái phiếu",
+          "sensitivity": "normal",
+          "route": "/iconnect/pnl"
+        }
+      ],
+      "sampleQuestions": [
+        "xem lãi lỗ trái phiếu"
+      ],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static",
+          "manual"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:60"
+      }
+    },
+    {
+      "id": "money.deposit",
+      "route": {
+        "pattern": "/money/deposit"
+      },
+      "title": "Nộp tiền",
+      "description": "Nộp tiền vào tài khoản giao dịch chứng khoán qua chuyển khoản ngân hàng hoặc QR.",
+      "keywords": [
+        "nop tien",
+        "chuyen khoan",
+        "nap tien"
+      ],
+      "menuPath": [
+        "Tiền",
+        "Nộp tiền"
+      ],
+      "facets": {
+        "product": "money"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [
+        "nộp tiền vào tài khoản",
+        "nạp tiền chứng khoán"
+      ],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static",
+          "manual"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:67"
+      }
+    },
+    {
+      "id": "money.transfer",
+      "route": {
+        "pattern": "/money/transfer"
+      },
+      "title": "Chuyển tiền",
+      "description": "Rút/chuyển tiền từ tài khoản chứng khoán về tài khoản ngân hàng đã đăng ký.",
+      "keywords": [
+        "chuyen tien",
+        "rut tien"
+      ],
+      "menuPath": [
+        "Tiền",
+        "Chuyển tiền"
+      ],
+      "facets": {
+        "product": "money"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:72"
+      }
+    },
+    {
+      "id": "market.price-board",
+      "route": {
+        "pattern": "/market/price-board"
+      },
+      "title": "Bảng giá cổ phiếu",
+      "description": "Bảng giá trực tuyến các mã cổ phiếu trên HOSE, HNX, UPCOM.",
+      "keywords": [
+        "bang gia co phieu",
+        "gia co phieu",
+        "thi truong"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Bảng giá cổ phiếu"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:77"
+      }
+    },
+    {
+      "id": "analysis",
+      "route": {
+        "pattern": "/analysis"
+      },
+      "title": "Phân tích đầu tư",
+      "description": "Báo cáo phân tích, dữ liệu và đánh giá về cổ phiếu và các loại chứng khoán.",
+      "keywords": [
+        "phan tich",
+        "bao cao phan tich"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Phân tích đầu tư"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:82"
+      }
+    },
+    {
+      "id": "ipower",
+      "route": {
+        "pattern": "/ipower"
+      },
+      "title": "iPower - Tài khoản nhàn lãi",
+      "description": "Nhận lãi trên số tiền nhàn rỗi trong tài khoản.",
+      "keywords": [
+        "ipower",
+        "nhan lai",
+        "lai tien nhan roi"
+      ],
+      "menuPath": [
+        "Tiền",
+        "iPower - Tài khoản nhàn lãi"
+      ],
+      "facets": {
+        "product": "money"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:87"
+      }
+    },
+    {
+      "id": "invest",
+      "route": {
+        "pattern": "/invest"
+      },
+      "title": "Đầu tư",
+      "description": "Lối vào nhanh các sản phẩm đầu tư.",
+      "keywords": [
+        "dau tu"
+      ],
+      "menuPath": [
+        "Tiện ích",
+        "Đầu tư"
+      ],
+      "facets": {},
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:92"
+      }
+    },
+    {
+      "id": "assets",
+      "route": {
+        "pattern": "/assets"
+      },
+      "title": "Tổng tài sản",
+      "description": "Tổng quan tài sản toàn tài khoản: tiền, cổ phiếu, trái phiếu, quỹ.",
+      "keywords": [
+        "tong tai san"
+      ],
+      "menuPath": [
+        "Tiền",
+        "Tổng tài sản"
+      ],
+      "facets": {},
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:97"
+      }
+    },
+    {
+      "id": "money.advance",
+      "route": {
+        "pattern": "/money/advance"
+      },
+      "title": "Ứng trước tiền bán",
+      "description": "Nhận trước tiền bán chứng khoán khi tiền bán chưa về tài khoản.",
+      "keywords": [
+        "ung truoc",
+        "tien ban"
+      ],
+      "menuPath": [
+        "Tiền",
+        "Ứng trước tiền bán"
+      ],
+      "facets": {
+        "product": "money"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:102"
+      }
+    },
+    {
+      "id": "money.history",
+      "route": {
+        "pattern": "/money/history"
+      },
+      "title": "Lịch sử giao dịch tiền",
+      "description": "Tra cứu lịch sử nộp, rút và chuyển tiền của tài khoản.",
+      "keywords": [
+        "lich su",
+        "sao ke",
+        "giao dich tien"
+      ],
+      "menuPath": [
+        "Tiền",
+        "Lịch sử giao dịch tiền"
+      ],
+      "facets": {
+        "product": "money"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:107"
+      }
+    },
+    {
+      "id": "stock.order",
+      "route": {
+        "pattern": "/stock/order"
+      },
+      "title": "Đặt lệnh cổ phiếu",
+      "description": "Mua bán cổ phiếu niêm yết trên HOSE, HNX, UPCOM.",
+      "keywords": [
+        "dat lenh",
+        "mua co phieu",
+        "ban co phieu"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Đặt lệnh cổ phiếu"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:112"
+      }
+    },
+    {
+      "id": "stock.trade-station",
+      "route": {
+        "pattern": "/stock/trade-station"
+      },
+      "title": "Trade Station",
+      "description": "Không gian giao dịch chuyên nghiệp với nhiều cửa sổ bảng giá, biểu đồ và đặt lệnh.",
+      "keywords": [
+        "trade station",
+        "giao dich chuyen nghiep"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Trade Station"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:117"
+      }
+    },
+    {
+      "id": "stock.conditional-order",
+      "route": {
+        "pattern": "/stock/conditional-order"
+      },
+      "title": "Đặt lệnh điều kiện",
+      "description": "Lệnh cổ phiếu tự kích hoạt khi giá chạm điều kiện đã đặt (chốt lời, cắt lỗ).",
+      "keywords": [
+        "lenh dieu kien",
+        "chot loi",
+        "cat lo"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Đặt lệnh điều kiện"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:122"
+      }
+    },
+    {
+      "id": "stock.ipo",
+      "route": {
+        "pattern": "/stock/ipo"
+      },
+      "title": "iPO",
+      "description": "Đăng ký mua cổ phiếu phát hành lần đầu ra công chúng.",
+      "keywords": [
+        "ipo",
+        "phat hanh lan dau"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "iPO"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:127"
+      }
+    },
+    {
+      "id": "stock.darkpool",
+      "route": {
+        "pattern": "/stock/darkpool"
+      },
+      "title": "Giao dịch Darkpool",
+      "description": "Giao dịch thỏa thuận cổ phiếu khối lượng lớn.",
+      "keywords": [
+        "darkpool",
+        "thoa thuan"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Giao dịch Darkpool"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:132"
+      }
+    },
+    {
+      "id": "stock.margin",
+      "route": {
+        "pattern": "/stock/margin"
+      },
+      "title": "Quản lý Margin",
+      "description": "Theo dõi sức mua, tỷ lệ ký quỹ và dư nợ margin.",
+      "keywords": [
+        "margin",
+        "ky quy",
+        "du no"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Quản lý Margin"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:137"
+      }
+    },
+    {
+      "id": "stock.performance",
+      "route": {
+        "pattern": "/stock/performance"
+      },
+      "title": "Hiệu quả đầu tư",
+      "description": "Lãi lỗ và hiệu quả danh mục cổ phiếu theo thời gian.",
+      "keywords": [
+        "hieu qua dau tu",
+        "lai lo co phieu"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Hiệu quả đầu tư"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:142"
+      }
+    },
+    {
+      "id": "stock.screener",
+      "route": {
+        "pattern": "/stock/screener"
+      },
+      "title": "Bộ lọc cổ phiếu",
+      "description": "Lọc cổ phiếu theo chỉ số tài chính và kỹ thuật.",
+      "keywords": [
+        "bo loc",
+        "loc co phieu"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Bộ lọc"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:147"
+      }
+    },
+    {
+      "id": "stock.backtest",
+      "route": {
+        "pattern": "/stock/backtest"
+      },
+      "title": "Kiểm thử chiến lược",
+      "description": "Chạy thử chiến lược đầu tư trên dữ liệu giá quá khứ.",
+      "keywords": [
+        "kiem thu",
+        "backtest"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Kiểm thử"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:152"
+      }
+    },
+    {
+      "id": "stock.rights",
+      "route": {
+        "pattern": "/stock/rights"
+      },
+      "title": "Đăng ký quyền mua",
+      "description": "Thực hiện quyền mua cổ phiếu phát hành thêm cho cổ đông hiện hữu.",
+      "keywords": [
+        "quyen mua",
+        "phat hanh them"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Đăng ký quyền mua"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:157"
+      }
+    },
+    {
+      "id": "stock.transfer",
+      "route": {
+        "pattern": "/stock/transfer"
+      },
+      "title": "Chuyển khoản chứng khoán",
+      "description": "Chuyển cổ phiếu giữa các tiểu khoản hoặc sang công ty chứng khoán khác.",
+      "keywords": [
+        "chuyen khoan chung khoan",
+        "chuyen co phieu"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Chuyển khoản chứng khoán"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:162"
+      }
+    },
+    {
+      "id": "stock.custody",
+      "route": {
+        "pattern": "/stock/custody"
+      },
+      "title": "Lưu ký chứng khoán",
+      "description": "Lưu ký cổ phiếu chứng chỉ vào tài khoản giao dịch.",
+      "keywords": [
+        "luu ky"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "Lưu ký chứng khoán"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:167"
+      }
+    },
+    {
+      "id": "stock.icopy",
+      "route": {
+        "pattern": "/stock/icopy"
+      },
+      "title": "iCopy",
+      "description": "Sao chép danh mục của nhà đầu tư chuyên nghiệp.",
+      "keywords": [
+        "icopy",
+        "sao chep danh muc"
+      ],
+      "menuPath": [
+        "Cổ phiếu",
+        "iCopy"
+      ],
+      "facets": {
+        "product": "stock"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:172"
+      }
+    },
+    {
+      "id": "derivatives.price-board",
+      "route": {
+        "pattern": "/derivatives/price-board"
+      },
+      "title": "Bảng giá phái sinh",
+      "description": "Giá hợp đồng tương lai chỉ số VN30 và trái phiếu chính phủ.",
+      "keywords": [
+        "bang gia phai sinh",
+        "hop dong tuong lai",
+        "vn30f"
+      ],
+      "menuPath": [
+        "Phái sinh",
+        "Bảng giá phái sinh"
+      ],
+      "facets": {
+        "product": "derivatives"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:177"
+      }
+    },
+    {
+      "id": "derivatives.order",
+      "route": {
+        "pattern": "/derivatives/order"
+      },
+      "title": "Đặt lệnh phái sinh",
+      "description": "Mở và đóng vị thế hợp đồng tương lai.",
+      "keywords": [
+        "lenh phai sinh",
+        "vi the"
+      ],
+      "menuPath": [
+        "Phái sinh",
+        "Đặt lệnh phái sinh"
+      ],
+      "facets": {
+        "product": "derivatives"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:182"
+      }
+    },
+    {
+      "id": "derivatives.margin",
+      "route": {
+        "pattern": "/derivatives/margin"
+      },
+      "title": "Quản lý ký quỹ phái sinh",
+      "description": "Nộp, rút ký quỹ phái sinh và theo dõi tỷ lệ sử dụng ký quỹ.",
+      "keywords": [
+        "ky quy phai sinh"
+      ],
+      "menuPath": [
+        "Phái sinh",
+        "Quản lý ký quỹ phái sinh"
+      ],
+      "facets": {
+        "product": "derivatives"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:187"
+      }
+    },
+    {
+      "id": "bond.ibond",
+      "route": {
+        "pattern": "/bond/ibond"
+      },
+      "title": "Trái phiếu iBond",
+      "description": "Trái phiếu phân phối sơ cấp, kỳ hạn linh hoạt.",
+      "keywords": [
+        "ibond",
+        "trai phieu so cap"
+      ],
+      "menuPath": [
+        "Trái phiếu",
+        "Trái phiếu iBond"
+      ],
+      "facets": {
+        "product": "bond"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:192"
+      }
+    },
+    {
+      "id": "fund.trade",
+      "route": {
+        "pattern": "/fund/trade"
+      },
+      "title": "Mua bán chứng chỉ quỹ",
+      "description": "Đặt lệnh mua, bán chứng chỉ quỹ mở.",
+      "keywords": [
+        "chung chi quy",
+        "mua quy",
+        "ban quy"
+      ],
+      "menuPath": [
+        "Quỹ",
+        "Mua bán chứng chỉ quỹ"
+      ],
+      "facets": {
+        "product": "fund"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:197"
+      }
+    },
+    {
+      "id": "fund.sip",
+      "route": {
+        "pattern": "/fund/sip"
+      },
+      "title": "Đầu tư định kỳ",
+      "description": "Tự động mua chứng chỉ quỹ hằng tháng.",
+      "keywords": [
+        "dinh ky",
+        "sip"
+      ],
+      "menuPath": [
+        "Quỹ",
+        "Đầu tư định kỳ"
+      ],
+      "facets": {
+        "product": "fund"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:202"
+      }
+    },
+    {
+      "id": "fund.assets",
+      "route": {
+        "pattern": "/fund/assets"
+      },
+      "title": "Tài sản quỹ",
+      "description": "Số chứng chỉ quỹ đang nắm giữ và lãi lỗ.",
+      "keywords": [
+        "tai san quy"
+      ],
+      "menuPath": [
+        "Quỹ",
+        "Tài sản quỹ"
+      ],
+      "facets": {
+        "product": "fund"
+      },
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:207"
+      }
+    },
+    {
+      "id": "utilities.calendar",
+      "route": {
+        "pattern": "/utilities/calendar"
+      },
+      "title": "Lịch sự kiện",
+      "description": "Lịch chia cổ tức, đại hội cổ đông và phát hành.",
+      "keywords": [
+        "lich su kien",
+        "co tuc"
+      ],
+      "menuPath": [
+        "Tiện ích",
+        "Lịch sự kiện"
+      ],
+      "facets": {},
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:212"
+      }
+    },
+    {
+      "id": "utilities.news",
+      "route": {
+        "pattern": "/utilities/news"
+      },
+      "title": "Tin tức thị trường",
+      "description": "Tin tức doanh nghiệp và thị trường mới nhất.",
+      "keywords": [
+        "tin tuc"
+      ],
+      "menuPath": [
+        "Tiện ích",
+        "Tin tức thị trường"
+      ],
+      "facets": {},
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:217"
+      }
+    },
+    {
+      "id": "partners.tcwealth",
+      "route": {
+        "pattern": "/partners/tcwealth"
+      },
+      "title": "TCWealth",
+      "description": "Quản lý tài sản cùng chuyên gia TCWealth.",
+      "keywords": [
+        "tcwealth",
+        "quan ly tai san"
+      ],
+      "menuPath": [
+        "Đối tác",
+        "TCWealth"
+      ],
+      "facets": {},
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:222"
+      }
+    },
+    {
+      "id": "partners.insurance",
+      "route": {
+        "pattern": "/partners/insurance"
+      },
+      "title": "Bảo hiểm",
+      "description": "Sản phẩm bảo hiểm từ đối tác liên kết.",
+      "keywords": [
+        "bao hiem"
+      ],
+      "menuPath": [
+        "Đối tác",
+        "Bảo hiểm"
+      ],
+      "facets": {},
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:227"
+      }
+    },
+    {
+      "id": "favorites",
+      "route": {
+        "pattern": "/favorites"
+      },
+      "title": "Tùy chỉnh tính năng ưa thích",
+      "description": "Chọn các tính năng hiện ở mục ưa thích trên trang chủ.",
+      "keywords": [
+        "ua thich",
+        "tuy chinh"
+      ],
+      "menuPath": [
+        "Ưa thích",
+        "Tùy chỉnh tính năng ưa thích"
+      ],
+      "facets": {},
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:232"
+      }
+    },
+    {
+      "id": "feedback",
+      "route": {
+        "pattern": "/feedback"
+      },
+      "title": "Góp ý",
+      "description": "Gửi góp ý, báo lỗi cho đội phát triển.",
+      "keywords": [
+        "gop y",
+        "phan hoi",
+        "bao loi"
+      ],
+      "menuPath": [
+        "Góp ý"
+      ],
+      "facets": {},
+      "access": {
+        "requires": [],
+        "unknownGuards": []
+      },
+      "targets": [],
+      "sampleQuestions": [],
+      "tourIds": [],
+      "provenance": {
+        "source": [
+          "static"
+        ],
+        "reviewed": false,
+        "sourceRef": "src/app/app.routes.ts:237"
+      }
+    }
+  ],
+  "tours": [
+    {
+      "id": "sell-bond",
+      "title": "Bán trái phiếu trên iConnect",
+      "description": "Dẫn từ trang chủ tới nút BÁN trong danh mục trái phiếu đang nắm giữ.",
+      "startRoute": "/home",
+      "steps": [
+        {
+          "tourId": "home-shortcut-iconnect",
+          "text": "Bắt đầu từ trang chủ: bấm vào **Giao dịch iConnect** để vào bảng giá trái phiếu.",
+          "advanceOn": "click",
+          "route": "/home",
+          "label": "Giao dịch iConnect"
+        },
+        {
+          "tourId": "iconnect-tab-assets",
+          "text": "Đây là bảng giá iConnect. Chuyển sang tab **Tài sản** để xem trái phiếu đang nắm giữ.",
+          "advanceOn": "click",
+          "route": "/iconnect/price-board",
+          "label": "Tab Tài sản"
+        },
+        {
+          "tourId": "assets-select-sell",
+          "text": "Bấm **CHỌN BÁN** để bật chế độ bán, mỗi trái phiếu sẽ hiện nút BÁN.",
+          "advanceOn": "click",
+          "route": "/iconnect/assets",
+          "label": "Chọn bán"
+        },
+        {
+          "tourId": "assets-sell-button",
+          "text": "Bấm **BÁN** ở dòng trái phiếu muốn bán. Từ đây bạn tự nhập khối lượng, giá và xác nhận lệnh; trợ lý không đặt lệnh hộ.",
+          "advanceOn": "next",
+          "route": "/iconnect/assets",
+          "label": "Bán"
+        }
+      ]
+    }
+  ],
+  "coverage": {
+    "routesFound": 41,
+    "routesWithTitle": 41,
+    "menuItemsMatched": 41,
+    "targetsFound": 9,
+    "warnings": []
+  }
+}

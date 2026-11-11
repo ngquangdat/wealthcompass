@@ -2,6 +2,14 @@ export interface ProjectSummary {
   path: string;
   name: string;
   angularVersion: string | null;
+  // Dự án tour chưa có source của web (discovery.source: none)
+  noSource?: boolean;
+  // web.url trong cấu hình
+  webUrl?: string | null;
+  // File kho SQLite chứa dữ liệu của dự án (ngoài source), hoặc thư mục web với dự án kiểu cũ
+  dataStore?: string;
+  // Dự án kiểu cũ: file của WealthCompass còn nằm cạnh source, nên chuyển bằng `wealthcompass migrate`
+  legacyFiles?: boolean;
   devPort: number;
   bootstrap: { kind: 'standalone' | 'ngmodule'; root: string } | null;
   routesFile: string | null;
@@ -49,20 +57,6 @@ export interface FeatureRow {
   sourceRef?: string;
 }
 
-export interface Hunk {
-  id: string;
-  header: string;
-  lines: string[];
-  added: number;
-  removed: number;
-}
-
-export interface FilePatch {
-  path: string;
-  head: string[];
-  hunks: Hunk[];
-}
-
 export interface ProcState {
   running: boolean;
   pid?: number;
@@ -70,10 +64,22 @@ export interface ProcState {
   exitCode?: number | null;
   port: number;
   available: boolean;
+  // Đang chạy nhưng không do Studio bật (terminal khác): Studio không dừng hay xem log được
+  external?: boolean;
 }
 
 export interface RunState {
-  backend: ProcState & { health: { features?: number; llmConfigured?: boolean; provider?: string; model?: string; pack?: string } | null };
+  // Backend chạy độc lập với Studio; Studio chỉ kết nối tới
+  backend: {
+    running: boolean;
+    port: number;
+    health: { features?: number; storedTours?: number; llmConfigured?: boolean; provider?: string; model?: string; debug?: boolean; tourDb?: string } | null;
+    command: { cwd: string; run: string; withStudio: string } | null;
+    // Kho tour của dự án (Studio ghi vào đây)
+    tourDb: string;
+    // Backend có đọc đúng kho đó không; null khi backend không báo (không chạy debug)
+    sameTourDb: boolean | null;
+  };
   web: ProcState & { url: string };
 }
 
@@ -83,7 +89,6 @@ export interface AiState {
   baseUrl: string;
   hasKey: boolean;
   keySource: string | null;
-  aiCode: boolean;
   providers: string[];
 }
 
@@ -98,36 +103,45 @@ export interface RoleRow {
 export interface GuardRow {
   name: string;
   requires: string[] | null;
-  status: 'unmapped' | 'draft' | 'reviewed' | 'code' | 'auth' | 'manual';
+  // default: chưa khai, chỉ cần đăng nhập. draft: cấu hình cũ còn quyền đoán từ tên, cần xem lại
+  status: 'default' | 'draft' | 'reviewed' | 'code' | 'auth' | 'manual';
+  // Chuỗi quyền thấy trong code của guard (gợi ý, chưa áp)
+  suggested?: string[];
   evidence: string | null;
   how: string;
   screens: string[];
 }
 
-export interface TourIdCandidate {
-  key: string;
-  tourId: string;
-  tag: string;
-  kind: string;
-  label: string | null;
-  sensitive: { level: 'sure' | 'maybe'; reason: string } | null;
-  screen: string;
-  screenTitle: string;
-  file: string;
-  line: number;
-  component: string;
-  // Mục menu sinh từ dữ liệu: gắn [tourMenu]="menuExpr", mỗi mục có mốc menu-<route>
-  menuExpr: string | null;
-}
-
 export interface TourStep {
+  // Khóa bước của tour ghi bằng locator (giữ locator khi sắp xếp lại)
+  key?: string;
+  // tourId ghim; rỗng = tìm phần tử theo locator đã ghi
   target: string;
-  advanceOn: 'click' | 'next';
+  // Mô tả phần tử đã ghi, vd. button "Bán" · app-bond-sell-panel
+  element?: string;
+  advanceOn: 'click' | 'next' | 'hover';
   text: string;
   known?: boolean;
   label?: string;
   route?: string;
   sensitive?: boolean;
+  // Ngày locator được làm mới (tour:verify --heal hoặc ghi lại bước)
+  healedAt?: string;
+}
+
+// Thiết bị của một bản tour
+export type TourLayout = 'desktop' | 'tablet' | 'mobile';
+
+// Locator đề xuất bởi tour:verify cho bước nhạy cảm, chờ người duyệt
+export interface TourProposal {
+  layout: TourLayout;
+  key: string;
+  index: number;
+  text: string;
+  from: string;
+  to: string;
+  changed: string[];
+  at: string;
 }
 
 export interface TourDef {
@@ -137,19 +151,14 @@ export interface TourDef {
   feature?: string;
   startRoute?: string;
   steps: TourStep[];
+  // recorded: ghi bằng tour:record (compass.tours.json), không cần tourId
+  source?: 'recorded';
+  // Thiết bị đã ghi (bản chính trước), vd. ['desktop', 'mobile']
+  layouts?: TourLayout[];
+  proposals?: TourProposal[];
   draft: boolean;
   valid: boolean;
   errors: string[];
-}
-
-export interface PackState {
-  name: string;
-  dir: string | null;
-  editable: boolean;
-  error?: string;
-  glossary: string[][];
-  topics: Array<{ id: string; patterns: string[]; refusal: string }>;
-  prompt: string;
 }
 
 export interface AssistantMeta {
@@ -161,14 +170,13 @@ export interface AssistantMeta {
 }
 
 export interface DebugStage {
-  stage: 'guardrail' | 'prefetch' | 'llm' | 'tool' | 'error' | 'done';
+  stage: 'prefetch' | 'llm' | 'tool' | 'error' | 'done';
   data: Record<string, any>;
 }
 
 export interface EvalCase {
   q: string;
   expect: string[];
-  blocked?: boolean;
   roles?: string[];
   draft?: boolean; // AI vừa đề xuất, chưa lưu
 }
@@ -176,7 +184,6 @@ export interface EvalCase {
 export interface EvalRow {
   q: string;
   expect: string[];
-  blocked: boolean;
   rank: number | null;
   pass: boolean;
   reason: string | null;
@@ -185,7 +192,7 @@ export interface EvalRow {
 
 export interface EvalRun {
   at: string;
-  summary: { total: number; hit1: number; hit3: number; mrr: number; blockedOk: number; blockedTotal: number; failed: number };
+  summary: { total: number; hit1: number; hit3: number; mrr: number; failed: number };
   rows: EvalRow[];
 }
 
@@ -198,7 +205,6 @@ export interface LogStats {
   outcomes: { offered: number; answered: number; not_found: number; refused: number; error: number };
   fallback: number;
   latency: { p50: number | null; p95: number | null };
-  byTopic: Record<string, number>;
   notFound: Array<{ q: string; count: number; last: string }>;
   funnel: Array<{ tourId: string; offered: number; started: number; completed: number; cancelled: number; failed: number }>;
   daily: Array<{ day: string; n: number }>;

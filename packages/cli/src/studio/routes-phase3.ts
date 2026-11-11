@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
+import { exists, readText, writeText } from '@wealthcompass/tourdb';
 import { join } from 'node:path';
 import type { OutgoingHttpHeaders } from 'node:http';
 import type { FastifyInstance } from 'fastify';
@@ -6,23 +7,20 @@ import { z } from 'zod';
 import { normalizeVi } from '@wealthcompass/core';
 import { completeText } from '@wealthcompass/llm';
 import { loadConfig } from '../scan';
-import { backendUrl, cachedScan, configPath, eventLogFile, httpError, llm, loadDoc, parseJson, requireApp, stream } from './context';
+import { backendUrl, cachedScan, dataFile, configPath, eventLogFile, httpError, llm, loadDoc, parseJson, requireApp, stream } from './context';
 
 // Đợt 3: thử trợ lý (qua chế độ debug của backend), bộ kiểm thử tìm kiếm, thống kê nhật ký hỏi đáp
 
 const evalCaseSchema = z.object({
   q: z.string().trim().min(2).max(300),
-  // Màn hình đúng (một trong các id); bỏ trống khi câu phải bị chặn
+  // Màn hình đúng (một trong các id)
   expect: z.array(z.string()).default([]),
-  // Câu này phải bị chặn bởi chủ đề cấm của Domain Pack
-  blocked: z.boolean().optional(),
   // Quyền của người hỏi; bỏ trống = có mọi quyền (chỉ kiểm tra tìm kiếm)
   roles: z.array(z.string()).optional(),
 });
 type EvalCase = z.infer<typeof evalCaseSchema>;
 
 interface DebugSearch {
-  verdict: { blocked: boolean; topic?: string };
   terms: string[];
   threshold: number;
   ranked: Array<{ id: string; title: string; score: number; allowed: boolean }>;
@@ -31,19 +29,20 @@ interface DebugSearch {
 export interface EvalRow {
   q: string;
   expect: string[];
-  blocked: boolean;
   rank: number | null; // thứ hạng của màn hình đúng trong kết quả trợ lý thấy được (1 = đầu)
-  pass: boolean; // đúng trong top 3 (hoặc bị chặn đúng)
+  pass: boolean; // đúng trong top 3
   reason: string | null;
   top: Array<{ id: string; title: string; score: number }>;
 }
 
-const evalFile = (app: string) => join(app, 'compass.eval.yaml');
-const lastEvalFile = (app: string) => join(app, '.wealthcompass', 'eval-last.json');
+const evalFile = (app: string) => dataFile(app, 'compass.eval.yaml');
+// Kết quả lần chạy gần nhất: trong kho dự án, hoặc .wealthcompass/ của dự án kiểu cũ
+const lastEvalFile = (app: string) => (dataFile(app, 'x').includes('.db/') ? dataFile(app, 'eval-last.json') : join(app, '.wealthcompass', 'eval-last.json'));
 
 function readCases(app: string): EvalCase[] {
   const raw = (loadDoc(evalFile(app)).toJSON() as { cases?: unknown[] } | null)?.cases ?? [];
-  return raw.map((c) => {
+  // File cũ có thể còn câu `blocked: true` (bộ lọc chủ đề đã bỏ): bỏ qua các câu đó
+  return raw.filter((c) => !(c as Record<string, unknown>)['blocked']).map((c) => {
     const r = c as Record<string, unknown>;
     // Cho phép viết tay gọn: expect là một chuỗi
     return evalCaseSchema.parse({ ...r, expect: typeof r['expect'] === 'string' ? [r['expect']] : r['expect'] });
@@ -69,8 +68,8 @@ async function backendHealth(app: string): Promise<{ running: boolean; debug: bo
 
 async function requireDebugBackend(app: string): Promise<string> {
   const h = await backendHealth(app);
-  if (!h.running) throw httpError(400, 'Backend chưa chạy. Bật backend ở trang Chạy thử.');
-  if (!h.debug) throw httpError(400, 'Backend đang chạy không có chế độ debug. Khởi động lại backend từ trang Chạy thử (cần gói WealthCompass 0.2.0 trở lên).');
+  if (!h.running) throw httpError(400, 'Backend chưa chạy. Backend chạy độc lập với Studio: bật nó bằng lệnh ở trang Chạy thử.');
+  if (!h.debug) throw httpError(400, 'Backend đang chạy không có chế độ debug. Khởi động lại backend với COMPASS_DEBUG=1 (lệnh đầy đủ ở trang Chạy thử).');
   return h.url;
 }
 
@@ -78,12 +77,6 @@ export function scoreCase(c: EvalCase, res: DebugSearch): EvalRow {
   // Trợ lý chỉ thấy màn hình đủ quyền và vượt ngưỡng điểm
   const visible = res.ranked.filter((r) => r.allowed && r.score >= res.threshold);
   const top = visible.slice(0, 3).map(({ id, title, score }) => ({ id, title, score }));
-  if (c.blocked) {
-    return { q: c.q, expect: c.expect, blocked: true, rank: null, pass: res.verdict.blocked, reason: res.verdict.blocked ? null : 'không bị chặn', top };
-  }
-  if (res.verdict.blocked) {
-    return { q: c.q, expect: c.expect, blocked: false, rank: null, pass: false, reason: `bị chặn nhầm (chủ đề ${res.verdict.topic})`, top };
-  }
   const index = visible.findIndex((r) => c.expect.includes(r.id));
   const rank = index === -1 ? null : index + 1;
   let reason: string | null = null;
@@ -93,19 +86,17 @@ export function scoreCase(c: EvalCase, res: DebugSearch): EvalRow {
   } else if (rank > 3) {
     reason = `xếp thứ ${rank}`;
   }
-  return { q: c.q, expect: c.expect, blocked: false, rank, pass: rank !== null && rank <= 3, reason, top };
+  return { q: c.q, expect: c.expect, rank, pass: rank !== null && rank <= 3, reason, top };
 }
 
 export function summarize(rows: EvalRow[]) {
-  const search = rows.filter((r) => !r.blocked);
+  const search = rows;
   const n = search.length || 1;
   return {
     total: rows.length,
     hit1: search.filter((r) => r.rank === 1).length / n,
     hit3: search.filter((r) => r.rank !== null && r.rank <= 3).length / n,
     mrr: search.reduce((s, r) => s + (r.rank ? 1 / r.rank : 0), 0) / n,
-    blockedOk: rows.filter((r) => r.blocked && r.pass).length,
-    blockedTotal: rows.filter((r) => r.blocked).length,
     failed: rows.filter((r) => !r.pass).length,
   };
 }
@@ -129,8 +120,6 @@ interface LogEntry {
 export function logStats(entries: LogEntry[], tourIds: Set<string>) {
   const chats = entries.filter((e) => e.event === 'chat');
   const count = (k: string) => chats.filter((e) => e.outcome === k).length;
-  const byTopic: Record<string, number> = {};
-  for (const e of chats) if (e.outcome === 'refused' && e.topic) byTopic[e.topic] = (byTopic[e.topic] ?? 0) + 1;
 
   // Câu không tìm thấy: gom theo dạng chuẩn hóa để thấy câu nào lặp lại nhiều
   const notFound = new Map<string, { q: string; count: number; last: string }>();
@@ -162,7 +151,6 @@ export function logStats(entries: LogEntry[], tourIds: Set<string>) {
     outcomes: { offered: count('offered'), answered: count('answered'), not_found: count('not_found'), refused: count('refused'), error: count('error') },
     fallback: chats.filter((e) => e.fallback).length,
     latency: { p50: pct(0.5), p95: pct(0.95) },
-    byTopic,
     notFound: [...notFound.values()].sort((a, b) => b.count - a.count || b.last.localeCompare(a.last)).slice(0, 30),
     funnel: [...funnel.values()].sort((a, b) => b.offered - a.offered),
     daily: [...days].sort(([a], [b]) => a.localeCompare(b)).map(([day, n]) => ({ day, n })),
@@ -205,17 +193,17 @@ export function registerPhase3(app: FastifyInstance): void {
   // ======================= Kiểm thử =======================
   app.get('/api/eval', async () => {
     const dir = requireApp();
-    const last = existsSync(lastEvalFile(dir)) ? JSON.parse(readFileSync(lastEvalFile(dir), 'utf8')) : null;
-    return { file: existsSync(evalFile(dir)), cases: readCases(dir), last, roles: allRoles(dir) };
+    const last = exists(lastEvalFile(dir)) ? JSON.parse(readText(lastEvalFile(dir))) : null;
+    return { file: exists(evalFile(dir)), cases: readCases(dir), last, roles: allRoles(dir) };
   });
 
   app.put('/api/eval', async (req) => {
     const dir = requireApp();
     const cases = z.array(evalCaseSchema).max(1000).parse((req.body as { cases: unknown }).cases);
     const doc = loadDoc(evalFile(dir));
-    if (!doc.commentBefore) doc.commentBefore = ' Bộ câu hỏi kiểm thử tìm kiếm của WealthCompass (Studio > Kiểm thử).\n expect: id màn hình đúng; blocked: true nếu câu phải bị chặn; roles: quyền người hỏi (bỏ trống = mọi quyền)';
-    doc.set('cases', doc.createNode(cases.map((c) => ({ q: c.q, ...(c.blocked ? { blocked: true } : { expect: c.expect.length === 1 ? c.expect[0] : c.expect }), ...(c.roles?.length ? { roles: c.roles } : {}) }))));
-    writeFileSync(evalFile(dir), String(doc));
+    if (!doc.commentBefore) doc.commentBefore = ' Bộ câu hỏi kiểm thử tìm kiếm của WealthCompass (Studio > Kiểm thử).\n expect: id màn hình đúng; roles: quyền người hỏi (bỏ trống = mọi quyền)';
+    doc.set('cases', doc.createNode(cases.map((c) => ({ q: c.q, expect: c.expect.length === 1 ? c.expect[0] : c.expect, ...(c.roles?.length ? { roles: c.roles } : {}) }))));
+    writeText(evalFile(dir), String(doc));
     return { ok: true, count: cases.length };
   });
 
@@ -236,8 +224,8 @@ export function registerPhase3(app: FastifyInstance): void {
         if ((i + 1) % 20 === 0) log(`Đã chạy ${i + 1}/${cases.length}`);
       }
       const result = { at: new Date().toISOString(), summary: summarize(rows), rows };
-      mkdirSync(join(dir, '.wealthcompass'), { recursive: true });
-      writeFileSync(lastEvalFile(dir), JSON.stringify(result));
+      if (!lastEvalFile(dir).includes('.db/')) mkdirSync(join(dir, '.wealthcompass'), { recursive: true });
+      writeText(lastEvalFile(dir), JSON.stringify(result));
       log(`Xong: hit@3 ${(result.summary.hit3 * 100).toFixed(0)}%, ${result.summary.failed} câu chưa đạt.`);
       return result;
     });
@@ -286,8 +274,8 @@ export function registerPhase3(app: FastifyInstance): void {
     const file = eventLogFile(dir);
     const since = new Date(Date.now() - days * 86_400_000).toISOString();
     const entries: LogEntry[] = [];
-    if (existsSync(file)) {
-      for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (exists(file)) {
+      for (const line of readText(file).split('\n')) {
         if (!line.trim()) continue;
         try {
           const e = JSON.parse(line) as LogEntry;
@@ -298,6 +286,6 @@ export function registerPhase3(app: FastifyInstance): void {
       }
     }
     const tourIds = new Set(cachedScan(dir).featureMap.tours.map((t) => t.id));
-    return { file, exists: existsSync(file), days, ...logStats(entries, tourIds) };
+    return { file, exists: exists(file), days, ...logStats(entries, tourIds) };
   });
 }

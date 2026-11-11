@@ -1,10 +1,9 @@
 // Kiểm tra nhanh chất lượng tìm kiếm trên Feature Map thật (chạy: npx tsx src/search-check.ts)
 import { FeatureStore } from './feature-store.js';
 import { loadConfig } from './config.js';
-import { loadPack } from './pack.js';
 
 const config = loadConfig();
-const store = new FeatureStore(config.featureMapPath, loadPack(config.packDir));
+const store = new FeatureStore(config.featureMapPath);
 const caps = ['stock_account', 'bond_account'];
 const cases: Array<[string, string]> = [
   ['bán trái phiếu ở đâu?', 'iconnect.assets'],

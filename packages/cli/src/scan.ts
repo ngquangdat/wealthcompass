@@ -1,6 +1,6 @@
 import { Project } from 'ts-morph';
 import { dirname, join, resolve } from 'node:path';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { exists, readText, writeText } from '@wealthcompass/tourdb';
 import { parse as parseYaml } from 'yaml';
 import {
   SCHEMA_VERSION,
@@ -9,26 +9,32 @@ import {
   type CompassConfig,
   type Feature,
   type FeatureMap,
+  type Layout,
   type Target,
   type Tour,
 } from '@wealthcompass/contracts';
 import { scanRoutes, type ScannedLayout, type ScannedRoute } from './routes';
+import { loadTranslator } from './i18n';
 import { scanMenu } from './menu';
 import { MENU_TARGETS } from './template';
-import { menuTourId } from '@wealthcompass/core';
+import { menuTourId, routeMatches } from '@wealthcompass/core';
+import { readToursFile } from './record/write';
+import { readIndex, sourceFingerprint, writeIndex } from './index-cache';
 
 interface Overrides {
   features?: Record<
     string,
     Partial<Pick<Feature, 'title' | 'description' | 'keywords' | 'sampleQuestions' | 'facets'>> & {
       hidden?: boolean;
+      // Chỉ dùng khi chưa có source (discovery.source: none): khai màn hình bằng tay, vd. /orders/:id
+      route?: string;
       // Quyền ghi đè cho riêng màn hình (thay cho quyền suy từ guard); [] = không cần quyền riêng
       requires?: string[];
       // Các trường do LLM soạn (lệnh enrich) và chưa được người duyệt; xóa khóa này sau khi đọc lại
       llmDraft?: string[];
     }
   >;
-  tours?: Record<string, { title: string; description?: string; feature?: string; startRoute: string; steps: Array<{ target: string; text: string; advanceOn?: 'next' | 'click' }> }>;
+  tours?: Record<string, { title: string; description?: string; feature?: string; startRoute: string; steps: Array<{ target: string; text: string; advanceOn?: 'next' | 'click' | 'hover' }> }>;
 }
 
 interface Lock {
@@ -59,10 +65,31 @@ export interface ScanResult {
   outFile: string;
   contexts: Record<string, FeatureContext>;
   hidden: HiddenScreen[];
-  // Project ts-morph đã nạp; annotate dùng lại để tính chỗ sửa mà không phải nạp lần nữa
+  // Project ts-morph đã nạp (phân tích guard, doctor dùng lại)
   project: Project;
   root: string;
   layouts: ScannedLayout[];
+  // Route/menu lấy từ chỉ mục SQLite (source chưa đổi): `project` rỗng, `layouts` và `contexts[*].classes` rỗng.
+  // Việc cần đọc mã nguồn (enrich, phân tích guard, doctor) phải quét đầy đủ (không truyền useIndex).
+  fromIndex: boolean;
+}
+
+export interface ScanOptions {
+  // Dùng chỉ mục source nếu còn hiệu lực thay vì nạp ts-morph. Kết quả Feature Map giống hệt quét đầy đủ.
+  useIndex?: boolean;
+}
+
+// Phần của route lưu được vào chỉ mục (không gồm đối tượng ts-morph)
+type IndexedRoute = Omit<ScannedRoute, 'classes'>;
+interface SourceIndex {
+  routes: IndexedRoute[];
+  menu: Array<[string, string[]]>;
+  warnings: string[];
+}
+
+// File dữ liệu của WealthCompass: sửa chúng không làm chỉ mục source hết hiệu lực
+export function indexIgnore(config: CompassConfig): string[] {
+  return [config.discovery.overrides, config.discovery.tours, config.discovery.tours.replace(/\.(db|json)$/, '.json'), config.discovery.tours.replace(/\.(db|json)$/, '.db'), config.discovery.out, 'compass.lock.json'];
 }
 
 function slug(path: string): string {
@@ -71,28 +98,109 @@ function slug(path: string): string {
 }
 
 function readYaml<T>(file: string): T | undefined {
-  return existsSync(file) ? (parseYaml(readFileSync(file, 'utf8')) as T) : undefined;
+  return exists(file) ? (parseYaml(readText(file)) as T) : undefined;
 }
 
-export function loadConfig(configPath: string): { config: CompassConfig; root: string } {
+// `root`: nơi chứa dữ liệu của WealthCompass (kho dự án SQLite, hoặc thư mục kiểu cũ). `sourceRoot`: thư mục source của web.
+// Dự án kiểu cũ thì hai nơi là một.
+export function loadConfig(configPath: string): { config: CompassConfig; root: string; sourceRoot: string } {
   const file = resolve(configPath);
   const raw = readYaml<unknown>(file);
-  if (!raw) throw new Error(`Không đọc được cấu hình: ${file}`);
-  return { config: compassConfigSchema.parse(raw), root: dirname(file) };
+  if (!raw) throw new Error(`Không đọc được cấu hình: ${file}. Web chưa tích hợp thì chạy \`wealthcompass setup --app <thư mục web>\`.`);
+  const config = compassConfigSchema.parse(raw);
+  const root = dirname(file);
+  return { config, root, sourceRoot: config.discovery.sourceDir ? resolve(config.discovery.sourceDir) : root };
 }
 
-export function scan(configPath: string): ScanResult {
-  const { config, root } = loadConfig(configPath);
+// Chưa có source: màn hình = route khai trong overrides (features.<id>.route) + route xuất hiện trong tour đã ghi.
+// Route trong tour là đường dẫn thật lúc ghi (/orders/42); muốn có tham số thì khai `route: /orders/:id` trong overrides.
+function observedRoutes(overrides: Overrides, recorded: ReturnType<typeof readToursFile>, discovery: CompassConfig['discovery']): ScannedRoute[] {
+  const make = (path: string, id: string | undefined, sourceRef: string): ScannedRoute =>
+    ({ path, title: undefined, data: id ? { compassId: id } : {}, guards: [], targets: [], uiText: [], classes: [], componentName: undefined, sourceRef }) as unknown as ScannedRoute;
+  const routes: ScannedRoute[] = [];
+  for (const [id, ov] of Object.entries(overrides.features ?? {})) {
+    if (typeof ov?.route === 'string' && ov.route.startsWith('/')) routes.push(make(ov.route, id, `${discovery.overrides}: features.${id}.route`));
+  }
+  const add = (path: string | undefined, tourId: string) => {
+    if (!path || !path.startsWith('/') || routes.some((r) => routeMatches(r.path, path))) return;
+    routes.push(make(path, undefined, `${discovery.tours}: tour ${tourId}`));
+  };
+  for (const [tourId, def] of Object.entries(recorded.tours)) {
+    add(def.startRoute, tourId);
+    for (const s of [...def.steps, ...Object.values(def.variants ?? {}).flat()]) add(s.route, tourId);
+    // Màn hình đích của tour (nơi dừng ghi) có thể không có bước nào: tính năng sở hữu tour vẫn cần tồn tại
+    add(def.endRoute, tourId);
+  }
+  return routes;
+}
+
+// Id tính năng suy từ đường dẫn (dùng chung cho scan và tour:record khi chưa có source)
+export function featureIdOfRoute(path: string): string {
+  return slug(path.split(/[?#]/)[0]);
+}
+
+export function scan(configPath: string, options: ScanOptions = {}): ScanResult {
+  const { config, root, sourceRoot } = loadConfig(configPath);
   const warnings: string[] = [];
 
-  const project = new Project({ tsConfigFilePath: join(root, 'tsconfig.app.json'), skipAddingFilesFromTsConfig: false });
-  const { routes, layouts } = scanRoutes(project, config.discovery.entry, root, warnings);
-  const menu = scanMenu(project, config.discovery.menu, root, warnings);
   const overrides = readYaml<Overrides>(join(root, config.discovery.overrides)) ?? {};
+  const noSource = config.discovery.source === 'none';
+  if (!noSource && !config.discovery.entry) throw new Error('compass.config.yaml thiếu discovery.entry (file route gốc). Chưa có source thì đặt discovery.source: none.');
+  // Phần tốn thời gian (ts-morph đọc route, menu, template) chỉ phụ thuộc source: lưu vào chỉ mục theo dấu vân tay source
+  const fingerprint = noSource ? '' : sourceFingerprint(sourceRoot, indexIgnore(config));
+  const cached = !noSource && options.useIndex ? readIndex<SourceIndex>(sourceRoot, 'scan', fingerprint) : null;
+  let project: Project;
+  let routes: ScannedRoute[];
+  let layouts: ScannedLayout[] = [];
+  let menu: Map<string, string[]>;
+  if (noSource) {
+    project = new Project({ useInMemoryFileSystem: true });
+    routes = observedRoutes(overrides, readToursFile(join(root, config.discovery.tours)), config.discovery);
+    menu = new Map();
+  } else if (cached) {
+    project = new Project({ useInMemoryFileSystem: true });
+    routes = cached.routes.map((r) => ({ ...r, classes: [] }));
+    menu = new Map(cached.menu);
+    warnings.push(...cached.warnings);
+  } else {
+    project = new Project({ tsConfigFilePath: join(sourceRoot, 'tsconfig.app.json'), skipAddingFilesFromTsConfig: false });
+    const scanned = scanRoutes(project, config.discovery.entry!, sourceRoot, warnings);
+    routes = scanned.routes;
+    layouts = scanned.layouts;
+    menu = scanMenu(project, config.discovery.menu, sourceRoot, warnings);
+    // Cảnh báo tới đây đều từ source (route, menu): lưu kèm để lần đọc chỉ mục báo y như quét đầy đủ
+    const index: SourceIndex = { routes: routes.map(({ classes: _classes, ...rest }) => rest), menu: [...menu], warnings: [...warnings] };
+    writeIndex(sourceRoot, 'scan', fingerprint, index);
+  }
+
+  // Khóa i18n (data.title: 'guest.t2', nhãn menu, {{ 'x' | translate }}) dịch bằng file dịch của web. Dịch sau chỉ mục:
+  // file dịch nằm trong source nên đổi nó thì chỉ mục cũng hết hiệu lực, còn bản dịch luôn lấy từ file hiện tại.
+  const i18n = noSource ? null : loadTranslator(sourceRoot, config.locale, config.discovery.i18n, warnings);
+  if (i18n) {
+    const tr = (s: string) => i18n.text(s);
+    // Chữ trên màn hình là khóa không có bản dịch: bỏ, chỉ làm nhiễu ngữ cảnh của LLM và tìm kiếm
+    const texts = (list: string[]) => [...new Set(list.filter((t) => !i18n.missing(t)).map(tr))];
+    routes = routes.map((r) => ({
+      ...r,
+      ...(typeof r.title === 'string' ? { title: tr(r.title) } : {}),
+      ...(typeof r.data['description'] === 'string' ? { data: { ...r.data, description: tr(r.data['description']) } } : {}),
+      uiText: texts(r.uiText),
+      targets: r.targets.map((t) => ({ ...t, ...(t.label ? { label: tr(t.label) } : {}), ...(t.hint ? { hint: tr(t.hint) } : {}) })),
+    }));
+    menu = new Map([...menu].map(([path, labels]) => [path, labels.map(tr)]));
+    const untranslated = routes.filter((r) => typeof r.title === 'string' && i18n.missing(r.title));
+    if (untranslated.length) {
+      warnings.push(
+        i18n.file
+          ? `${untranslated.length} route có title là khóa i18n không có trong ${i18n.file} (vd. ${untranslated[0].title} ở ${untranslated[0].path}): thêm bản dịch hoặc đặt title trong overrides`
+          : `${untranslated.length} route có title giống khóa i18n (vd. ${untranslated[0].title}) nhưng không tìm thấy file dịch: khai discovery.i18n (vd. src/assets/i18n/vi.json) trong compass.config.yaml`,
+      );
+    }
+  }
 
   // Khóa ổn định: nếu id sinh ra chưa có trong lock nhưng component cũ vẫn còn, coi là đổi tên route
   const lockFile = join(root, 'compass.lock.json');
-  const lock: Lock = existsSync(lockFile) ? JSON.parse(readFileSync(lockFile, 'utf8')) : { features: {} };
+  const lock: Lock = exists(lockFile) ? JSON.parse(readText(lockFile)) : { features: {} };
   const claimed = new Set<string>();
   const idFor = (r: ScannedRoute): string => {
     const explicit = r.data['compassId'];
@@ -131,11 +239,13 @@ export function scan(configPath: string): ScanResult {
 
     const menuPath = menu.get(r.path) ?? [];
     if (menuPath.length) menuMatched++;
-    else warnings.push(`${r.sourceRef}: route ${r.path} không có trong menu (agent sẽ không trả lời được "ở đâu trong menu")`);
+    else if (!noSource) warnings.push(`${r.sourceRef}: route ${r.path} không có trong menu (agent sẽ không trả lời được "ở đâu trong menu")`);
 
     // Thứ tự: overrides > title của route > nhãn menu (cuối đường dẫn menu). Dùng nhãn menu thay vì đường dẫn thô
     // vì người dùng nhìn thấy đúng chữ đó khi tìm trong menu.
-    const title = ov.title ?? r.title ?? menuPath.at(-1);
+    // title là khóa i18n chưa có bản dịch: nhãn menu (nếu có) dễ hiểu hơn chuỗi khóa
+    const routeTitle = r.title && i18n?.missing(r.title) && menuPath.length ? undefined : r.title;
+    const title = ov.title ?? routeTitle ?? menuPath.at(-1);
     if (title) routesWithTitle++;
     else warnings.push(`${r.sourceRef}: route ${r.path} thiếu title (data.title, nhãn menu hoặc overrides)`);
     const description = ov.description ?? (r.data['description'] as string | undefined) ?? '';
@@ -146,7 +256,8 @@ export function scan(configPath: string): ScanResult {
       warnings.push(`Feature "${id}": ${drafted.join(', ')} do LLM soạn, chưa duyệt (đọc lại rồi xóa khóa llmDraft trong overrides)`);
     }
 
-    // Guard -> quyền theo bảng trong config; guard lạ ghi unknownGuards
+    // Guard -> quyền theo bảng trong config. Guard không khai trong bảng: màn hình chỉ cần đăng nhập (mặc định),
+    // tên guard ghi vào unknownGuards để Studio liệt kê, không cảnh báo.
     const requires = new Set<string>();
     const unknownGuards: string[] = [];
     for (const g of r.guards) {
@@ -156,7 +267,6 @@ export function scan(configPath: string): ScanResult {
     }
     // Người duyệt ghi đè quyền cho màn hình này thì dùng đúng danh sách đó, guard chưa ánh xạ không còn là vấn đề
     const overrideRequires = Array.isArray(ov.requires) ? ov.requires.map(String) : null;
-    if (unknownGuards.length && !overrideRequires) warnings.push(`${r.sourceRef}: guard chưa ánh xạ quyền: ${unknownGuards.join(', ')}`);
 
     const seen = new Set<string>();
     const targets: Target[] = [];
@@ -225,6 +335,52 @@ export function scan(configPath: string): ScanResult {
     owner?.tourIds.push(tourId);
   }
 
+  // Tour ghi bằng `tour:record` (compass.tours.json): bước dùng locator không cần tourId trong template.
+  // Bước có tourId vẫn được kiểm như trên; locator thì chỉ kiểm màn hình của bước có trong Feature Map.
+  const recorded = readToursFile(join(root, config.discovery.tours));
+  for (const [tourId, def] of Object.entries(recorded.tours)) {
+    if (tours.some((t) => t.id === tourId)) {
+      warnings.push(`Tour "${tourId}" có ở cả overrides lẫn ${config.discovery.tours}; dùng bản trong overrides`);
+      continue;
+    }
+    const variants = Object.entries(def.variants ?? {}) as Array<[Layout, typeof def.steps]>;
+    const allSteps = [...def.steps, ...variants.flatMap(([, steps]) => steps)];
+    const missing = [...new Set(allSteps.filter((s) => s.tourId && !s.locator && !targetRoute.has(s.tourId)).map((s) => s.tourId))];
+    if (missing.length) {
+      warnings.push(`Tour "${tourId}" bị loại: không tìm thấy tourId ${missing.join(', ')} trong template`);
+      continue;
+    }
+    const unmatched = allSteps.filter((s) => s.route && !features.some((f) => routeMatches(f.route.pattern, s.route!)));
+    for (const s of unmatched) warnings.push(`Tour "${tourId}" bước ${s.key ?? '?'}: màn hình ${s.route} không có trong Feature Map`);
+    if (def.draft) warnings.push(`Tour "${tourId}" là nháp (${def.draftSource === 'llm' ? 'LLM soạn' : 'dựng bằng mẫu'}), chưa duyệt: đọc lại chữ rồi bấm Lưu ở trang Tour của Studio`);
+    const mapSteps = (steps: typeof def.steps) =>
+      steps.map((s, i) => {
+        const t = s.tourId ? targetRoute.get(s.tourId) : undefined;
+        return {
+          key: s.key ?? `s${i + 1}`,
+          ...(s.tourId && t ? { tourId: s.tourId } : {}),
+          ...(s.locator ? { locator: s.locator } : {}),
+          text: s.text,
+          advanceOn: s.advanceOn,
+          route: t?.route ?? s.route,
+          label: t?.label ?? s.label ?? s.locator?.name ?? s.locator?.text,
+          ...(s.skipIfNextVisible ? { skipIfNextVisible: true } : {}),
+        };
+      });
+    tours.push({
+      id: tourId,
+      title: def.title,
+      description: def.description,
+      startRoute: def.startRoute,
+      steps: mapSteps(def.steps),
+      ...(def.layout ? { layout: def.layout } : {}),
+      ...(variants.length ? { variants: Object.fromEntries(variants.map(([layout, steps]) => [layout, mapSteps(steps)])) } : {}),
+    });
+    const owner = features.find((f) => f.id === def.feature);
+    if (def.feature && !owner) warnings.push(`Tour "${tourId}": feature "${def.feature}" không tồn tại`);
+    owner?.tourIds.push(tourId);
+  }
+
   // Dọn lock: id không còn route nào dùng thì bỏ và cảnh báo
   for (const id of Object.keys(lock.features)) {
     if (!claimed.has(id)) {
@@ -249,7 +405,8 @@ export function scan(configPath: string): ScanResult {
   });
 
   const outFile = resolve(root, config.discovery.out);
-  writeFileSync(outFile, JSON.stringify(featureMap, null, 2) + '\n');
-  writeFileSync(lockFile, JSON.stringify(lock, null, 2) + '\n');
-  return { featureMap, outFile, contexts, hidden, project, root, layouts };
+  writeText(outFile, JSON.stringify(featureMap, null, 2) + '\n');
+  writeText(lockFile, JSON.stringify(lock, null, 2) + '\n');
+  // `root` của kết quả quét là thư mục source
+  return { featureMap, outFile, contexts, hidden, project, root: sourceRoot, layouts, fromIndex: Boolean(cached) };
 }

@@ -1,12 +1,12 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { exists, readText, writeText } from '@wealthcompass/tourdb';
 
 // Đọc/sửa wealthcompass.env mà giữ nguyên chú thích và thứ tự dòng.
 // Giá trị rỗng = comment dòng đó lại (`# KEY=`), vì biến rỗng vẫn được backend coi là "đã đặt".
 
 export function readEnvFile(file: string): Record<string, string> {
   const out: Record<string, string> = {};
-  if (!existsSync(file)) return out;
-  for (const line of readFileSync(file, 'utf8').split('\n')) {
+  if (!exists(file)) return out;
+  for (const line of readText(file).split('\n')) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/);
     if (m) out[m[1]] = m[2].replace(/\s+#.*$/, '').trim();
   }
@@ -14,7 +14,7 @@ export function readEnvFile(file: string): Record<string, string> {
 }
 
 export function updateEnvFile(file: string, changes: Record<string, string | null>): void {
-  const lines = existsSync(file) ? readFileSync(file, 'utf8').split('\n') : [];
+  const lines = exists(file) ? readText(file).split('\n') : [];
   for (const [key, raw] of Object.entries(changes)) {
     if (!/^[A-Z0-9_]+$/.test(key)) throw new Error(`Tên biến không hợp lệ: ${key}`);
     const value = raw === null ? '' : String(raw).replace(/[\r\n]/g, '').trim();
@@ -25,5 +25,5 @@ export function updateEnvFile(file: string, changes: Record<string, string | nul
     else if (commented !== -1) lines[commented] = value ? next : lines[commented];
     else if (value) lines.push(next);
   }
-  writeFileSync(file, lines.join('\n').replace(/\n*$/, '\n'));
+  writeText(file, lines.join('\n').replace(/\n*$/, '\n'));
 }

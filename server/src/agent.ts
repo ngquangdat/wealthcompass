@@ -1,11 +1,10 @@
-import { normalizeVi, redactPii } from '@wealthcompass/core';
+import { redactPii } from '@wealthcompass/core';
 import type { ChatEvent, ChatRequest } from '@wealthcompass/contracts';
 import type { Principal } from './auth.js';
 import type { ServerConfig } from './config.js';
 import type { FeatureStore } from './feature-store.js';
-import { classifyInput } from './guardrails.js';
 import { LlmError, streamChat, type LlmMessage, type ToolSpec } from '@wealthcompass/llm';
-import type { DomainPack } from './pack.js';
+import { SYSTEM_PROMPT } from './prompt.js';
 
 const MAX_ROUNDS = 4;
 
@@ -47,7 +46,6 @@ const TOOLS: ToolSpec[] = [
 export interface AgentDeps {
   config: ServerConfig;
   store: FeatureStore;
-  pack: DomainPack;
   log: (entry: Record<string, unknown>) => void;
   // Chỉ có ở chế độ debug (Studio): từng bước agent làm gì, để hiện bên cạnh câu trả lời
   trace?: (stage: string, data: Record<string, unknown>) => void;
@@ -90,21 +88,11 @@ export async function* runAgent(
   request: ChatRequest,
   signal: AbortSignal,
 ): AsyncGenerator<ChatEvent> {
-  const { store, pack, config, log } = deps;
+  const { store, config, log } = deps;
   const trace = deps.trace ?? (() => undefined);
   const startedAt = Date.now();
   const message = redactPii(request.message).text;
   const toolsUsed: string[] = [];
-
-  // Lớp 1: chặn trước khi gọi LLM
-  const verdict = classifyInput(message, pack);
-  trace('guardrail', { normalized: normalizeVi(message), blocked: verdict.blocked, topic: verdict.topic ?? null });
-  if (verdict.blocked) {
-    log({ event: 'chat', user: principal.id, q: message, outcome: 'refused', topic: verdict.topic });
-    yield { type: 'refusal', message: verdict.message ?? '' };
-    yield { type: 'done' };
-    return;
-  }
 
   // Quyền lấy từ token đã xác minh, KHÔNG tin danh sách quyền client gửi lên
   const capabilities = principal.roles;
@@ -118,7 +106,7 @@ export async function* runAgent(
     `Phần tử có tourId đang hiện: ${request.context.visibleTargets.join(', ') || '(không có)'}`,
     `Quyền tài khoản: ${capabilities.join(', ') || '(không có)'}`,
   ].join('\n');
-  const system = `${pack.systemPrompt}\n\nNGỮ CẢNH\n${context}\n\nKẾT QUẢ TRA CỨU BAN ĐẦU (cho câu hỏi hiện tại)\n${JSON.stringify(prefetch)}`;
+  const system = `${SYSTEM_PROMPT}\n\nNGỮ CẢNH\n${context}\n\nKẾT QUẢ TRA CỨU BAN ĐẦU (cho câu hỏi hiện tại)\n${JSON.stringify(prefetch)}`;
 
   const messages: LlmMessage[] = [
     { role: 'system', content: system },

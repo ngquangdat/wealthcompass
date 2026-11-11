@@ -22,7 +22,6 @@ export class ProjectStore {
     const warns = o?.checks.filter((c) => c.status === 'warn').length ?? 0;
     return {
       overview: !p?.integrated ? 'none' : fails ? 'danger' : warns ? 'warning' : 'success',
-      integrate: !p?.integrated ? 'warning' : p.patchPending || !p.installed ? 'warning' : 'success',
       screens: !o?.stats ? 'none' : o.stats.drafts || o.stats.missing ? 'warning' : 'success',
     } as Record<string, 'none' | 'success' | 'warning' | 'danger'>;
   });
@@ -46,7 +45,13 @@ export class ProjectStore {
   async refresh(): Promise<void> {
     const p = this.project();
     if (!p) return;
-    this.project.set(await this.api.post<ProjectSummary>('/api/project/open', { path: p.path }));
+    this.loading.set(true);
+    try {
+      await this.api.post('/api/rescan');
+      this.project.set(await this.api.post<ProjectSummary>('/api/project/open', { path: p.path }));
+    } finally {
+      this.loading.set(false);
+    }
     await this.refreshOverview();
   }
 

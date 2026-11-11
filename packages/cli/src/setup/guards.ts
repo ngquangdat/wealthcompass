@@ -4,14 +4,17 @@ import { redactPii } from '@wealthcompass/core';
 import { completeText, type LlmConfig } from '@wealthcompass/llm';
 import { memberExpr, type AuthGuess } from './detect';
 
-// Ánh xạ guard -> quyền và đoán cách lấy token. Mặc định chỉ phân tích tĩnh;
-// chỉ khi bật --ai-code mới gửi trích đoạn code (đã lọc PII) cho LLM.
+// Gợi ý quyền của guard và đoán cách lấy token. MẶC ĐỊNH mọi màn hình chỉ cần đăng nhập: quyền riêng chỉ có khi người
+// vận hành tự khai (access.guards hoặc ghi đè theo màn hình). Kết quả ở đây chỉ là gợi ý để người khai chọn, không tự áp:
+// đoán sai quyền làm trợ lý báo "không có quyền" với người thật ra vào được.
+// Mặc định chỉ phân tích tĩnh; chỉ khi bật "cho AI đọc mã nguồn" mới gửi trích đoạn code (đã lọc PII) cho LLM.
 
 export interface GuardMapping {
   name: string;
   requires: string[];
-  // auth: guard chỉ kiểm đăng nhập; code: đọc được chuỗi quyền trong code; name: đoán từ tên (cần duyệt); llm: LLM đọc code
-  how: 'auth' | 'code' | 'name' | 'llm' | 'unknown';
+  // auth: tên guard cho thấy chỉ kiểm đăng nhập; code: thấy chuỗi quyền trong code (gợi ý); llm: LLM đọc code (gợi ý);
+  // default: không đọc được gì, coi là chỉ cần đăng nhập
+  how: 'auth' | 'code' | 'llm' | 'default';
   evidence?: string;
 }
 
@@ -31,13 +34,6 @@ function definitionText(project: Project, name: string): string | null {
   return null;
 }
 
-function toSnake(name: string): string {
-  return name
-    .replace(/Guard$/i, '')
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .toLowerCase();
-}
-
 export function analyzeGuards(project: Project, names: string[]): GuardMapping[] {
   return names.map((name) => {
     const text = definitionText(project, name);
@@ -49,8 +45,8 @@ export function analyzeGuards(project: Project, names: string[]): GuardMapping[]
       if (found.size) return { name, requires: [...found], how: 'code', evidence: `chuỗi quyền trong code: ${[...found].join(', ')}` };
     }
     if (AUTH_ONLY.test(name)) return { name, requires: [], how: 'auth', evidence: 'tên cho thấy chỉ kiểm tra đã đăng nhập' };
-    if (!text) return { name, requires: [], how: 'unknown', evidence: 'không tìm thấy định nghĩa guard' };
-    return { name, requires: [toSnake(name)], how: 'name', evidence: `đoán từ tên "${name}"` };
+    // Không đoán quyền từ tên guard: không rõ thì chỉ cần đăng nhập
+    return { name, requires: [], how: 'default', evidence: text ? 'không thấy chuỗi quyền trong code' : 'không tìm thấy định nghĩa guard' };
   });
 }
 
@@ -70,11 +66,11 @@ function parseJson(text: string): unknown {
 
 const excerpt = (text: string, max = 3500) => redactPii(text.length > max ? text.slice(0, max) + '\n// ...(cắt bớt)' : text).text;
 
-// LLM đọc code guard (chỉ những guard đang phải đoán từ tên)
+// LLM đọc code guard (chỉ những guard phân tích tĩnh không đọc được quyền)
 export async function refineGuardsWithLlm(project: Project, mappings: GuardMapping[], llm: LlmConfig, log: (m: string) => void): Promise<GuardMapping[]> {
   const out: GuardMapping[] = [];
   for (const g of mappings) {
-    if (g.how !== 'name') {
+    if (g.how !== 'default') {
       out.push(g);
       continue;
     }

@@ -4,7 +4,7 @@ import { relative } from 'node:path';
 import { createTwoFilesPatch } from 'diff';
 import { ClassDeclaration, Node, ObjectLiteralExpression, SourceFile } from 'ts-morph';
 
-// Mô hình sửa code dùng chung cho annotate và setup: mọi thay đổi là "chèn chữ tại vị trí" trong file GỐC,
+// Mô hình sửa code của setup: mọi thay đổi là "chèn chữ tại vị trí" trong file GỐC,
 // gom theo file rồi xuất một patch git duy nhất. Không ghi gì vào code.
 
 export interface Edit {
@@ -18,10 +18,6 @@ export type EditSet = Map<string, Edit[]>;
 
 export function addEdit(set: EditSet, file: string, edit: Edit): void {
   set.set(file, [...(set.get(file) ?? []), edit]);
-}
-
-export function mergeEdits(target: EditSet, source: EditSet): void {
-  for (const [file, list] of source) for (const e of list) addEdit(target, file, e);
 }
 
 export function applyEdits(text: string, edits: Edit[]): string {
@@ -73,20 +69,6 @@ export function importsEdit(file: SourceFile, moduleName: string, symbols: strin
     return { pos: named[named.length - 1].getEnd(), text: missing.map((m) => `, ${m}`).join('') };
   }
   const line = `import { ${missing.join(', ')} } from '${moduleName}';`;
-  if (imports.length) return { pos: imports[imports.length - 1].getEnd(), text: `\n${line}` };
-  return { pos: 0, text: `${line}\n` };
-}
-
-// Thêm `import { symbol } from 'module'` nếu chưa có
-export function importEdit(file: SourceFile, moduleName: string, symbol: string): Edit | null {
-  const imports = file.getImportDeclarations();
-  if (imports.some((i) => i.getNamedImports().some((n) => n.getName() === symbol))) return null;
-  const same = imports.find((i) => i.getModuleSpecifierValue() === moduleName);
-  if (same) {
-    const named = same.getNamedImports();
-    if (named.length) return { pos: named[named.length - 1].getEnd(), text: `, ${symbol}` };
-  }
-  const line = `import { ${symbol} } from '${moduleName}';`;
   if (imports.length) return { pos: imports[imports.length - 1].getEnd(), text: `\n${line}` };
   return { pos: 0, text: `${line}\n` };
 }

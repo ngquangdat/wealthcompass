@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
-import type { AiState, GuardRow, RoleRow } from '../core/models';
+import type { GuardRow, RoleRow } from '../core/models';
 import { ProjectStore } from '../core/project.store';
 import { ToastService } from '../core/toast.service';
 import { ChipsInputComponent } from '../shared/chips-input.component';
@@ -9,12 +9,12 @@ import { IconComponent } from '../shared/icon.component';
 import { PageHeaderComponent } from '../shared/page-header.component';
 
 const STATUS: Record<GuardRow['status'], { label: string; cls: string }> = {
-  unmapped: { label: 'Chưa ánh xạ', cls: 'danger' },
-  draft: { label: 'Đoán từ tên, cần duyệt', cls: 'warning' },
-  reviewed: { label: 'Đã duyệt', cls: 'success' },
-  code: { label: 'Đọc từ code', cls: 'success' },
-  auth: { label: 'Chỉ cần đăng nhập', cls: 'primary' },
-  manual: { label: 'Khai tay', cls: '' },
+  default: { label: 'Mặc định', cls: '' },
+  draft: { label: 'Đoán từ tên (cấu hình cũ), nên xem lại', cls: 'warning' },
+  reviewed: { label: 'Đã khai', cls: 'success' },
+  code: { label: 'Đã khai', cls: 'success' },
+  auth: { label: 'Đã khai', cls: 'success' },
+  manual: { label: 'Đã khai', cls: 'success' },
 };
 
 @Component({
@@ -22,14 +22,14 @@ const STATUS: Record<GuardRow['status'], { label: string; cls: string }> = {
   imports: [FormsModule, IconComponent, PageHeaderComponent, ChipsInputComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ui-page-header title="Quyền" subtitle="Guard trên route quyết định màn hình cần quyền gì. Trợ lý dựa vào đây để không chỉ đường tới màn hình người dùng không vào được." />
+    <ui-page-header title="Quyền" subtitle="Mặc định mọi màn hình chỉ cần đăng nhập. Chỉ khai quyền khi muốn trợ lý không chỉ đường tới màn hình mà người dùng thiếu quyền không vào được." />
 
-    <div class="alert info"><ui-icon name="info" /><span>Tên quyền phải trùng với giá trị trong claim quyền của JWT (mặc định <code>roles</code>). Guard chỉ kiểm tra đăng nhập thì để trống.</span></div>
+    <div class="alert info"><ui-icon name="info" /><span>Không cần làm gì ở trang này nếu web không phân quyền theo màn hình. Khi khai quyền: tên quyền phải trùng với giá trị trong claim quyền của JWT (mặc định <code>roles</code>); để trống là chỉ cần đăng nhập.</span></div>
 
     <section class="card">
       <div class="sec-head">
         <h3 class="grow">Danh mục quyền</h3>
-        <span class="muted small">Lưu trong <code>compass.config.yaml</code> (<code>access.roles</code>); dùng làm gợi ý khi chọn quyền cho guard, màn hình và Thử trợ lý.</span>
+        <span class="muted small">Lưu trong cấu hình của dự án (<code>access.roles</code>, trong kho dự án); dùng làm gợi ý khi chọn quyền cho guard, màn hình và Thử trợ lý.</span>
       </div>
       <table class="table">
         <thead><tr><th class="c-name">Quyền</th><th>Mô tả</th><th>Dùng ở</th><th></th></tr></thead>
@@ -56,7 +56,12 @@ const STATUS: Record<GuardRow['status'], { label: string; cls: string }> = {
                 } @else {
                   <button class="btn btn-ghost btn-sm" (click)="editRole(r)"><ui-icon name="edit" [size]="13" /> {{ r.inCatalog ? 'Sửa' : 'Khai' }}</button>
                   @if (r.inCatalog && !r.guards.length && !r.screens.length) {
-                    <button class="btn btn-ghost btn-icon btn-sm" (click)="removeRole(r)" title="Xóa khỏi danh mục"><ui-icon name="trash" [size]="13" /></button>
+                    @if (confirmingRole() === r.name) {
+                      <button class="btn btn-danger btn-sm" (click)="removeRole(r)">Xóa</button>
+                      <button class="btn btn-ghost btn-sm" (click)="confirmingRole.set(null)">Không</button>
+                    } @else {
+                      <button class="btn btn-ghost btn-icon btn-sm" (click)="confirmingRole.set(r.name)" title="Xóa khỏi danh mục"><ui-icon name="trash" [size]="13" /></button>
+                    }
                   }
                 }
               </td>
@@ -90,24 +95,17 @@ const STATUS: Record<GuardRow['status'], { label: string; cls: string }> = {
                   @if (g.evidence) { <div class="hint">{{ g.evidence }}</div> }
                 } @else {
                   @for (r of g.requires ?? []; track r) { <span class="chip">{{ r }}</span> }
-                  @if (g.requires && !g.requires.length) { <span class="muted small">Không cần quyền riêng</span> }
-                  @if (!g.requires) { <span class="muted small">—</span> }
+                  @if (!g.requires?.length) { <span class="muted small">Chỉ cần đăng nhập</span> }
+                  @if (!g.requires && g.suggested?.length) { <div class="hint">Trong code có: {{ g.suggested!.join(', ') }} (chưa áp)</div> }
                 }
               </td>
               <td><span class="badge" [class]="status(g).cls">{{ status(g).label }}</span></td>
               <td class="actions">
                 @if (editing() === g.name) {
-                  <button class="btn btn-ai btn-sm" (click)="askAi(g)" [disabled]="aiBusy() || !ai()?.aiCode" [title]="ai()?.aiCode ? 'AI đọc code guard' : 'Bật quyền đọc mã nguồn trong Cài đặt AI'">
-                    @if (aiBusy()) { <span class="spinner"></span> } @else { <ui-icon name="sparkles" [size]="13" /> } AI đọc code
-                  </button>
                   <button class="btn btn-sm" (click)="editing.set(null)">Hủy</button>
                   <button class="btn btn-primary btn-sm" (click)="save(g)">Lưu</button>
                 } @else {
-                  @if (g.status === 'draft' || g.status === 'unmapped') {
-                    <button class="btn btn-primary btn-sm" (click)="edit(g)">Duyệt</button>
-                  } @else {
-                    <button class="btn btn-ghost btn-sm" (click)="edit(g)"><ui-icon name="edit" [size]="13" /> Sửa</button>
-                  }
+                  <button class="btn btn-ghost btn-sm" (click)="edit(g)"><ui-icon name="edit" [size]="13" /> {{ g.requires ? 'Sửa' : 'Khai quyền' }}</button>
                 }
               </td>
             </tr>
@@ -140,8 +138,6 @@ export class PermissionsPage implements OnInit {
   private readonly toast = inject(ToastService);
   protected readonly guards = signal<GuardRow[]>([]);
   protected readonly editing = signal<string | null>(null);
-  protected readonly aiBusy = signal(false);
-  protected readonly ai = signal<AiState | null>(null);
   protected draft: string[] = [];
   protected readonly roles = signal<RoleRow[]>([]);
   protected readonly roleNames = computed(() => this.roles().map((r) => r.name));
@@ -151,7 +147,6 @@ export class PermissionsPage implements OnInit {
   protected newDesc = '';
 
   async ngOnInit(): Promise<void> {
-    this.ai.set(await this.api.get<AiState>('/api/ai').catch(() => null));
     await this.load();
   }
 
@@ -170,7 +165,8 @@ export class PermissionsPage implements OnInit {
   }
 
   protected edit(g: GuardRow): void {
-    this.draft = [...(g.requires ?? [])];
+    // Chưa khai thì điền sẵn chuỗi quyền thấy trong code để người chọn giữ hay xóa
+    this.draft = [...(g.requires ?? g.suggested ?? [])];
     this.editing.set(g.name);
   }
 
@@ -216,28 +212,16 @@ export class PermissionsPage implements OnInit {
     }
   }
 
+  // Xác nhận xóa ngay trong trang, không dùng confirm() của trình duyệt (bị chặn trong một số khung nhúng)
+  protected readonly confirmingRole = signal<string | null>(null);
+
   protected async removeRole(r: RoleRow): Promise<void> {
-    if (!confirm(`Xóa quyền "${r.name}" khỏi danh mục?`)) return;
+    this.confirmingRole.set(null);
     try {
       await this.api.delete(`/api/roles/${encodeURIComponent(r.name)}`);
       await this.load();
     } catch (e) {
       this.toast.error(e);
-    }
-  }
-
-  protected async askAi(g: GuardRow): Promise<void> {
-    this.aiBusy.set(true);
-    try {
-      const res = await this.api.stream<{ requires: string[]; evidence?: string; fromAi: boolean }>(`/api/guards/${encodeURIComponent(g.name)}/ai`, {}, () => undefined);
-      if (res.fromAi) {
-        this.draft = res.requires;
-        this.toast.success(`AI đề xuất: ${res.requires.join(', ') || 'không cần quyền riêng'}. Kiểm tra rồi bấm Lưu.`);
-      } else this.toast.show('AI không đọc được guard này; hãy khai tay.');
-    } catch (e) {
-      this.toast.error(e);
-    } finally {
-      this.aiBusy.set(false);
     }
   }
 }

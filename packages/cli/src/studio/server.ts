@@ -1,46 +1,52 @@
-import { randomBytes } from 'node:crypto';
-import { execFile, spawn } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { exists, readText } from '@wealthcompass/tourdb';
 import { homedir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { OutgoingHttpHeaders } from 'node:http';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { z } from 'zod';
 import { completeText, LLM_PRESETS } from '@wealthcompass/llm';
-import { buildGitPatch, gitTopLevel } from '../codemod';
+import { compassHome, listDocuments, tourDbPath } from '@wealthcompass/tourdb';
+import { parse as parseYaml } from 'yaml';
+import { CONFIG_NAME, dataRoot, usesStore } from '../project';
 import { enrich } from '../enrich';
-import { loadConfig, scan } from '../scan';
+import { loadConfig } from '../scan';
 import { doctor } from '../setup/doctor';
-import { setup } from '../setup/setup';
 import { VERSION } from '../version';
 import { readEnvFile, updateEnvFile } from './env-file';
 import { approveFeature, updateFeature, type FeatureChanges } from './overrides-edit';
-import { cachedScan, eventLogFile, invalidateScan, patchFile, configPath, featureRows, httpError, integrated, keySource, llm, llmEnv, projectSummary, requireApp, runCommand, state, stream } from './context';
+import { dataFile, cachedCodeChecks, cachedScan, isProject, noSource, eventLogFile, configPath, featureRows, httpError, integrated, keySource, llm, projectSummary, requireApp, rescan, state, stream } from './context';
 import { registerPhase2 } from './routes-phase2';
 import { registerPhase3 } from './routes-phase3';
-import { parsePatch, selectHunks } from './patch-hunks';
-import { backendBin, ngBin, onLog, procInfo, procLogs, startProc, stopAll, stopProc, type ProcName } from './processes';
+import { ngBin, onLog, portAnswers, procInfo, procLogs, sourceRepo, startProc, stopAll, stopProc, type ProcName } from './processes';
 
 // WealthCompass Studio: giao diện web chạy trên máy dev, bọc các lệnh sẵn có (setup, scan, enrich, doctor...).
-// Chỉ nghe 127.0.0.1, mọi API cần token ngẫu nhiên trong link mở Studio; kiểm Host để chặn DNS rebinding.
+// Chỉ nghe 127.0.0.1 và không dùng token. Chặn trang web khác trong trình duyệt gọi API bằng cách kiểm Host
+// (DNS rebinding) và Origin/Sec-Fetch-Site (yêu cầu từ site khác). Chương trình khác chạy trên cùng máy thì gọi được.
 
 export interface StudioOptions {
   port: number;
   open?: string; // thư mục dự án mở sẵn
-  tarballs: string | null;
 }
 
 export async function startStudio(opts: StudioOptions): Promise<{ url: string; close: () => Promise<void> }> {
-  const token = randomBytes(18).toString('base64url');
   const app = Fastify({ logger: false, bodyLimit: 2_000_000 });
 
-  // Bảo vệ: chỉ chấp nhận Host là localhost và token đúng cho mọi /api
+  // Bảo vệ: chỉ chấp nhận Host là localhost; API chỉ nhận yêu cầu từ chính giao diện Studio, không nhận từ trang web khác
+  const ownOrigins = new Set([`http://127.0.0.1:${opts.port}`, `http://localhost:${opts.port}`]);
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
     const host = (req.headers.host ?? '').split(':')[0];
     if (host !== '127.0.0.1' && host !== 'localhost') return reply.code(403).send({ error: 'host không hợp lệ' });
-    if (req.url.startsWith('/api/') && req.headers['x-studio-token'] !== token) return reply.code(401).send({ error: 'thiếu hoặc sai token Studio' });
+    if (!req.url.startsWith('/api/')) return;
+    // Trình duyệt gửi Origin cho mọi yêu cầu ghi và mọi yêu cầu khác site; Sec-Fetch-Site cho biết yêu cầu đến từ site nào.
+    // Thiếu cả hai (curl, công cụ dòng lệnh trên máy này) thì cho qua.
+    const origin = req.headers.origin;
+    const site = req.headers['sec-fetch-site'];
+    if ((origin && !ownOrigins.has(origin)) || site === 'cross-site' || site === 'same-site') {
+      return reply.code(403).send({ error: 'Studio chỉ nhận yêu cầu từ chính giao diện của nó' });
+    }
   });
   app.setErrorHandler((err: Error & { statusCode?: number }, _req, reply) => {
     reply.code(err.statusCode && err.statusCode >= 400 ? err.statusCode : 500).send({ error: err.message });
@@ -48,7 +54,7 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
 
   // Giao diện (bản build Angular)
   const here = dirname(fileURLToPath(import.meta.url));
-  const uiDir = [join(here, '..', 'studio-ui'), resolve(here, '..', '..', '..', 'studio-ui', 'dist', 'studio-ui', 'browser')].find((d) => existsSync(join(d, 'index.html')));
+  const uiDir = [join(here, '..', 'studio-ui'), resolve(here, '..', '..', '..', 'studio-ui', 'dist', 'studio-ui', 'browser')].find((d) => exists(join(d, 'index.html')));
   if (uiDir) {
     // wildcard: phục vụ file theo yêu cầu (không chỉ file có lúc khởi động) để build lại giao diện không cần khởi động lại
     await app.register(fastifyStatic, { root: uiDir, prefix: '/', wildcard: true });
@@ -64,23 +70,51 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
   app.get('/api/fs/list', async (req) => {
     const q = req.query as { path?: string };
     const dir = resolve(q.path || homedir());
-    if (!existsSync(dir) || !statSync(dir).isDirectory()) throw httpError(400, 'Không phải thư mục');
+    if (!exists(dir) || !statSync(dir).isDirectory()) throw httpError(400, 'Không phải thư mục');
     const entries = readdirSync(dir, { withFileTypes: true })
       .filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules')
       .map((e) => {
         const path = join(dir, e.name);
-        return { name: e.name, path, isAngular: existsSync(join(path, 'angular.json')), integrated: existsSync(join(path, 'compass.config.yaml')) };
+        return { name: e.name, path, isAngular: isProject(path), integrated: integrated(path) };
       })
       .sort((a, b) => Number(b.isAngular) - Number(a.isAngular) || a.name.localeCompare(b.name));
-    return { path: dir, parent: dirname(dir) === dir ? null : dirname(dir), isAngular: existsSync(join(dir, 'angular.json')), entries };
+    return { path: dir, parent: dirname(dir) === dir ? null : dirname(dir), isAngular: isProject(dir), entries };
+  });
+
+  // Các kho dự án đã có trên máy (~/.wealthcompass/projects): mở lại dự án mà không cần nhớ thư mục
+  app.get('/api/projects', async () => {
+    const home = join(compassHome(), 'projects');
+    if (!existsSync(home)) return { home, projects: [] };
+    const projects = readdirSync(home)
+      .filter((f) => f.endsWith('.db'))
+      .map((f) => {
+        const db = join(home, f);
+        try {
+          if (!listDocuments(db).includes(CONFIG_NAME)) return null;
+          const cfg = parseYaml(readText(join(db, CONFIG_NAME))) as { web?: { url?: string }; discovery?: { sourceDir?: string; source?: string } } | null;
+          const sourceDir = cfg?.discovery?.sourceDir ?? null;
+          // Mở bằng thư mục source (dự án có source) hoặc bằng chính file kho (dự án tour chưa có source)
+          return { db, name: f.replace(/(-[0-9a-f]{8})?\.db$/, ''), sourceDir, url: cfg?.web?.url ?? null, open: sourceDir ?? db, missingSource: Boolean(sourceDir && !existsSync(sourceDir)) };
+        } catch {
+          return null;
+        }
+      })
+      .filter((p): p is NonNullable<typeof p> => p !== null);
+    return { home, projects };
   });
 
   app.post('/api/project/open', async (req) => {
     const { path } = req.body as { path: string };
     const dir = resolve(path.replace(/^~(?=$|\/)/, homedir()));
-    if (!existsSync(join(dir, 'angular.json'))) throw httpError(400, `Không thấy angular.json trong ${dir}`);
+    if (!isProject(dir)) throw httpError(400, `${dir} không phải thư mục web Angular (không có angular.json) và cũng không phải kho dự án tour chưa có source (file .db tạo bằng \`wealthcompass init\`)`);
     state.appDir = dir;
     return projectSummary(dir);
+  });
+
+  // Quét lại source từ đầu (bỏ chỉ mục và bộ nhớ đệm)
+  app.post('/api/rescan', async () => {
+    rescan(requireApp());
+    return { ok: true };
   });
 
   // ---------------- Tổng quan ----------------
@@ -88,7 +122,10 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
     const dir = requireApp();
     if (!integrated(dir)) return { integrated: false, checks: [], warnings: [], stats: null };
     const scanned = cachedScan(dir);
-    const checks = await doctor(dir, undefined, scanned);
+    // Chưa có source: không có gì để kiểm trong code của web
+    const checks = noSource(dir)
+      ? [{ status: 'ok' as const, name: 'Cấu hình dự án', detail: 'dự án tour chưa có source (discovery.source: none): màn hình lấy từ tour đã ghi' }]
+      : await doctor(dir, undefined, scanned, { codeChecks: cachedCodeChecks(dir), devPort: projectSummary(dir).devPort });
     const { featureMap } = scanned;
     const rows = featureRows(dir);
     return {
@@ -103,106 +140,6 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
         tours: featureMap.tours.length,
       },
     };
-  });
-
-  // ---------------- Tích hợp ----------------
-  app.post('/api/setup', async (req, reply) => {
-    const dir = requireApp();
-    const body = (req.body ?? {}) as { pack?: string; backendUrl?: string; useAi?: boolean };
-    await stream(reply, async (log) => {
-      const result = await setup(
-        {
-          app: dir,
-          pack: body.pack ?? 'generic',
-          backendUrl: body.backendUrl ?? 'http://localhost:8890',
-          tarballs: tarballsDir(),
-          version: VERSION,
-          llm: body.useAi === false ? null : llm(),
-          aiCode: state.ai.aiCode,
-          annotate: null,
-          force: false,
-        },
-        log,
-      );
-      return { todo: result.todo, patch: result.patchFile !== null, stats: result.stats };
-    });
-  });
-
-  app.get('/api/patch', async (req) => {
-    const dir = requireApp();
-    const file = patchFile(dir, (req.query as { name?: string }).name);
-    if (!existsSync(file)) return { exists: false, files: [], report: readReport(dir) };
-    return { exists: true, files: parsePatch(readFileSync(file, 'utf8')), report: readReport(dir) };
-  });
-
-  app.post('/api/patch/apply', async (req) => {
-    const dir = requireApp();
-    const { hunks, name } = req.body as { hunks: string[]; name?: string };
-    const file = patchFile(dir, name);
-    if (!existsSync(file)) throw httpError(400, 'Không có patch nào');
-    const selected = selectHunks(parsePatch(readFileSync(file, 'utf8')), new Set(hunks));
-    if (!selected) throw httpError(400, 'Chưa chọn thay đổi nào');
-    const base = gitTopLevel(dir) ?? dir;
-    const tmp = join(dir, '.wealthcompass-selected.patch');
-    writeFileSync(tmp, selected);
-    try {
-      await exec('git', ['apply', '--check', tmp], base);
-      await exec('git', ['apply', tmp], base);
-    } finally {
-      if (existsSync(tmp)) unlinkSync(tmp);
-    }
-    // Áp xong thì patch cũ không còn đúng (vị trí đã đổi); chạy lại tích hợp sẽ sinh patch cho phần còn thiếu
-    unlinkSync(file);
-    invalidateScan();
-    return { applied: hunks.length };
-  });
-
-  // Cập nhật gói WealthCompass lên bản đang có (file .tgz mới hoặc phiên bản mới): tạo patch cho package.json để duyệt như bình thường
-  // Thư mục .tgz có đúng phiên bản thì cài từ file; có thư mục mà thiếu bản thì báo, không âm thầm chuyển sang registry
-  const tarballsDir = (): string | null => {
-    if (!opts.tarballs) return null;
-    if (existsSync(join(opts.tarballs, `wealthcompass-angular-${VERSION}.tgz`))) return opts.tarballs;
-    throw httpError(400, `Chưa có gói ${VERSION} trong ${opts.tarballs}. Chạy \`npm run pack\` trong repo WealthCompass rồi thử lại.`);
-  };
-
-  app.post('/api/update-packages', async () => {
-    const dir = requireApp();
-    const file = join(dir, 'package.json');
-    const text = readFileSync(file, 'utf8');
-    const pkg = JSON.parse(text) as Record<string, Record<string, string> | undefined>;
-    const tarballs = tarballsDir();
-    const spec = (name: string) => {
-      if (!tarballs) return `^${VERSION}`;
-      const tgz = join(tarballs, `wealthcompass-${name}-${VERSION}.tgz`);
-      const rel = relative(dir, tgz).split('\\').join('/');
-      return `file:${(rel.match(/\.\.\//g)?.length ?? 0) > 3 ? tgz : rel}`;
-    };
-    let changed = 0;
-    for (const section of ['dependencies', 'devDependencies']) {
-      const deps = pkg[section];
-      if (!deps) continue;
-      for (const name of Object.keys(deps)) {
-        if (!name.startsWith('@wealthcompass/')) continue;
-        const next = spec(name.split('/')[1]);
-        if (deps[name] !== next) {
-          deps[name] = next;
-          changed++;
-        }
-      }
-    }
-    if (!changed) return { changed: 0 };
-    const edits = new Map([[file, [{ pos: 0, end: text.length, text: JSON.stringify(pkg, null, 2) + '\n' }]]]);
-    const { patch } = buildGitPatch(edits, dir);
-    writeFileSync(join(dir, 'wealthcompass-setup.patch'), patch);
-    return { changed };
-  });
-
-  app.post('/api/install', async (_req, reply) => {
-    const dir = requireApp();
-    await stream(reply, async (log) => {
-      await runCommand('npm', ['install', '--no-audit', '--no-fund'], dir, log);
-      return { ok: true };
-    });
   });
 
   // ---------------- Màn hình ----------------
@@ -246,55 +183,73 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
 
   app.post('/api/features/enrich', async (req, reply) => {
     const dir = requireApp();
-    const { ids } = (req.body ?? {}) as { ids?: string[] };
+    const { ids, redraft } = (req.body ?? {}) as { ids?: string[]; redraft?: boolean };
     await stream(reply, async (log) => {
-      const res = await enrich({ config: configPath(dir), dryRun: false, only: ids, llm: llm() }, log);
+      const res = await enrich({ config: configPath(dir), dryRun: false, only: ids, llm: llm(), redraft: Boolean(redraft) }, log);
       return { drafted: res.drafted.length, skipped: res.skipped };
     });
   });
 
-  // ---------------- Chạy backend và web ----------------
+  // ---------------- Backend (chạy độc lập) và web ----------------
+  // Backend KHÔNG do Studio bật: nó là một tiến trình riêng (trên máy này hoặc máy chủ), Studio chỉ kết nối tới để thử trợ lý.
+  // Hai bên dùng chung một kho tour (compass.tours.db của dự án).
   app.get('/api/run', async () => {
     const dir = requireApp();
-    const env = readEnvFile(join(dir, 'wealthcompass.env'));
+    const env = readEnvFile(dataFile(dir, 'wealthcompass.env'));
     const port = Number(env['PORT'] ?? 8890);
-    let health: unknown = null;
-    if (procInfo('backend').running) {
-      try {
-        health = await (await fetch(`http://127.0.0.1:${port}/v1/health`, { signal: AbortSignal.timeout(1500) })).json();
-      } catch {
-        health = null;
-      }
+    let health: { tourDb?: string; debug?: boolean } | null = null;
+    try {
+      health = (await (await fetch(`http://127.0.0.1:${port}/v1/health`, { signal: AbortSignal.timeout(1500) })).json()) as { tourDb?: string; debug?: boolean };
+    } catch {
+      health = null;
     }
+    const { config, root } = loadConfig(configPath(dir));
+    const tourDb = tourDbPath(join(root, config.discovery.tours));
+    // Lệnh chạy backend cho dự án này. COMPASS_DEBUG và COMPASS_LOG_FILE chỉ cần khi muốn dùng trang Thử trợ lý, Kiểm thử, Nhật ký.
+    const repo = sourceRepo();
+    const extras = `COMPASS_DEBUG=1 COMPASS_LOG_FILE=${eventLogFile(dir)}`;
+    // Backend không cài trong web: chạy từ repo WealthCompass (source) hoặc từ gói @wealthcompass/server cài riêng
+    // Dự án dùng kho SQLite: backend chỉ cần biết file kho (bản đồ tính năng, tour và cấu hình backend đều nằm trong đó).
+    // Dự án kiểu cũ: trỏ tới feature-map.json và file env cạnh source.
+    const inStore = usesStore(dir);
+    const envFile = dataFile(dir, 'wealthcompass.env');
+    const target = inStore ? `COMPASS_PROJECT=${dataRoot(dir)}` : `COMPASS_FEATURE_MAP=${join(root, config.discovery.out)}`;
+    const envArg = !inStore && exists(envFile) ? ` --env-file ${envFile}` : '';
+    const base = repo ? `${target} npm run server${envArg ? ` --${envArg}` : ''}` : `${target} wealthcompass-server${envArg}`;
+    const command = { cwd: repo ?? '(nơi cài gói @wealthcompass/server)', run: base, withStudio: `${extras} ${base}` };
     const devPort = projectSummary(dir).devPort;
+    const web = procInfo('web');
+    // `external`: web đang chạy nhưng không do Studio bật, nên Studio không dừng hay xem log được
+    const webExternal = !web.running && (await portAnswers(`http://127.0.0.1:${devPort}/`));
     return {
-      backend: { ...procInfo('backend'), port, health, available: Boolean(backendBin(dir)) },
-      web: { ...procInfo('web'), port: devPort, url: `http://localhost:${devPort}`, available: Boolean(ngBin(dir)) },
+      backend: {
+        running: health !== null,
+        port,
+        health,
+        command,
+        tourDb,
+        // null: backend không báo (không chạy debug) nên không kiểm được
+        sameTourDb: health?.tourDb ? resolve(health.tourDb) === resolve(tourDb) : null,
+      },
+      web: { ...web, running: web.running || webExternal, external: webExternal, port: devPort, url: `http://localhost:${devPort}`, available: Boolean(ngBin(dir)) },
     };
   });
 
   app.post('/api/run/:name/:action', async (req) => {
     const dir = requireApp();
-    const { name, action } = req.params as { name: ProcName; action: 'start' | 'stop' };
+    const { name, action } = req.params as { name: string; action: 'start' | 'stop' };
+    if (name !== 'web') throw httpError(400, 'Backend chạy độc lập với Studio: bật nó bằng lệnh ở trang Chạy thử');
+
     if (action === 'stop') {
-      stopProc(name);
-      return procInfo(name);
+      stopProc('web');
+      return procInfo('web');
     }
-    if (name === 'backend') {
-      const bin = backendBin(dir);
-      if (!bin) throw httpError(400, 'Chưa cài @wealthcompass/server trong dự án (áp patch tích hợp rồi npm install)');
-      if (!existsSync(join(dir, 'wealthcompass.env'))) throw httpError(400, 'Chưa có wealthcompass.env (chạy tích hợp trước)');
-      // Studio bật debug (chỉ nhận từ máy này) cho trang Thử trợ lý/Kiểm thử, và ghi nhật ký cho trang Nhật ký
-      const env = { ...llmEnv(), COMPASS_DEBUG: '1', COMPASS_LOG_FILE: eventLogFile(dir) };
-      return startProc('backend', process.execPath, [bin, '--env-file', 'wealthcompass.env'], dir, env);
-    }
-    if (name === 'web') {
-      const ng = ngBin(dir);
-      if (!ng) throw httpError(400, 'Chưa cài Angular CLI trong dự án (npm install)');
-      const port = projectSummary(dir).devPort;
-      return startProc('web', process.execPath, [ng, 'serve', '--port', String(port), '--host', '127.0.0.1'], dir, process.env);
-    }
-    throw httpError(400, 'Tiến trình không hợp lệ');
+    const ng = ngBin(dir);
+    if (!ng) throw httpError(400, 'Chưa cài Angular CLI trong dự án (npm install)');
+    const port = projectSummary(dir).devPort;
+    // ng serve ưu tiên biến PORT hơn --port: bỏ PORT của Studio để web chạy đúng cổng dev của dự án
+    const { PORT: _studioPort, ...webEnv } = process.env;
+    return startProc('web', process.execPath, [ng, 'serve', '--port', String(port), '--host', '127.0.0.1'], dir, webEnv);
   });
 
   app.get('/api/run/:name/logs', async (req, reply) => {
@@ -308,7 +263,7 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
 
   app.get('/api/env', async () => {
     const dir = requireApp();
-    return { exists: existsSync(join(dir, 'wealthcompass.env')), values: readEnvFile(join(dir, 'wealthcompass.env')) };
+    return { exists: exists(dataFile(dir, 'wealthcompass.env')), values: readEnvFile(dataFile(dir, 'wealthcompass.env')) };
   });
 
   app.put('/api/env', async (req) => {
@@ -316,24 +271,24 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
     const changes = req.body as Record<string, string | null>;
     // Không cho ghi khóa LLM vào file: khóa chỉ đặt qua biến môi trường hoặc phiên Studio
     if (Object.keys(changes).some((k) => /API_KEY/.test(k))) throw httpError(400, 'Không ghi khóa API vào wealthcompass.env');
-    updateEnvFile(join(dir, 'wealthcompass.env'), changes);
-    return { values: readEnvFile(join(dir, 'wealthcompass.env')), restartNeeded: procInfo('backend').running };
+    updateEnvFile(dataFile(dir, 'wealthcompass.env'), changes);
+    // Backend chạy độc lập: cấu hình mới có hiệu lực sau khi bạn khởi động lại backend
+    return { values: readEnvFile(dataFile(dir, 'wealthcompass.env')), restartNeeded: true };
   });
 
   // ---------------- Cài đặt AI ----------------
   app.get('/api/ai', async () => {
     const c = llm();
-    return { provider: c.provider, model: c.model, baseUrl: c.baseUrl, hasKey: Boolean(c.apiKey), keySource: keySource(), aiCode: state.ai.aiCode, providers: Object.keys(LLM_PRESETS) };
+    return { provider: c.provider, model: c.model, baseUrl: c.baseUrl, hasKey: Boolean(c.apiKey), keySource: keySource(), providers: Object.keys(LLM_PRESETS) };
   });
 
   app.put('/api/ai', async (req) => {
-    const body = req.body as { provider?: string; model?: string; apiKey?: string | null; aiCode?: boolean };
+    const body = req.body as { provider?: string; model?: string; apiKey?: string | null };
     if (body.provider !== undefined) state.ai.provider = body.provider || undefined;
     if (body.model !== undefined) state.ai.model = body.model || undefined;
     if (body.apiKey !== undefined) state.ai.apiKey = body.apiKey || undefined;
-    if (body.aiCode !== undefined) state.ai.aiCode = body.aiCode;
     const c = llm();
-    return { provider: c.provider, model: c.model, baseUrl: c.baseUrl, hasKey: Boolean(c.apiKey), keySource: keySource(), aiCode: state.ai.aiCode, providers: Object.keys(LLM_PRESETS) };
+    return { provider: c.provider, model: c.model, baseUrl: c.baseUrl, hasKey: Boolean(c.apiKey), keySource: keySource(), providers: Object.keys(LLM_PRESETS) };
   });
 
   app.post('/api/ai/test', async () => {
@@ -353,11 +308,11 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
 
   if (opts.open) {
     const dir = resolve(opts.open);
-    if (existsSync(join(dir, 'angular.json'))) state.appDir = dir;
+    if (isProject(dir)) state.appDir = dir;
   }
 
   await app.listen({ port: opts.port, host: '127.0.0.1' });
-  const url = `http://127.0.0.1:${opts.port}/?t=${token}`;
+  const url = `http://127.0.0.1:${opts.port}/`;
   const close = async () => {
     stopAll();
     await app.close();
@@ -365,15 +320,3 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
   process.on('exit', stopAll);
   return { url, close };
 }
-
-function readReport(dir: string): string | null {
-  const f = join(dir, 'WEALTHCOMPASS_SETUP.md');
-  return existsSync(f) ? readFileSync(f, 'utf8') : null;
-}
-
-function exec(cmd: string, args: string[], cwd: string): Promise<string> {
-  return new Promise((ok, fail) =>
-    execFile(cmd, args, { cwd }, (err, stdout, stderr) => (err ? fail(httpError(400, (stderr || err.message).trim())) : ok(stdout))),
-  );
-}
-

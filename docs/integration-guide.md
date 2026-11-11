@@ -36,20 +36,20 @@ COMPASS_JWT_ISSUER=https://sso.congty.vn \
 COMPASS_JWT_AUDIENCE=web-dau-tu \
 COMPASS_CAPABILITIES_CLAIM=roles \
 COMPASS_ORIGINS=https://web.congty.vn \
-COMPASS_FEATURE_MAP=/duong/dan/feature-map.json \
-COMPASS_PACK=packs/finance-vn \
+COMPASS_PROJECT=/duong/dan/toi/web-hoac-file-kho.db \
 COMPASS_LLM_PROVIDER=deepseek COMPASS_LLM_API_KEY=... \
 npm run server
 ```
 
 | Biến | Ý nghĩa | Mặc định |
 | --- | --- | --- |
-| `COMPASS_MOCK_IDP` | `0` để tắt IdP giả lập (**bắt buộc tắt ngoài demo**) | `1` |
+| `COMPASS_MOCK_IDP` | `1` bật IdP giả lập để thử (**không bật ngoài demo**) | tắt (bật sẵn với web demo trong repo) |
+| `COMPASS_AUTH` | `gateway` (mặc định): đã có API gateway xác minh JWT đứng trước backend; backend chỉ đọc `sub` và quyền trong token, **không kiểm chữ ký**, không cần JWKS. Backend chỉ được nhận yêu cầu đi qua gateway (mạng nội bộ), nếu không ai cũng tự tạo được token. Token thiếu, hỏng, hết hạn vẫn bị từ chối. `jwks`: backend tự xác minh chữ ký bằng JWKS, dùng khi không có gateway | `gateway` |
 | `COMPASS_JWKS_URL`, `COMPASS_JWT_ISSUER`, `COMPASS_JWT_AUDIENCE` | Xác minh chữ ký, nhà phát hành, đối tượng của JWT | trỏ IdP giả lập |
 | `COMPASS_CAPABILITIES_CLAIM` | Tên claim chứa quyền; chấp nhận mảng hoặc chuỗi cách nhau bằng dấu cách/phẩy | `roles` |
 | `COMPASS_ORIGINS` | Origin được gọi (CORS), phân tách bằng dấu phẩy | `localhost:4200` |
-| `COMPASS_FEATURE_MAP` | File Feature Map; tự nạp lại khi file đổi | file của demo |
-| `COMPASS_PACK` | Thư mục Domain Pack | `packs/finance-vn` |
+| `COMPASS_PROJECT` | Kho dự án backend phục vụ: file kho `.db` hoặc thư mục source của web. Bản đồ tính năng, tour và cấu hình backend đều đọc từ đó; tự nạp lại khi kho đổi | web demo trong repo |
+| `COMPASS_FEATURE_MAP` | Chỉ cho dự án kiểu cũ: đường dẫn `feature-map.json` cạnh source | file của demo |
 | `COMPASS_LLM_PROVIDER` | `deepseek` hoặc `gemini` (preset base URL + model + tên biến khóa) | `deepseek` |
 | `COMPASS_LLM_BASE_URL`, `COMPASS_LLM_MODEL`, `COMPASS_LLM_API_KEY` | Ghi đè preset, dùng cho endpoint tương thích OpenAI bất kỳ (vLLM, Ollama on-prem...) | theo preset |
 | `COMPASS_LLM_REASONING_EFFORT` | `low`/`high`/`max` cho mô hình suy luận, `low` nhanh hơn | không đặt |
@@ -84,7 +84,7 @@ Scanner đọc source nên chất lượng câu trả lời phụ thuộc vào m
     title: 'Tài sản trái phiếu iConnect',                 // nên có; thiếu thì lấy nhãn menu
     description: 'Danh mục trái phiếu đang nắm giữ...',   // nên có; mô tả nghiệp vụ, không mô tả kỹ thuật (thiếu thì chạy enrich)
     keywords: ['ban trai phieu', 'danh muc'],            // cách người dùng hay gọi, có thể không dấu
-    facets: { product: 'bond' },                          // tùy chọn, do Domain Pack định nghĩa
+    facets: { product: 'bond' },                          // tùy chọn, nhãn tự do của dự án
     // compassId: 'bond.assets',                          // tùy chọn: cố định id, không đổi khi đổi route
     // hidden: true,                                      // bỏ khỏi trợ lý (trang đăng nhập, trang lỗi...)
   },
@@ -102,7 +102,7 @@ access:
     bondAccountGuard: { requires: [bond_account] }   # tên quyền phải trùng giá trị trong claim của JWT
 ```
 
-Guard chưa ánh xạ sẽ báo cảnh báo và ghi vào `unknownGuards`.
+**Mặc định mọi màn hình chỉ cần đăng nhập.** Bảng `access.guards` là tùy chọn: chỉ khai khi muốn trợ lý không chỉ đường tới màn hình mà người dùng thiếu quyền không vào được. Guard không khai trong bảng không gây cảnh báo (tên guard vẫn ghi vào `unknownGuards` để Studio liệt kê). `setup` không tự ghi quyền nào; chuỗi quyền đọc được trong code guard chỉ là gợi ý trong báo cáo và ở Studio > Quyền.
 
 ## 4. Bước 3: Gắn widget vào web
 
@@ -209,64 +209,36 @@ Quy tắc:
    }
    ```
 
-   Mỗi mục tự có mốc `menu-<route>` (`/leave/request` → `menu-leave-request`, `/` → `menu-home`). Scanner đọc dữ liệu menu (`discovery.menu`) và tạo đủ các mốc này kèm nhãn theo đường đi menu, nên tour và `tour:record` trỏ được vào từng mục, kể cả mục thêm sau. `annotate`/Studio tự gợi ý `[tourMenu]` cho link trong vòng lặp có `[routerLink]="mục.trường"`.
+   Mỗi mục tự có mốc `menu-<route>` (`/leave/request` → `menu-leave-request`, `/` → `menu-home`). Scanner đọc dữ liệu menu (`discovery.menu`) và tạo đủ các mốc này kèm nhãn theo đường đi menu, nên tour và `tour:record` trỏ được vào từng mục, kể cả mục thêm sau.
 
-### 5.1 Gợi ý `tourId` hàng loạt bằng `annotate`
+### 5.1 Ai gắn `tourId`
 
-Gắn tay từng phần tử thì chậm, nên `annotate` quét template, gợi ý `tourId` cho phần tử tương tác còn thiếu và **xuất patch**. Nó **không bao giờ tự sửa code**.
-
-```bash
-cd ~/wealthcompass
-npm run annotate                                   # toàn bộ màn hình; ghi compass-annotate.patch cạnh compass.config.yaml
-npm run annotate -- --only /iconnect/assets,/home  # chỉ một vài màn hình (id tính năng hoặc tiền tố route)
-npm run annotate -- --print                        # in patch ra màn hình, không ghi file
-npm run annotate -- --out /tmp/x.patch --directive-import @cong-ty/compass
-# web khác: npx tsx packages/cli/src/main.ts annotate --config duong/dan/compass.config.yaml
-```
-
-Nó làm gì:
-
-1. **Liệt kê** nút, link, tab, ô nhập (và phần tử có `(click)`) chưa có `tourId`. Bỏ qua phần tử đã có `tourId`, phần tử ẩn (`hidden`), `input type="hidden"`, và khung bao ngoài chỉ để bắt click.
-2. **Đặt tên** `<màn-hình>-<phần-tử>`: màn hình lấy từ đoạn cuối của route, phần tử lấy từ chữ trên nó (ưu tiên `aria-label`, rồi chữ bên trong không kể icon, rồi `placeholder`, `title`), bỏ dấu và viết thường: nút "Hủy lệnh" ở `/orders` thành `orders-huy-lenh`; ô nhập thêm hậu tố `-input`, tab thêm `-tab`. Trùng thì thêm `-2`, `-3`, và không bao giờ trùng với `tourId` đã có trong dự án. Thêm `tourLabel` từ chữ trên nút.
-3. **Đánh dấu `tourRole="user-only"`** cho phần tử có vẻ nhạy cảm:
-   - ⛔ *chắc chắn*: ô mật khẩu, ô OTP/PIN/CVV, ô thẻ, `type="submit"`, nút có chữ đúng là BÁN, MUA, Đặt lệnh, Xác nhận, Đồng ý, Thanh toán, Chuyển tiền, Rút tiền, Nộp tiền, Hủy lệnh, Xóa...
-   - ⚠ *cần xem lại*: có từ liên quan trong chữ, tên hàm trong `(click)` hoặc class (ví dụ "Lệnh nhanh", `placeOrder()`, `class="btn-sell"`).
-   - Link chuyển trang (`routerLink`, `href`) và ô nhập thông thường không bị đánh dấu.
-4. **Thêm `TourIdDirective`** vào `imports` của component và câu `import` tương ứng (nếu không, thuộc tính `tourId` chỉ là thuộc tính HTML thường, không gắn `data-tour-id` và tour sẽ hỏng âm thầm). Component khai trong NgModule (`standalone: false`) hoặc có `imports` không phải mảng literal sẽ **bị bỏ qua kèm lý do**, bạn thêm tay.
-
-Quy trình duyệt:
-
-```bash
-cd ~/wealthcompass                       # gốc repo git
-git apply --check compass-annotate.patch # thử, chưa sửa gì
-# mở patch (hoặc IDE) xem; xóa những hunk không cần; sửa tên nếu muốn
-git apply compass-annotate.patch
-npm run scan                             # xác nhận scanner thấy các tourId mới
-```
-
-- **Đọc kỹ cột user-only.** Gắn thừa thì tour không bấm thay được nút đó (chỉ tô sáng); thiếu ở nút giao dịch thì nguy hiểm hơn, nên heuristic nghiêng về gắn thừa. Nút "chọn bán" kiểu bật/tắt chế độ thường bị ⚠ nhưng có thể bỏ `tourRole` đi nếu muốn tour tự chờ người dùng bấm vào nó.
-- **Chỉ giữ `tourId` của phần tử tour thật sự cần.** Danh sách gợi ý thường nhiều hơn mức cần (một web demo 13 màn hình ra khoảng 35 gợi ý); đặt tên và gắn thừa đều là việc phải duy trì về sau. Dùng `--only` theo luồng đang làm.
-- Chạy lại `annotate` sau khi áp patch sẽ không còn gợi ý nào (đã có `tourId`).
-- Template nằm trong `.ts` chỉ sửa được khi là chuỗi không có ký tự thoát (`\`) hay `${}`; trường hợp khác bị bỏ qua kèm lý do.
+`tourId` do **dev của web tự gắn trong source** theo cách ở trên, khi một phần tử cần được ghim chắc chắn (chữ trùng nhau, phần tử quan trọng). WealthCompass không còn công cụ gắn hộ: lệnh `annotate`, tùy chọn `setup --annotate` và trang "Gắn tourId" của Studio đã bỏ. Tour ghi bằng `tour:record` không cần `tourId` (tìm phần tử bằng locator), nên đa số trường hợp không phải gắn gì.
 
 ## 6. Bước 5: Quét và viết tour
 
 ### 6.1 Cấu hình quét
 
-`compass.config.yaml` đặt cùng thư mục với `tsconfig.app.json` của web:
+`compass.config.yaml` là một tài liệu trong kho dự án (file SQLite ngoài source, xem [quickstart.md](quickstart.md)); `setup` tạo nó. Xem và sửa bằng Studio, hoặc `wealthcompass project:export` / `project:import`. Các tên file khác trong tài liệu này (`compass.overrides.yaml`, `feature-map.json`...) cũng là tài liệu trong kho. Nội dung:
 
 ```yaml
-domainPack: finance-vn
 locale: vi
 discovery:
   entry: src/app/app.routes.ts                 # file khai báo mảng Routes gốc
   menu: src/app/shared/menu.config.ts          # tùy chọn
+  i18n: src/assets/i18n/vi.json                # tùy chọn: file dịch của web; bỏ trống thì tự tìm theo locale
   overrides: compass.overrides.yaml
   out: feature-map.json
 access:
   guards:
     authGuard: { requires: [] }
 ```
+
+**Web dùng i18n** (ngx-translate, transloco): route khai `data: { title: 'guest.t2' }`, menu khai nhãn bằng khóa, template viết `{{ 'guest.t2' | translate }}`. Scanner dịch các khóa này bằng file dịch của web trước khi dùng làm tiêu đề, nhãn menu, nhãn `tourId` và chữ trên màn hình (ngữ cảnh để LLM soạn mô tả và để tìm kiếm). Không khai `discovery.i18n` thì nó tự tìm `<locale>.json` ở `src/assets/i18n/`, `src/assets/locale(s)/`, `src/assets/lang/`, `public/i18n/`, `src/i18n/`. File lồng nhau (`{ "guest": { "t2": "..." } }`) hay phẳng (`{ "guest.t2": "..." }`) đều đọc được.
+
+- Khóa không có trong file dịch: tiêu đề dùng nhãn menu nếu có, và `scan` báo cảnh báo kèm ví dụ; chữ trên màn hình là khóa chưa dịch thì bị bỏ.
+- Chỉ dịch được khóa viết thẳng trong source. Khóa ghép lúc chạy (`'menu.' + item.key`) hoặc chữ đặt bằng `translate.instant(...)` trong TypeScript không dịch được; đặt tiêu đề cho các màn đó trong overrides.
+- Sau khi bật dịch, chạy lại `scan` rồi `enrich --redraft` (Studio: "Soạn lại … nháp chưa duyệt" ở trang Màn hình) để LLM soạn lại mô tả nháp của các màn trước đây chỉ có khóa. Mô tả đã duyệt thì sửa tay.
 
 An toàn phía client (selector `user-only` bổ sung, route tour không bao giờ được dẫn tới) khai trong `provideCompass({ safety: {...} })` ở bước 4.3, vì engine chạy trong trình duyệt. Mục `safety` trong file yaml của bản demo hiện chưa được dùng.
 
@@ -337,13 +309,14 @@ cd ~/wealthcompass
 npm run enrich -- --dry-run                 # xem LLM định viết gì, chưa ghi file
 npm run enrich                              # ghi vào compass.overrides.yaml
 npm run enrich -- --only iconnect.assets,money.deposit
+npm run enrich -- --redraft                 # soạn lại cả nháp LLM chưa duyệt (vd. sau khi bật dịch i18n)
 # web khác: npx tsx packages/cli/src/main.ts enrich --config duong/dan/compass.config.yaml
 ```
 
 Cách hoạt động:
 
-1. Chạy `scan`, tìm các màn hình thiếu `description`, `keywords` hoặc `sampleQuestions`. Chỉ **điền chỗ trống**, không bao giờ đè thứ đã viết (trong `route.data` hay overrides).
-2. Với mỗi màn hình, gửi LLM: tiêu đề, đường dẫn menu, nhóm sản phẩm, **chữ tĩnh trong template** (tiêu đề, nhãn, tên nút, placeholder; bỏ phần nội suy `{{ }}`), phần đã có, danh sách trường cần soạn, và từ điển thuật ngữ của Domain Pack nếu có. Không gửi dữ liệu hiển thị trên màn hình khi chạy; mọi chuỗi qua lọc PII cả chiều gửi và chiều nhận.
+1. Chạy `scan`, tìm các màn hình thiếu `description`, `keywords` hoặc `sampleQuestions`. Chỉ **điền chỗ trống**, không bao giờ đè thứ đã viết (trong `route.data` hay overrides). `--redraft` (Studio: nút "Soạn lại … nháp chưa duyệt" ở trang Màn hình) soạn lại thêm các trường LLM đã soạn mà còn trong `llmDraft`; trường người viết hoặc đã duyệt vẫn giữ nguyên.
+2. Với mỗi màn hình, gửi LLM: tiêu đề, đường dẫn menu, nhóm sản phẩm, **chữ tĩnh trong template** (tiêu đề, nhãn, tên nút, placeholder; bỏ phần nội suy `{{ }}`), phần đã có và danh sách trường cần soạn. Không gửi dữ liệu hiển thị trên màn hình khi chạy; mọi chuỗi qua lọc PII cả chiều gửi và chiều nhận.
 3. Gửi theo lô 6 màn hình mỗi lần. Kết quả được kiểm bằng schema; sai định dạng thì thử lại một lần rồi bỏ qua lô đó.
 4. LLM được dặn: chỉ dùng thông tin trong đầu vào, không bịa tính năng; **nếu đầu vào quá ít thì trả mô tả rỗng**. Màn hình như vậy được báo "không đủ thông tin để soạn" và bỏ qua thay vì đoán.
 5. Ghi vào `compass.overrides.yaml` (giữ nguyên chú thích và phần viết tay), kèm khóa `llmDraft` liệt kê các trường do LLM soạn:
@@ -377,19 +350,14 @@ Kết quả là `feature-map.json` và `compass.lock.json` (giữ `id` ổn đ�
 
 Thêm `?compassTour=<id tour>` vào bất kỳ địa chỉ nào của web (ví dụ `https://web/dashboard?compassTour=tao-don-nghi`): khi trang mở và người dùng đã đăng nhập, widget tự chạy tour đó, rồi bỏ tham số khỏi thanh địa chỉ. Dùng cho nút "Chạy thử" của Studio, link trong email hướng dẫn hoặc trang trợ giúp. Id tour chỉ nhận chữ thường, số và gạch nối; tour không tồn tại thì widget báo lỗi trong khung chat, không làm gì khác. Nếu web chuyển sang trang đăng nhập rồi về trang chủ mà không giữ lại query, tham số sẽ mất: mở lại link sau khi đăng nhập.
 
-## 7. Domain Pack (nội dung theo ngành)
+## 7. Lời dặn cho AI và từ đồng nghĩa
 
-`COMPASS_PACK` trỏ tới một thư mục:
+Domain Pack (thư mục `packs/`, biến `COMPASS_PACK`, khóa `domainPack`, tùy chọn `--pack`, trang Domain Pack của Studio) **đã bỏ**. Còn lại:
 
-| File | Nội dung |
-| --- | --- |
-| `pack.yaml` | Tên, phiên bản, locale |
-| `glossary.yaml` | Nhóm từ đồng nghĩa (CCQ = chứng chỉ quỹ...), dùng mở rộng câu hỏi khi tìm |
-| `topics.yaml` | Mẫu regex (trên văn bản không dấu) cho chủ đề bị chặn **trước khi gọi LLM** |
-| `refusals.vi.md` | Câu từ chối cho từng chủ đề bị chặn, do pháp chế duyệt |
-| `prompt.vi.md` | System prompt của agent |
-
-Web ngành khác: sao chép `packs/finance-vn`, sửa từ điển, chủ đề chặn, mẫu từ chối và prompt. Sau khi sửa luôn chạy lại `npm run test` và thử tay vài câu hỏi để chắc mẫu chặn không chặn nhầm câu hỏi "ở đâu/làm sao" bình thường.
+- **Lời dặn cho AI** là một bản chung cố định trong backend (`server/src/prompt.ts`): chỉ đường tới tính năng, chỉ dựa vào kết quả tra cứu, không thao tác hay nhập mật khẩu/OTP thay người dùng.
+- **Không còn bộ lọc chủ đề chặn trước khi gọi LLM** (trước đây chặn câu xin tư vấn đầu tư, dự đoán giá, nhờ làm hộ bằng mẫu regex và trả câu từ chối soạn sẵn). Mọi câu hỏi đều tới LLM; engine tour vẫn không bao giờ tự bấm, và phần tử nhạy cảm vẫn chỉ được tô sáng.
+- **Từ đồng nghĩa** không còn từ điển chung: thêm cách gọi khác vào `keywords` và `sampleQuestions` của từng màn hình (trang Màn hình của Studio, hoặc `compass.overrides.yaml`).
+- Cấu hình cũ còn `domainPack:` hay `COMPASS_PACK=` vẫn chạy, hai khóa này bị bỏ qua.
 
 ## 8. Kiểm tra sau khi tích hợp
 
@@ -403,16 +371,17 @@ Web ngành khác: sao chép `packs/finance-vn`, sửa từ điển, chủ đề 
 - [ ] Tắt LLM (sai khóa): vẫn trả lời ở chế độ dự phòng, có ghi chú rõ.
 - [ ] Mở trên điện thoại và máy tính; widget không che nút quan trọng của web.
 - [ ] Bộ kiểm thử `compass.eval.yaml` (Studio > Kiểm thử) đạt hit@3 từ 90% trở lên, mọi câu phải chặn đều bị chặn.
+- [ ] Dùng kho tour ở backend thì đặt `COMPASS_ADMIN_TOKEN` (khóa dài, chỉ CI biết); kho tour là file `compass.tours.db` cạnh `feature-map.json` (đổi bằng `COMPASS_TOUR_DB`).
 - [ ] Máy chủ thật **không** đặt `COMPASS_DEBUG`; nếu cần thống kê thì đặt `COMPASS_LOG_FILE` (file JSONL, tự xoay vòng ở 20 MB, chỉ chứa câu hỏi đã che và mã người dùng đã băm).
 
 ## 9. Giới hạn hiện tại của scanner và widget
 
-Đã kiểm thử: standalone, `provideRouter`, `loadComponent`, `loadChildren` (file route export mảng), `children`, guard kế thừa từ route cha, `templateUrl` và `template`, component con khai trong `imports` của component cha, `@if/@for`.
+Đã kiểm thử: standalone, `provideRouter`, `loadComponent`, `loadChildren` (file route export mảng), `children`, guard kế thừa từ route cha, `templateUrl` và `template`, component con khai trong `imports` của component cha, `@if/@for`. App NgModule: `loadChildren` trỏ tới module (`.then(m => m.XxxModule)` hoặc chuỗi kiểu cũ `'./x.module#XxxModule'`) với route trong `RouterModule.forChild(...)` của chính module hoặc của `XxxRoutingModule` nó import; component con khai trong `declarations` của module hoặc lấy từ `exports` của module được import (kể cả module re-export).
 
 Chưa hỗ trợ hoặc chưa kiểm thử:
 
 - Route khai bằng **spread** (`...adminRoutes`) hoặc sinh từ hàm: scanner ghi cảnh báo và bỏ qua phần đó. Đường dẫn không phải chuỗi literal (hằng số `ROUTE_PATHS.x`) cũng bị bỏ qua kèm cảnh báo.
-- **NgModule**: chưa kiểm thử. Component con khai trong `declarations` (không phải `imports`) không được lần theo, nên `tourId` trong đó không được quét; chỉ `tourId` nằm trong template của chính component được route tới là chắc chắn thấy.
+- **NgModule**: đường dẫn import của `loadChildren`/`loadComponent` phải là đường dẫn tương đối (`./`, `../`); alias trong `paths` của tsconfig (`@features/...`) chưa resolve được và bị bỏ qua kèm cảnh báo. Route sinh bằng hàm (`RouterModule.forChild(buildRoutes())`) cũng chưa hỗ trợ.
 - Route theo **tham số** (`:id`): đưa vào Feature Map nhưng agent không tạo nút mở thẳng (thiếu giá trị tham số); `exampleParams` chưa dùng.
 - `tourId` sinh động, phần tử trong iframe khác origin hoặc shadow DOM đóng: không hỗ trợ.
 - `tour:record` chỉ ghi lần bấm (chưa ghi hover, kéo thả, nhập liệu) và cần Chrome cài trên máy; chưa lưu trạng thái tour khi tải lại trang.

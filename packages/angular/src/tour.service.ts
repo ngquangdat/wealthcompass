@@ -1,10 +1,46 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { NavigationCancel, NavigationEnd, NavigationError, NavigationStart, Router } from '@angular/router';
 import { driver, type Driver } from 'driver.js';
 import type { Tour, ToolResultStatus } from '@wealthcompass/contracts';
-import { isBlockedRoute, isUserOnly, renderLiteMarkdown, resolveTarget, resumeStep, waitForTarget } from '@wealthcompass/core';
+import {
+  currentLayout,
+  describeLocator,
+  isBlockedRoute,
+  isUserOnly,
+  isVisible,
+  lockHover,
+  renderLiteMarkdown,
+  resolveStep,
+  resumeStep,
+  routeMatches,
+  shouldSkipStep,
+  simulateHover,
+  stepsForLayout,
+  ungated,
+  waitForReady,
+  waitForRoute,
+  type HoverLock,
+  type StepResolution,
+} from '@wealthcompass/core';
 import { COMPASS_CONFIG } from './compass.config';
 import { CompassApiService } from './compass-api.service';
+
+// Chờ phần tử của bước sẵn sàng (thành phần tải xong, đứng yên) tối đa chừng này khi đã ở đúng màn hình
+const READY_TIMEOUT_MS = 10000;
+// Chưa ở màn hình của bước: chờ ngắn xem phần tử có sẵn không (khung chung, menu) rồi mới tự điều hướng
+const OFF_ROUTE_PEEK_MS = 800;
+// Router đang chuyển trang (resolver, lazy chunk chậm): chờ tối đa chừng này
+const NAVIGATION_TIMEOUT_MS = 15000;
+
+// Ghi thời gian chờ từng bước ra console (tìm nguyên nhân bước hiện chậm): bật bằng localStorage.compassDebug = '1'
+// hoặc thêm ?compassDebug=1 vào địa chỉ trang
+function debugEnabled(): boolean {
+  try {
+    return localStorage.getItem('compassDebug') === '1' || /[?&]compassDebug=1\b/.test(location.search);
+  } catch {
+    return false;
+  }
+}
 
 export interface TourOutcome {
   tourId: string;
@@ -27,10 +63,29 @@ export class TourService {
   private current: Driver | null = null;
   private runId = 0;
   private detachClick: (() => void) | null = null;
+  // Khóa hover đang giữ menu mở (bước hover lồng nhau: menu rồi menu con); nhả khi xong bước không-hover kế tiếp
+  private hoverLocks: HoverLock[] = [];
+  // Router đang chuyển trang: bước sau chờ trang mới dựng xong rồi mới tìm phần tử
+  private navigating = false;
 
-  async start(tour: Tour): Promise<TourOutcome> {
+  constructor() {
+    this.router.events.subscribe((e) => {
+      if (e instanceof NavigationStart) this.navigating = true;
+      else if (e instanceof NavigationEnd || e instanceof NavigationCancel || e instanceof NavigationError) this.navigating = false;
+    });
+  }
+
+  private async navigationSettled(timeoutMs = NAVIGATION_TIMEOUT_MS): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.navigating && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  }
+
+  async start(input: Tour): Promise<TourOutcome> {
     this.stop();
     const run = ++this.runId;
+    // Bản của bố cục hiện tại (mobile có thể có thêm bước mở menu); thiếu thì dùng bản chính
+    const layout = currentLayout(this.config.tours.mobileBreakpoint, undefined, this.config.tours.tabletBreakpoint);
+    const tour: Tour = { ...input, steps: stepsForLayout(input, layout) };
     this.active.set(tour);
     this.message.set('');
     this.api.report({ event: 'tour_start', tourId: tour.id });
@@ -41,25 +96,51 @@ export class TourService {
     // Đang ở giữa luồng (vd. đã ở màn hình đích): bắt đầu từ bước của màn hình này, khi phần tử của bước đó đang hiện
     const path = this.router.url.split(/[?#]/)[0];
     let from = resumeStep(tour, path);
-    if (from > 0 && !resolveTarget(tour.steps[from].tourId)) from = 0;
+    // Bước mở chỗ chứa đã không còn cần (bước sau đang hiện) cũng tính là đang ở đúng chỗ
+    if (from > 0 && !resolveStep(tour.steps[from])?.confident && !shouldSkipStep(tour.steps, from)) from = 0;
     // Phần tử của bước đầu đã có trên màn hình hiện tại (vd. mục menu ở khung chung): bắt đầu tại chỗ, không chuyển trang
-    if (from === 0 && path !== tour.startRoute && !resolveTarget(tour.steps[0].tourId)) {
+    if (from === 0 && path !== tour.startRoute && !resolveStep(tour.steps[0])?.confident) {
       const ok = await this.router.navigateByUrl(tour.startRoute);
       // Guard chặn điều hướng (thiếu quyền, hết phiên) thì dừng và báo rõ
       if (!ok) return this.finish(tour, run, 'failed', 0, 'route_denied');
     }
 
+    // Menu hover bị app đóng giữa chừng: mở lại và làm lại bước đó, tối đa vài lần
+    let retries = 0;
     for (let index = from; index < tour.steps.length; index++) {
       if (run !== this.runId) return { tourId: tour.id, status: 'cancelled', lastStep: index };
+      // Bước chỉ để mở chỗ chứa bước sau (nút menu trên mobile): bước sau đã hiện thì bỏ qua
+      if (shouldSkipStep(tour.steps, index)) {
+        this.api.report({ event: 'tour_step', tourId: tour.id, stepKey: tour.steps[index].key ?? String(index), status: 'skipped' });
+        continue;
+      }
       const result = await this.runStep(tour, index, run);
+      if (result === 'retry' && retries < 3) {
+        retries++;
+        for (const lock of this.hoverLocks) lock.reopen();
+        index--;
+        continue;
+      }
+      retries = 0;
+      // Xong mục bên trong menu hover (bước không-hover): nhả khóa để menu đóng lại như bình thường
+      if (tour.steps[index].advanceOn !== 'hover') this.releaseHover();
       if (result === 'cancelled') return this.finish(tour, run, 'cancelled', index);
-      if (result === 'missing') return this.finish(tour, run, 'failed', index, 'target_missing');
+      if (result === 'missing' || result === 'retry') return this.finish(tour, run, 'failed', index, 'target_missing');
     }
     return this.finish(tour, run, 'completed', tour.steps.length - 1);
   }
 
+  private path(): string {
+    return this.router.url.split(/[?#]/)[0];
+  }
+
+  private releaseHover(): void {
+    for (const lock of this.hoverLocks.splice(0)) lock.release();
+  }
+
   stop(): void {
     this.runId++;
+    this.releaseHover();
     this.teardown();
     this.active.set(null);
   }
@@ -76,6 +157,7 @@ export class TourService {
 
   private finish(tour: Tour, run: number, status: TourOutcome['status'], lastStep: number, reason?: ToolResultStatus): TourOutcome {
     if (run === this.runId) {
+      this.releaseHover();
       this.teardown();
       this.active.set(null);
       this.message.set(
@@ -90,35 +172,137 @@ export class TourService {
     return { tourId: tour.id, status, lastStep, reason };
   }
 
-  // Trả về 'next' khi sang bước sau, 'cancelled' khi người dùng đóng, 'missing' khi không thấy phần tử
-  private async runStep(tour: Tour, index: number, run: number): Promise<'next' | 'cancelled' | 'missing'> {
+  // Bước không chắc phần tử: popover không gắn phần tử, nói rõ cần tìm gì, người dùng bấm "Tiếp" để đi tiếp
+  private async showUnanchored(tour: Tour, index: number, run: number): Promise<'next' | 'cancelled'> {
     const step = tour.steps[index];
     const isLast = index === tour.steps.length - 1;
-
-    let found = await waitForTarget(step.tourId, step.route ? 600 : 4000);
-    if (!found && step.route && this.router.url.split('?')[0] !== step.route) {
-      const ok = await this.router.navigateByUrl(step.route);
-      if (!ok) return 'missing';
-      found = await waitForTarget(step.tourId, 4000);
+    const hint = step.locator ? describeLocator(step.locator).split(' · ')[0] : step.label ?? '';
+    // Ảnh chụp phần tử lúc tour:verify chạy được: cho người dùng thấy cần tìm gì trên màn hình
+    const shot = step.shot ? await this.api.shotUrl(step.shot) : null;
+    if (run !== this.runId) {
+      if (shot) URL.revokeObjectURL(shot);
+      return 'cancelled';
     }
-    if (run !== this.runId) return 'cancelled';
-    if (!found) return 'missing';
-
-    const element = found.element;
-    // Phần tử nhạy cảm: giữ nguyên chỉ-highlight; không có nhánh nào can thiệp vào nó
-    const sensitive = isUserOnly(element, this.config.safety);
-    element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-
     return new Promise((resolve) => {
       let settled = false;
       const settle = (value: 'next' | 'cancelled') => {
         if (settled) return;
         settled = true;
         this.teardown();
+        if (shot) URL.revokeObjectURL(shot);
+        resolve(run === this.runId ? value : 'cancelled');
+      };
+      this.current = driver({
+        popoverClass: 'compass-popover',
+        overlayColor: '#000',
+        overlayOpacity: 0.5,
+        allowClose: true,
+        onDestroyStarted: () => settle('cancelled'),
+      });
+      this.current.highlight({
+        popover: {
+          title: step.label ?? `Bước ${index + 1}/${tour.steps.length}`,
+          description:
+            renderLiteMarkdown(step.text) +
+            (hint ? `<br><small>Tìm trên màn hình: ${renderLiteMarkdown(hint)}</small>` : '') +
+            (shot ? `<br><img class="compass-shot" src="${shot}" alt="" style="display:block;max-width:100%;max-height:120px;margin-top:8px;border-radius:4px;border:1px solid #ddd">` : ''),
+          showButtons: ['next', 'close'],
+          nextBtnText: isLast ? 'Xong' : 'Tiếp',
+          onNextClick: () => settle('next'),
+          onCloseClick: () => settle('cancelled'),
+        },
+      });
+    });
+  }
+
+  // Trả về 'next' khi sang bước sau, 'cancelled' khi người dùng đóng, 'missing' khi không thấy phần tử
+  // 'retry': phần tử nằm trong menu hover đang khóa nhưng app đã đóng menu (vòng ngoài mở lại menu rồi làm lại bước)
+  private async runStep(tour: Tour, index: number, run: number): Promise<'next' | 'cancelled' | 'missing' | 'retry'> {
+    const step = tour.steps[index];
+    const isLast = index === tour.steps.length - 1;
+    const debug = debugEnabled();
+    const t0 = performance.now();
+    const log = (msg: string) => debug && console.info(`[WealthCompass] ${tour.id} bước ${index + 1}/${tour.steps.length} +${Math.round(performance.now() - t0)} ms: ${msg}`);
+    const trace = debug ? (reason: string) => log(`chờ: ${reason}`) : undefined;
+    log(`bắt đầu (route ${step.route ?? '-'}, đang ở ${this.path()}${this.navigating ? ', router đang chuyển trang' : ''})`);
+
+    // Thứ tự chờ: router chuyển trang xong (lần bấm ở bước trước) → đúng route → phần tử SẴN SÀNG: tìm thấy chắc chắn,
+    // thành phần quanh nó hết "đang tải" và đã đứng yên. Chỉ dẫn sớm hơn thì popover trỏ vào khung chưa dựng xong.
+    await this.navigationSettled();
+    if (step.route && index > 0 && !routeMatches(step.route, this.path())) await waitForRoute(step.route, () => this.path(), 3000);
+    await this.navigationSettled();
+    if (run !== this.runId) return 'cancelled';
+    log(`xong chờ chuyển trang, đang ở ${this.path()}`);
+
+    const ready = { busySelector: this.config.tours.busySelector, stableMs: 150, trace };
+    // Route có tham số (/orders/:id) không điều hướng được: chờ người dùng tự mở
+    const canNavigate = Boolean(step.route && !step.route.includes(':') && !routeMatches(step.route, this.path()));
+    let found: StepResolution | null = await waitForReady(step, { ...ready, timeoutMs: this.hoverLocks.length ? 1500 : canNavigate ? OFF_ROUTE_PEEK_MS : READY_TIMEOUT_MS });
+    // Mục nằm trong menu hover đang khóa mà không thấy: app đã đóng menu, mở lại rồi tìm tiếp
+    if (!found?.confident && this.hoverLocks.length) {
+      log('không thấy mục trong menu đang khóa, mở lại menu');
+      for (const lock of this.hoverLocks) lock.reopen();
+      found = await waitForReady(step, { ...ready, timeoutMs: canNavigate ? OFF_ROUTE_PEEK_MS : READY_TIMEOUT_MS });
+    }
+    if (!found?.confident && canNavigate) {
+      if (run !== this.runId) return 'cancelled';
+      const ok = await this.router.navigateByUrl(step.route!);
+      if (!ok) return 'missing';
+      await this.navigationSettled();
+      found = await waitForReady(step, { ...ready, timeoutMs: READY_TIMEOUT_MS });
+    }
+    if (run !== this.runId) return 'cancelled';
+    log(found ? `hiện bước (${found.matchedBy}${found.confident ? '' : ', không chắc'})` : 'không thấy phần tử');
+    if (!found) return 'missing';
+    // Chỉ báo bước tìm bằng locator: để biết tour nào đang dựa vào manh mối yếu trước khi nó hỏng hẳn
+    if (found.matchedBy.startsWith('locator')) this.api.report({ event: 'tour_step', tourId: tour.id, stepKey: step.key ?? String(index), matchedBy: found.matchedBy, score: found.score, status: found.confident ? 'ok' : 'low_confidence' });
+    // Không chắc phần tử nào: hiện bước dạng popover giữa màn hình, KHÔNG tô sáng phần tử có thể sai
+    if (!found.confident) return this.showUnanchored(tour, index, run);
+
+    const element = found.element;
+    // Phần tử nằm trong menu đang được giữ mở: giữ luôn nó (và menu con chứa nó)
+    for (const lock of this.hoverLocks) lock.hold(element);
+    // Phần tử nhạy cảm: giữ nguyên chỉ-highlight; không có nhánh nào can thiệp vào nó
+    const sensitive = isUserOnly(element, this.config.safety);
+    // Đang giữ menu hover: không cuộn trang (nhiều menu overlay tự đóng khi trang cuộn)
+    const inMenu = this.hoverLocks.length > 0;
+    if (!inMenu) element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = (value: 'next' | 'cancelled' | 'retry') => {
+        if (settled) return;
+        settled = true;
+        gone?.disconnect();
+        this.teardown();
         resolve(value);
       };
+      // Phần tử trong menu đang khóa bị gỡ (app vẫn đóng menu): làm lại bước sau khi mở lại menu
+      const gone = inMenu
+        ? new MutationObserver(() => {
+            if (element.isConnected || settled) return;
+            log('menu bị đóng trong lúc chờ, mở lại');
+            settle('retry');
+          })
+        : null;
+      gone?.observe(document.documentElement, { childList: true, subtree: true });
 
       const waitsForClick = step.advanceOn === 'click' && !sensitive;
+      // Bước hover: chờ người dùng di chuột vào nút mở menu, rồi khóa hover để menu không đóng khi tour sang mục bên trong
+      const waitsForHover = step.advanceOn === 'hover' && !sensitive;
+      const next = tour.steps[index + 1];
+      let opening = false;
+      const openMenu = async (simulate: boolean) => {
+        if (opening || settled) return;
+        opening = true;
+        if (simulate) simulateHover(element);
+        const lock = lockHover(element, { trace: debug ? (m) => log(m) : undefined });
+        this.hoverLocks.push(lock);
+        // Chờ mục của bước sau hiện ra trong menu (hết hiệu ứng mở) rồi giữ nó; không thấy thì vẫn đi tiếp (bước sau tự báo)
+        const inside = next ? await waitForReady(next, { timeoutMs: 3000, stableMs: 100, busySelector: this.config.tours.busySelector }) : null;
+        if (inside?.confident) lock.hold(inside.element);
+        settle('next');
+      };
       this.current = driver({
         popoverClass: 'compass-popover',
         overlayColor: '#000',
@@ -126,7 +310,7 @@ export class TourService {
         stagePadding: 5,
         stageRadius: 6,
         allowClose: true,
-        smoothScroll: true,
+        smoothScroll: !inMenu,
         // Với bước chờ click, vẫn cho người dùng thao tác trực tiếp lên phần tử được highlight
         disableActiveInteraction: false,
         onDestroyStarted: () => settle('cancelled'),
@@ -136,23 +320,58 @@ export class TourService {
         element,
         popover: {
           title: step.label ?? `Bước ${index + 1}/${tour.steps.length}`,
-          description: renderLiteMarkdown(step.text) + (waitsForClick ? '<br><small>Bấm vào phần được tô sáng để tiếp tục.</small>' : ''),
+          description:
+            renderLiteMarkdown(step.text) +
+            (waitsForClick ? '<br><small>Bấm vào phần được tô sáng để tiếp tục.</small>' : waitsForHover ? '<br><small>Di chuột vào phần được tô sáng để mở menu.</small>' : ''),
           side: 'top',
           align: 'center',
           showButtons: waitsForClick ? ['close'] : ['next', 'close'],
           nextBtnText: isLast ? 'Xong' : 'Tiếp',
-          onNextClick: () => settle('next'),
+          // Bước hover: "Tiếp" mở menu thay người dùng (màn hình cảm ứng không có hover); chỉ là sự kiện hover, không click
+          onNextClick: () => (waitsForHover ? void openMenu(true) : settle('next')),
           onCloseClick: () => settle('cancelled'),
         },
       });
 
+      // Nghe ở pha capture trên document: app chặn lan truyền (stopPropagation) hay lớp trong suốt phủ lên phần tử
+      // (lần bấm/di chuột rơi vào lớp phủ, không vào phần tử) vẫn nhận ra người dùng đã thao tác đúng chỗ
+      const onTarget = (e: Event): boolean => {
+        const t = e.target;
+        if (t instanceof Element && t.closest('.driver-popover, .compass-popover')) return false;
+        if (t instanceof Node && element.contains(t)) return true;
+        const m = e as MouseEvent;
+        if (typeof m.clientX !== 'number' || !element.isConnected) return false;
+        const r = element.getBoundingClientRect();
+        return m.clientX >= r.left && m.clientX <= r.right && m.clientY >= r.top && m.clientY <= r.bottom;
+      };
+      const detach: Array<() => void> = [];
+      const listen = (type: string, raw: (e: Event) => void) => {
+        // Listener của tour không đi qua cổng của khóa hover (menu con, bước hover lồng nhau vẫn nhận được chuột)
+        const handler = ungated(raw);
+        document.addEventListener(type, handler, true);
+        detach.push(() => document.removeEventListener(type, handler, true));
+      };
+      this.detachClick = () => detach.splice(0).forEach((d) => d());
+
+      if (waitsForHover) {
+        const onMove = (e: Event) => onTarget(e) && void openMenu(false);
+        listen('mouseover', onMove);
+        listen('mousemove', onMove);
+        // Chuột đã ở sẵn trên phần tử (vừa bấm bước trước ngay tại đó): không có sự kiện chuột mới
+        if (element.matches(':hover')) void openMenu(false);
+      }
       if (waitsForClick) {
-        const onClick = () => {
-          // Chờ app xử lý click (đổi route, đổi tab) rồi mới sang bước sau
-          setTimeout(() => settle('next'), 120);
-        };
-        element.addEventListener('click', onClick, { once: true });
-        this.detachClick = () => element.removeEventListener('click', onClick);
+        // Sang bước sau ngay sau khi app nhận lần bấm (bước sau tự chờ trang/thành phần mới sẵn sàng)
+        listen('click', (e) => {
+          if (!onTarget(e)) return;
+          log('người dùng đã bấm, sang bước sau');
+          setTimeout(() => settle('next'), 30);
+        });
+        // Component xử lý ở pointerdown rồi gỡ phần tử (click không bao giờ tới): phần tử biến mất sau lần nhấn là đã bấm
+        listen('pointerdown', (e) => {
+          if (!onTarget(e)) return;
+          setTimeout(() => !settled && (!element.isConnected || !isVisible(element)) && settle('next'), 400);
+        });
       }
     });
   }

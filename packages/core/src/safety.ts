@@ -17,6 +17,10 @@ export interface SafetyPolicy {
   blockedRoutes: string[];
 }
 
+// Không có danh sách "chữ trên nút nhạy cảm": đoán theo chữ chặn nhầm cả mục menu (vd. "Đặt lệnh cổ phiếu"). Nút nào chỉ
+// nên tô sáng thì người ghi tour tự bật "Tô sáng (không bấm)" lúc ghi, hoặc dev đánh dấu trong source
+// (tourRole="user-only", data-sensitive).
+
 export function buildSafetyPolicy(extra?: Partial<SafetyPolicy>): SafetyPolicy {
   return {
     userOnlySelectors: [...BASE_USER_ONLY_SELECTORS, ...(extra?.userOnlySelectors ?? [])],
@@ -26,13 +30,16 @@ export function buildSafetyPolicy(extra?: Partial<SafetyPolicy>): SafetyPolicy {
 
 // Phần tử (hoặc tổ tiên) khớp selector user-only => engine chỉ được highlight, không click/điền/focus
 export function isUserOnly(element: Element, policy: SafetyPolicy): boolean {
-  return policy.userOnlySelectors.some((selector) => {
+  const bySelector = policy.userOnlySelectors.some((selector) => {
     try {
       return element.closest(selector) !== null;
     } catch {
       return false; // selector sai cú pháp thì bỏ qua, không làm vỡ tour
     }
   });
+  if (bySelector) return true;
+  // Nút gửi form: không biết form làm gì nên coi là nhạy cảm (chỉ tô sáng, người dùng tự bấm)
+  return element.closest('button[type=submit], input[type=submit]')?.closest('form') != null;
 }
 
 export function isBlockedRoute(route: string, policy: SafetyPolicy): boolean {

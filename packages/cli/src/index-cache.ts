@@ -4,10 +4,11 @@
 // File chỉ mục nằm ngoài dự án (~/.wealthcompass/index) để không lẫn vào git của web.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { VERSION } from './version';
 
 // Đổi khi hình dạng dữ liệu lưu thay đổi: chỉ mục cũ tự bị bỏ
@@ -76,6 +77,30 @@ function treeStamp(dir: string): string {
   return `${count}:${newest}`;
 }
 
+// Dấu vân tay code của chính WealthCompass (thư mục chứa module này: src khi chạy dev, bản bundle khi đóng gói):
+// sửa scanner mà chưa nâng VERSION thì chỉ mục cũ vẫn phải bỏ, không thì Studio hiện kết quả quét của code cũ
+let codeStamp: string | undefined;
+function toolStamp(): string {
+  if (codeStamp !== undefined) return codeStamp;
+  const hash = createHash('sha256');
+  const walk = (d: string) => {
+    let entries;
+    try {
+      entries = readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.(ts|js|mjs)$/.test(e.name) && !/\.test\.ts$/.test(e.name)) hash.update(`${p}\0`).update(readFileSync(p));
+    }
+  };
+  walk(dirname(fileURLToPath(import.meta.url)));
+  return (codeStamp = hash.digest('hex').slice(0, 16));
+}
+
 const memo = new Map<string, { at: number; value: string }>();
 
 // `ignore`: file dữ liệu của WealthCompass (overrides, tour, feature map, lock, patch) không phải source của web:
@@ -88,7 +113,7 @@ export function sourceFingerprint(rootInput: string, ignore: string[] = []): str
   if (hit && Date.now() - hit.at < 300) return hit.value;
 
   const skip = new Set(ignore.map((p) => p.replace(/^\.\//, '')));
-  const hash = createHash('sha256').update(`v${FORMAT}|${VERSION}|`);
+  const hash = createHash('sha256').update(`v${FORMAT}|${VERSION}|${toolStamp()}|`);
   const head = git(root, ['rev-parse', 'HEAD']);
   const status = head ? git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.']) : null;
   if (head && status !== null) {
@@ -120,6 +145,18 @@ export function sourceFingerprint(rootInput: string, ignore: string[] = []): str
 // Gọi ngay sau khi công cụ tự sửa source (áp patch): lần quét kế tiếp phải tính lại dấu vân tay
 export function forgetFingerprints(): void {
   memo.clear();
+}
+
+// Xóa mọi chỉ mục của một dự án (gốc dự án và thư mục con, như thư mục source): lần sau quét lại từ đầu
+export function dropIndex(rootInput: string): void {
+  const handle = open();
+  if (!handle) return;
+  const root = resolve(rootInput);
+  try {
+    handle.prepare("DELETE FROM source_index WHERE root = ? OR root LIKE ? ESCAPE '\\'").run(root, root.replace(/[\\%_]/g, '\\$&') + '/%');
+  } catch {
+    // không xóa được thì vẫn quét lại nhờ invalidateScan
+  }
 }
 
 export function readIndex<T>(root: string, name: string, fingerprint: string): T | null {

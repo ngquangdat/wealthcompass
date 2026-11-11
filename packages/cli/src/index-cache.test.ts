@@ -7,7 +7,7 @@ import { test } from 'node:test';
 
 // Chỉ mục riêng cho test, không đụng ~/.wealthcompass
 process.env['COMPASS_INDEX_DIR'] = mkdtempSync(join(tmpdir(), 'compass-index-'));
-const { forgetFingerprints, sourceFingerprint } = await import('./index-cache');
+const { dropIndex, forgetFingerprints, sourceFingerprint } = await import('./index-cache');
 const { indexIgnore, loadConfig, scan } = await import('./scan');
 
 const fixture = resolve(import.meta.dirname, '../test-fixtures/mini-app');
@@ -58,4 +58,19 @@ test('chỉ mục source: dùng lại khi source không đổi, quét lại khi 
   assert.equal(scan(cfg, { useIndex: true }).fromIndex, true);
   // Quét đầy đủ (CLI scan, enrich) không bao giờ đọc chỉ mục
   assert.equal(scan(cfg).fromIndex, false);
+});
+
+test('dropIndex (nút Quét lại của Studio): lần quét sau đọc lại source dù dấu vân tay không đổi', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'compass-idx-drop-'));
+  cpSync(fixture, dir, { recursive: true });
+  // Có git thì dấu vân tay không đổi khi scan ghi feature-map.json
+  const git = (...a: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: dir, stdio: 'ignore' });
+  git('init', '-q');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'init');
+  const cfg = join(dir, 'compass.config.yaml');
+  scan(cfg, { useIndex: true });
+  assert.equal(scan(cfg, { useIndex: true }).fromIndex, true);
+  dropIndex(dir);
+  assert.equal(scan(cfg, { useIndex: true }).fromIndex, false);
 });

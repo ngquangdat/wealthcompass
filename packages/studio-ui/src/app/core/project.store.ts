@@ -45,7 +45,13 @@ export class ProjectStore {
   async refresh(): Promise<void> {
     const p = this.project();
     if (!p) return;
-    this.project.set(await this.api.post<ProjectSummary>('/api/project/open', { path: p.path }));
+    this.loading.set(true);
+    try {
+      await this.api.post('/api/rescan');
+      this.project.set(await this.api.post<ProjectSummary>('/api/project/open', { path: p.path }));
+    } finally {
+      this.loading.set(false);
+    }
     await this.refreshOverview();
   }
 

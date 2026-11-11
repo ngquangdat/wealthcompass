@@ -17,7 +17,7 @@ import { doctor } from '../setup/doctor';
 import { VERSION } from '../version';
 import { readEnvFile, updateEnvFile } from './env-file';
 import { approveFeature, updateFeature, type FeatureChanges } from './overrides-edit';
-import { dataFile, cachedCodeChecks, cachedScan, isProject, noSource, eventLogFile, configPath, featureRows, httpError, integrated, keySource, llm, projectSummary, requireApp, state, stream } from './context';
+import { dataFile, cachedCodeChecks, cachedScan, isProject, noSource, eventLogFile, configPath, featureRows, httpError, integrated, keySource, llm, projectSummary, requireApp, rescan, state, stream } from './context';
 import { registerPhase2 } from './routes-phase2';
 import { registerPhase3 } from './routes-phase3';
 import { ngBin, onLog, portAnswers, procInfo, procLogs, sourceRepo, startProc, stopAll, stopProc, type ProcName } from './processes';
@@ -109,6 +109,12 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
     if (!isProject(dir)) throw httpError(400, `${dir} không phải thư mục web Angular (không có angular.json) và cũng không phải kho dự án tour chưa có source (file .db tạo bằng \`wealthcompass init\`)`);
     state.appDir = dir;
     return projectSummary(dir);
+  });
+
+  // Quét lại source từ đầu (bỏ chỉ mục và bộ nhớ đệm)
+  app.post('/api/rescan', async () => {
+    rescan(requireApp());
+    return { ok: true };
   });
 
   // ---------------- Tổng quan ----------------

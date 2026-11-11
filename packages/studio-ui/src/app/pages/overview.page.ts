@@ -19,8 +19,8 @@ const LINKS: Array<[RegExp, string, string]> = [
   template: `
     @if (store.project(); as p) {
       <ui-page-header [title]="p.name" [subtitle]="(p.noSource ? 'Chưa có source · ' + (p.webUrl ?? '') : 'Angular ' + (p.angularVersion ?? '?')) + ' · ' + p.path">
-        <button class="btn" (click)="store.refresh()" [disabled]="store.loading()">
-          @if (store.loading()) { <span class="spinner"></span> } @else { <ui-icon name="refresh" /> } Kiểm tra lại
+        <button class="btn" (click)="store.refresh()" [disabled]="store.loading()" title="Quét lại source từ đầu (bỏ kết quả đã lưu) và kiểm tra lại tích hợp">
+          @if (store.loading()) { <span class="spinner"></span> } @else { <ui-icon name="refresh" /> } Quét lại
         </button>
       </ui-page-header>
 
@@ -34,7 +34,7 @@ const LINKS: Array<[RegExp, string, string]> = [
           <div class="hero-icon"><ui-icon name="plug" [size]="22" /></div>
           <div class="grow">
             <h2>Dự án chưa gắn WealthCompass</h2>
-            <p class="muted">Tích hợp làm một lần bằng dòng lệnh, không làm trong Studio. Chạy lệnh dưới đây, duyệt và áp patch, rồi bấm Kiểm tra lại.</p>
+            <p class="muted">Tích hợp làm một lần bằng dòng lệnh, không làm trong Studio. Chạy lệnh dưới đây, duyệt và áp patch, rồi bấm Quét lại.</p>
             <pre class="cmd">npx wealthcompass setup --app {{ p.path }}
 git apply wealthcompass-setup.patch &amp;&amp; npm install</pre>
           </div>

@@ -10,7 +10,7 @@ import type { FastifyReply } from 'fastify';
 import { resolveLlmConfig, LLM_PRESETS } from '@wealthcompass/llm';
 import { findGaps } from '../enrich';
 import { indexIgnore, loadConfig, scan, type ScanResult } from '../scan';
-import { forgetFingerprints, indexed, sourceFingerprint } from '../index-cache';
+import { dropIndex, forgetFingerprints, indexed, sourceFingerprint } from '../index-cache';
 import { codeChecks, type Check } from '../setup/doctor';
 import { detectProject } from '../setup/detect';
 import { readEnvFile } from './env-file';
@@ -247,6 +247,13 @@ export function cachedScan(app: string, full = false): ScanResult {
 export function invalidateScan(): void {
   cache = null;
   forgetFingerprints();
+}
+
+// Nút "Quét lại": bỏ cả chỉ mục source (route, kết quả doctor) rồi quét đầy đủ, kể cả khi dấu vân tay chưa đổi
+export function rescan(app: string): void {
+  dropIndex(app);
+  if (integrated(app) && !noSource(app)) dropIndex(loadConfig(configPath(app)).sourceRoot);
+  invalidateScan();
 }
 
 // Nhật ký hỏi đáp của backend do Studio bật: để ngoài dự án (không lẫn vào git), mỗi dự án một file

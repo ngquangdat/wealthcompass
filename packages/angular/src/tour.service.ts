@@ -16,6 +16,7 @@ import {
   shouldSkipStep,
   simulateHover,
   stepsForLayout,
+  ungated,
   waitForReady,
   waitForRoute,
   type HoverLock,
@@ -104,6 +105,8 @@ export class TourService {
       if (!ok) return this.finish(tour, run, 'failed', 0, 'route_denied');
     }
 
+    // Menu hover bị app đóng giữa chừng: mở lại và làm lại bước đó, tối đa vài lần
+    let retries = 0;
     for (let index = from; index < tour.steps.length; index++) {
       if (run !== this.runId) return { tourId: tour.id, status: 'cancelled', lastStep: index };
       // Bước chỉ để mở chỗ chứa bước sau (nút menu trên mobile): bước sau đã hiện thì bỏ qua
@@ -112,10 +115,17 @@ export class TourService {
         continue;
       }
       const result = await this.runStep(tour, index, run);
+      if (result === 'retry' && retries < 3) {
+        retries++;
+        for (const lock of this.hoverLocks) lock.reopen();
+        index--;
+        continue;
+      }
+      retries = 0;
       // Xong mục bên trong menu hover (bước không-hover): nhả khóa để menu đóng lại như bình thường
       if (tour.steps[index].advanceOn !== 'hover') this.releaseHover();
       if (result === 'cancelled') return this.finish(tour, run, 'cancelled', index);
-      if (result === 'missing') return this.finish(tour, run, 'failed', index, 'target_missing');
+      if (result === 'missing' || result === 'retry') return this.finish(tour, run, 'failed', index, 'target_missing');
     }
     return this.finish(tour, run, 'completed', tour.steps.length - 1);
   }
@@ -206,7 +216,8 @@ export class TourService {
   }
 
   // Trả về 'next' khi sang bước sau, 'cancelled' khi người dùng đóng, 'missing' khi không thấy phần tử
-  private async runStep(tour: Tour, index: number, run: number): Promise<'next' | 'cancelled' | 'missing'> {
+  // 'retry': phần tử nằm trong menu hover đang khóa nhưng app đã đóng menu (vòng ngoài mở lại menu rồi làm lại bước)
+  private async runStep(tour: Tour, index: number, run: number): Promise<'next' | 'cancelled' | 'missing' | 'retry'> {
     const step = tour.steps[index];
     const isLast = index === tour.steps.length - 1;
     const debug = debugEnabled();
@@ -226,7 +237,13 @@ export class TourService {
     const ready = { busySelector: this.config.tours.busySelector, stableMs: 150, trace };
     // Route có tham số (/orders/:id) không điều hướng được: chờ người dùng tự mở
     const canNavigate = Boolean(step.route && !step.route.includes(':') && !routeMatches(step.route, this.path()));
-    let found: StepResolution | null = await waitForReady(step, { ...ready, timeoutMs: canNavigate ? OFF_ROUTE_PEEK_MS : READY_TIMEOUT_MS });
+    let found: StepResolution | null = await waitForReady(step, { ...ready, timeoutMs: this.hoverLocks.length ? 1500 : canNavigate ? OFF_ROUTE_PEEK_MS : READY_TIMEOUT_MS });
+    // Mục nằm trong menu hover đang khóa mà không thấy: app đã đóng menu, mở lại rồi tìm tiếp
+    if (!found?.confident && this.hoverLocks.length) {
+      log('không thấy mục trong menu đang khóa, mở lại menu');
+      for (const lock of this.hoverLocks) lock.reopen();
+      found = await waitForReady(step, { ...ready, timeoutMs: canNavigate ? OFF_ROUTE_PEEK_MS : READY_TIMEOUT_MS });
+    }
     if (!found?.confident && canNavigate) {
       if (run !== this.runId) return 'cancelled';
       const ok = await this.router.navigateByUrl(step.route!);
@@ -247,16 +264,28 @@ export class TourService {
     for (const lock of this.hoverLocks) lock.hold(element);
     // Phần tử nhạy cảm: giữ nguyên chỉ-highlight; không có nhánh nào can thiệp vào nó
     const sensitive = isUserOnly(element, this.config.safety);
-    element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    // Đang giữ menu hover: không cuộn trang (nhiều menu overlay tự đóng khi trang cuộn)
+    const inMenu = this.hoverLocks.length > 0;
+    if (!inMenu) element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 
     return new Promise((resolve) => {
       let settled = false;
-      const settle = (value: 'next' | 'cancelled') => {
+      const settle = (value: 'next' | 'cancelled' | 'retry') => {
         if (settled) return;
         settled = true;
+        gone?.disconnect();
         this.teardown();
         resolve(value);
       };
+      // Phần tử trong menu đang khóa bị gỡ (app vẫn đóng menu): làm lại bước sau khi mở lại menu
+      const gone = inMenu
+        ? new MutationObserver(() => {
+            if (element.isConnected || settled) return;
+            log('menu bị đóng trong lúc chờ, mở lại');
+            settle('retry');
+          })
+        : null;
+      gone?.observe(document.documentElement, { childList: true, subtree: true });
 
       const waitsForClick = step.advanceOn === 'click' && !sensitive;
       // Bước hover: chờ người dùng di chuột vào nút mở menu, rồi khóa hover để menu không đóng khi tour sang mục bên trong
@@ -267,7 +296,7 @@ export class TourService {
         if (opening || settled) return;
         opening = true;
         if (simulate) simulateHover(element);
-        const lock = lockHover(element);
+        const lock = lockHover(element, { trace: debug ? (m) => log(m) : undefined });
         this.hoverLocks.push(lock);
         // Chờ mục của bước sau hiện ra trong menu (hết hiệu ứng mở) rồi giữ nó; không thấy thì vẫn đi tiếp (bước sau tự báo)
         const inside = next ? await waitForReady(next, { timeoutMs: 3000, stableMs: 100, busySelector: this.config.tours.busySelector }) : null;
@@ -281,7 +310,7 @@ export class TourService {
         stagePadding: 5,
         stageRadius: 6,
         allowClose: true,
-        smoothScroll: true,
+        smoothScroll: !inMenu,
         // Với bước chờ click, vẫn cho người dùng thao tác trực tiếp lên phần tử được highlight
         disableActiveInteraction: false,
         onDestroyStarted: () => settle('cancelled'),
@@ -316,7 +345,9 @@ export class TourService {
         return m.clientX >= r.left && m.clientX <= r.right && m.clientY >= r.top && m.clientY <= r.bottom;
       };
       const detach: Array<() => void> = [];
-      const listen = (type: string, handler: (e: Event) => void) => {
+      const listen = (type: string, raw: (e: Event) => void) => {
+        // Listener của tour không đi qua cổng của khóa hover (menu con, bước hover lồng nhau vẫn nhận được chuột)
+        const handler = ungated(raw);
         document.addEventListener(type, handler, true);
         detach.push(() => document.removeEventListener(type, handler, true));
       };

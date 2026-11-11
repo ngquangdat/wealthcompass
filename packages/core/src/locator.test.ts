@@ -458,8 +458,8 @@ test('khóa hover: chặn sự kiện rời chuột của menu JS, đóng băng 
   assert.equal(dropdown.style.getPropertyPriority('display'), 'important');
   assert.equal(trigger.style.getPropertyPriority('display'), '', 'không đụng tới nút mở và tổ tiên chung');
 
-  // Web đóng menu khi chuột ĐI VÀO chỗ khác (phần thân trang): sự kiện hover ngoài vùng menu cũng bị chặn,
-  // còn trong vùng menu và trên giao diện của tour thì vẫn tới nơi
+  // Web đóng menu khi chuột ĐI VÀO chỗ khác (phần thân trang, popover của tour): sự kiện hover ngoài vùng menu bị chặn,
+  // trong vùng menu thì vẫn tới nơi
   const body = document.createElement('main');
   body.innerHTML = '<p id="content">Nội dung</p><div class="driver-popover"><button id="next">Tiếp</button></div>';
   document.body.appendChild(body);
@@ -467,7 +467,7 @@ test('khóa hover: chặn sự kiện rời chuột của menu JS, đóng băng 
   for (const id of ['content', 'next']) document.getElementById(id)!.addEventListener('mouseenter', () => got.push(id));
   document.querySelector('.dropdown a')!.addEventListener('mouseenter', () => got.push('item'));
   for (const el of [document.getElementById('content')!, document.getElementById('next')!, document.querySelector('.dropdown a')!]) el.dispatchEvent(new window.MouseEvent('mouseenter'));
-  assert.deepEqual(got, ['next', 'item'], 'chỉ sự kiện hover ở phần thân trang bị chặn');
+  assert.deepEqual(got, ['item'], 'sự kiện hover ngoài vùng menu bị chặn, kể cả trên popover của tour (app thấy chuột ở chỗ khác sẽ đóng menu)');
 
   lock.release();
   assert.equal(dropdown.style.getPropertyPriority('display'), '', 'trả style cũ');
@@ -477,7 +477,36 @@ test('khóa hover: chặn sự kiện rời chuột của menu JS, đóng băng 
   trigger.dispatchEvent(new window.MouseEvent('mouseleave'));
   assert.equal(left, before + 1, 'sau khi nhả, sự kiện chạy bình thường');
   document.getElementById('content')!.dispatchEvent(new window.MouseEvent('mouseenter'));
-  assert.deepEqual(got, ['next', 'item', 'content'], 'sau khi nhả, phần thân trang nhận lại sự kiện hover');
+  assert.deepEqual(got, ['item', 'content'], 'sau khi nhả, phần thân trang nhận lại sự kiện hover');
+});
+
+test('cổng khóa hover: listener của app ở document (đóng menu khi chuột ở ngoài, khi trang cuộn) không nhận sự kiện; listener của tour vẫn nhận sự kiện trong menu', async () => {
+  const { installHoverGuard, lockHover, ungated } = await import('./hover-lock');
+  installHoverGuard();
+  page(`<nav><button id="trigger">Tài khoản</button></nav><div class="cdk-overlay-pane"><button id="item">Bảo mật</button></div><main id="content">Nội dung</main><div class="driver-popover" id="pop">Bấm Bảo mật</div>`);
+  const closes: string[] = [];
+  const onMove = (e: Event) => {
+    const t = e.target as Element;
+    if (!t.closest?.('#trigger, .cdk-overlay-pane')) closes.push(`${e.type}@${(t as Element).id || 'doc'}`);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('scroll', () => closes.push('scroll'), true);
+  const tourSaw: string[] = [];
+  document.addEventListener('mousemove', ungated((e: Event) => tourSaw.push((e.target as Element).id)), true);
+
+  const lock = lockHover(document.getElementById('trigger')!);
+  lock.hold(document.getElementById('item')!);
+  for (const id of ['content', 'pop', 'item']) document.getElementById(id)!.dispatchEvent(new window.MouseEvent('mousemove', { bubbles: true }));
+  document.dispatchEvent(new window.Event('scroll'));
+  assert.deepEqual(closes, [], 'app không thấy chuột ở ngoài menu, trên popover, hay trang cuộn');
+  assert.deepEqual(tourSaw, ['item'], 'listener của tour vẫn nhận sự kiện trong menu (menu con, bước hover lồng nhau)');
+
+  lock.release();
+  document.getElementById('content')!.dispatchEvent(new window.MouseEvent('mousemove', { bubbles: true }));
+  assert.deepEqual(closes, ['mousemove@content'], 'nhả khóa thì app nhận lại sự kiện');
+  document.removeEventListener('mousemove', onMove);
+  document.getElementById('content')!.dispatchEvent(new window.MouseEvent('mousemove', { bubbles: true }));
+  assert.equal(closes.length, 1, 'gỡ listener của app vẫn đúng sau khi bị bọc');
 });
 
 test('tourId lồng nhau: lấy tourId của chính nút vừa bấm; vùng chứa nhiều nút không được dùng', async () => {

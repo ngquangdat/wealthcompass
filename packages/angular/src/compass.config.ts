@@ -1,5 +1,5 @@
-import { InjectionToken, makeEnvironmentProviders, EnvironmentProviders } from '@angular/core';
-import { DEFAULT_BUSY_SELECTOR, buildSafetyPolicy, type SafetyPolicy } from '@wealthcompass/core';
+import { InjectionToken, makeEnvironmentProviders, provideEnvironmentInitializer, EnvironmentProviders } from '@angular/core';
+import { DEFAULT_BUSY_SELECTOR, buildSafetyPolicy, installHoverGuard, type SafetyPolicy } from '@wealthcompass/core';
 
 export interface CompassOptions {
   // Địa chỉ backend WealthCompass tự host, VD http://localhost:8890
@@ -36,6 +36,9 @@ export const COMPASS_CONFIG = new InjectionToken<ResolvedCompassConfig>('COMPASS
 // để lấy AuthService của web chủ mà không cần biến toàn cục.
 export function provideCompass(options: CompassOptions | (() => CompassOptions)): EnvironmentProviders {
   return makeEnvironmentProviders([
+    // Cổng sự kiện của khóa hover cài lúc khởi tạo, trước khi component của app đăng ký listener: khóa menu hover
+    // của tour mới chặn được mọi listener của app
+    provideEnvironmentInitializer(() => installHoverGuard()),
     {
       provide: COMPASS_CONFIG,
       useFactory: (): ResolvedCompassConfig => {

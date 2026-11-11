@@ -1,0 +1,24 @@
+{
+  "slug": "wealthcompass",
+  "repo": "ngquangdat/wealthcompass",
+  "base_branch": "main",
+  "engine": "claude",
+  "parent_slug": null,
+  "depends_on": [],
+  "children": [],
+  "status": "READY",
+  "host": null,
+  "members": [
+    {
+      "user_id": "web:Đạt@king",
+      "role": "king"
+    }
+  ],
+  "discord_channel_id": null,
+  "github_milestone": 1,
+  "pr_number": null,
+  "linked": [],
+  "pr_repo": "",
+  "merge_queue": [],
+  "cancelled": false
+}

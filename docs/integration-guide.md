@@ -368,12 +368,12 @@ Domain Pack (thư mục `packs/`, biến `COMPASS_PACK`, khóa `domainPack`, tù
 
 ## 9. Giới hạn hiện tại của scanner và widget
 
-Đã kiểm thử: standalone, `provideRouter`, `loadComponent`, `loadChildren` (file route export mảng), `children`, guard kế thừa từ route cha, `templateUrl` và `template`, component con khai trong `imports` của component cha, `@if/@for`.
+Đã kiểm thử: standalone, `provideRouter`, `loadComponent`, `loadChildren` (file route export mảng), `children`, guard kế thừa từ route cha, `templateUrl` và `template`, component con khai trong `imports` của component cha, `@if/@for`. App NgModule: `loadChildren` trỏ tới module (`.then(m => m.XxxModule)` hoặc chuỗi kiểu cũ `'./x.module#XxxModule'`) với route trong `RouterModule.forChild(...)` của chính module hoặc của `XxxRoutingModule` nó import; component con khai trong `declarations` của module hoặc lấy từ `exports` của module được import (kể cả module re-export).
 
 Chưa hỗ trợ hoặc chưa kiểm thử:
 
 - Route khai bằng **spread** (`...adminRoutes`) hoặc sinh từ hàm: scanner ghi cảnh báo và bỏ qua phần đó. Đường dẫn không phải chuỗi literal (hằng số `ROUTE_PATHS.x`) cũng bị bỏ qua kèm cảnh báo.
-- **NgModule**: chưa kiểm thử. Component con khai trong `declarations` (không phải `imports`) không được lần theo, nên `tourId` trong đó không được quét; chỉ `tourId` nằm trong template của chính component được route tới là chắc chắn thấy.
+- **NgModule**: đường dẫn import của `loadChildren`/`loadComponent` phải là đường dẫn tương đối (`./`, `../`); alias trong `paths` của tsconfig (`@features/...`) chưa resolve được và bị bỏ qua kèm cảnh báo. Route sinh bằng hàm (`RouterModule.forChild(buildRoutes())`) cũng chưa hỗ trợ.
 - Route theo **tham số** (`:id`): đưa vào Feature Map nhưng agent không tạo nút mở thẳng (thiếu giá trị tham số); `exampleParams` chưa dùng.
 - `tourId` sinh động, phần tử trong iframe khác origin hoặc shadow DOM đóng: không hỗ trợ.
 - `tour:record` chỉ ghi lần bấm (chưa ghi hover, kéo thả, nhập liệu) và cần Chrome cài trên máy; chưa lưu trạng thái tour khi tải lại trang.

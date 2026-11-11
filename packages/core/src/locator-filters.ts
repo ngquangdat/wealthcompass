@@ -141,4 +141,4 @@ export function columnOf(element: Element): string | undefined {
 }
 
 // Phần tử "đang tải" mặc định; app có spinner riêng thì khai báo tours.busySelector
-export const DEFAULT_BUSY_SELECTOR = '[aria-busy="true"],mat-spinner,mat-progress-spinner,.compass-busy';
+export const DEFAULT_BUSY_SELECTOR = '[aria-busy="true"],mat-spinner,mat-progress-spinner,mat-progress-bar[mode="indeterminate"],ngx-skeleton-loader,.compass-busy';

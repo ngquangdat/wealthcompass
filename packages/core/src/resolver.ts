@@ -55,36 +55,50 @@ export function resolveStep(
   return null;
 }
 
+// Khoảng cách tối thiểu giữa hai lần dò khi DOM đổi liên tục (bảng giá cập nhật realtime đổi DOM hàng trăm lần mỗi
+// giây; dò sau từng lần đổi làm nghẽn luồng chính nên tour hiện chậm)
+const PROBE_INTERVAL_MS = 60;
+
 // Chờ tới khi `probe` trả kết quả đạt `done` bằng MutationObserver thay vì setTimeout cố định:
 // @if async và change detection có thể chưa kịp render khi route vừa đổi. Hết giờ thì trả kết quả cuối (có thể chưa đạt).
+// `pollMs`: dò thêm theo nhịp (điều kiện phụ thuộc thời gian, vd. phần tử đứng yên đủ lâu, không cần DOM đổi).
 export function waitFor<T>(
   probe: () => T | null,
   timeoutMs = 4000,
   root: ParentNode = document,
   done: (value: T) => boolean = () => true,
+  pollMs = 0,
 ): Promise<T | null> {
   const immediate = probe();
   if (immediate && done(immediate)) return Promise.resolve(immediate);
 
   return new Promise((resolve) => {
     const observeRoot = ((root as Document).documentElement ?? root) as Node;
-    let pending = false;
+    let scheduled: ReturnType<typeof setTimeout> | null = null;
+    let last = Date.now();
+    let finished = false;
     const finish = (value: T | null) => {
+      if (finished) return;
+      finished = true;
       observer.disconnect();
       clearTimeout(timer);
+      if (scheduled) clearTimeout(scheduled);
+      if (poll) clearInterval(poll);
       resolve(value);
     };
+    const check = () => {
+      scheduled = null;
+      last = Date.now();
+      const found = probe();
+      if (found && done(found)) finish(found);
+    };
+    // Gộp các thay đổi DOM liên tiếp: dò ngay nếu đã lâu chưa dò, không thì dò một lần ở cuối khoảng
     const observer = new MutationObserver(() => {
-      // Gộp nhiều thay đổi DOM liên tiếp vào một lần chấm điểm
-      if (pending) return;
-      pending = true;
-      queueMicrotask(() => {
-        pending = false;
-        const found = probe();
-        if (found && done(found)) finish(found);
-      });
+      if (scheduled || finished) return;
+      scheduled = setTimeout(check, Math.max(0, last + PROBE_INTERVAL_MS - Date.now()));
     });
     const timer = setTimeout(() => finish(probe()), timeoutMs);
+    const poll = pollMs > 0 ? setInterval(() => !scheduled && check(), pollMs) : null;
     observer.observe(observeRoot, { childList: true, subtree: true, attributes: true });
   });
 }
@@ -157,6 +171,90 @@ function busy(selector: string, root: ParentNode): boolean {
   } catch {
     return false;
   }
+}
+
+// Vùng "component" chứa phần tử: thẻ Angular gần nhất (có dấu gạch nối) không phải khung của cả trang
+function componentHost(element: Element): Element | null {
+  const vw = window.innerWidth || 1;
+  const vh = window.innerHeight || 1;
+  for (let el = element.parentElement; el && el !== document.body; el = el.parentElement) {
+    if (!el.tagName.includes('-') || el.tagName === 'APP-ROOT') continue;
+    const r = el.getBoundingClientRect();
+    if (r.width * r.height >= vw * vh * 0.8) return null;
+    return el;
+  }
+  return null;
+}
+
+function overlaps(a: DOMRect, b: DOMRect): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+// Phần tử của bước còn đang tải: nằm trong vùng aria-busy, hoặc có chỉ báo "đang tải" che lên nó, nằm trong cùng
+// component với nó, hay trải rộng cả trang (thanh tải trên đầu trang, lớp phủ tải). Spinner nhỏ ở chỗ khác không tính.
+export function isLoadingAround(element: Element, selector = DEFAULT_BUSY_SELECTOR, root: ParentNode = document): boolean {
+  if (element.closest('[aria-busy="true"]')) return true;
+  let indicators: Element[];
+  try {
+    indicators = Array.from(root.querySelectorAll(selector)).filter(isVisible);
+  } catch {
+    return false;
+  }
+  if (!indicators.length) return false;
+  const rect = element.getBoundingClientRect();
+  const host = componentHost(element);
+  const vw = window.innerWidth || 1;
+  return indicators.some((ind) => {
+    if (ind === element || ind.contains(element)) return true;
+    if (host && host.contains(ind)) return true;
+    const r = ind.getBoundingClientRect();
+    return r.width >= vw * 0.5 || overlaps(r, rect);
+  });
+}
+
+export interface ReadyOptions {
+  timeoutMs?: number;
+  busySelector?: string;
+  // Phần tử phải đứng yên (vị trí, cỡ không đổi) chừng này ms: component đã dựng xong, không còn nhảy bố cục
+  stableMs?: number;
+}
+
+// Chờ phần tử của bước SẴN SÀNG rồi mới chỉ dẫn: tìm thấy chắc chắn, không còn đang tải quanh nó, và đã đứng yên.
+// Hết giờ: trả phần tử chắc chắn dù chưa đứng yên/còn tải (không để tour kẹt), không có thì trả kết quả tốt nhất đã thấy.
+export async function waitForReady(
+  step: { tourId?: string; locator?: Locator },
+  options: ReadyOptions = {},
+  root: ParentNode = document,
+): Promise<StepResolution | null> {
+  const { timeoutMs = 8000, busySelector = DEFAULT_BUSY_SELECTOR, stableMs = 150 } = options;
+  let seen: { element: Element; box: string; since: number } | null = null;
+  let best: StepResolution | null = null;
+  const ready = (r: StepResolution): boolean => {
+    if (!r.confident || isLoadingAround(r.element, busySelector, root)) {
+      seen = null;
+      return false;
+    }
+    const b = r.element.getBoundingClientRect();
+    const box = `${Math.round(b.left)},${Math.round(b.top)},${Math.round(b.width)},${Math.round(b.height)}`;
+    const now = Date.now();
+    if (!seen || seen.element !== r.element || seen.box !== box) {
+      seen = { element: r.element, box, since: now };
+      return stableMs <= 0;
+    }
+    return now - seen.since >= stableMs;
+  };
+  const result = await waitFor(
+    () => {
+      const r = resolveStep(step, root);
+      if (r && (!best || r.confident || !best.confident)) best = r;
+      return r;
+    },
+    timeoutMs,
+    root,
+    ready,
+    Math.max(40, Math.min(100, stableMs / 2)),
+  );
+  return result?.confident ? result : best;
 }
 
 // Chờ spinner/khung "đang tải" biến mất (hết giờ thì đi tiếp: không để tour kẹt vì spinner không tắt)

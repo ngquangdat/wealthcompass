@@ -78,7 +78,7 @@ Phím Alt tiện nhất vì chuột không phải rời nút mở menu; đưa ch
 
 Lúc chạy tour, bước `hover` tô sáng nút mở menu và chờ người dùng di chuột vào. Khi menu mở, widget **khóa hover**: menu được giữ mở trong lúc tour tô sáng mục bên trong, dù chuột rời nút mở hay lớp phủ của tour che mất nó. Khóa được nhả ngay sau bước không-hover kế tiếp (mục trong menu đã được bấm), khi tour kết thúc hoặc bị đóng.
 
-- Menu mở bằng JS (`mouseenter`/`mouseleave`, overlay): widget chặn sự kiện "rời chuột" của nút mở và vùng menu, và chặn luôn các sự kiện hover xảy ra **ngoài** vùng menu (nhiều web, như TCInvest, đóng menu khi chuột đi vào phần thân trang chứ không phải khi rời nút). Popover của tour và khung chat không bị chặn. Trong lúc khóa, phần còn lại của trang tạm không phản ứng với hover (tooltip, menu khác) cho tới khi nhả khóa.
+- Menu mở bằng JS (`mouseenter`/`mouseleave`, overlay): widget chặn mọi sự kiện "rời chuột" (kể cả khung bọc ngoài nút mở, như lớp trong suốt phủ lên tên người dùng của TCBS), và chặn luôn các sự kiện hover xảy ra **ngoài** vùng menu. Lớp nền trong suốt của menu CDK/Material (`cdk-overlay-backdrop`) luôn tính là ngoài menu (nhiều web, như TCInvest, đóng menu khi chuột đi vào phần thân trang chứ không phải khi rời nút). Popover của tour và khung chat không bị chặn. Trong lúc khóa, phần còn lại của trang tạm không phản ứng với hover (tooltip, menu khác) cho tới khi nhả khóa.
 - Menu mở bằng CSS `:hover`: widget ghim kiểu hiển thị hiện tại (`display`, `visibility`, `opacity`...) của mục và các phần tử chứa nó.
 - Màn hình cảm ứng không có hover: nút **Tiếp** của bước gửi sự kiện hover thay người dùng (chỉ mở được menu JS). Bước `hover` luôn có `skipIfNextVisible`, nên bố cục mà mục đã hiện sẵn (menu mobile) thì bước này tự được bỏ qua.
 - `tour:verify` di chuột thật vào nút mở menu rồi mới thử bước sau.
@@ -161,7 +161,19 @@ Lúc ghi, nếu phần tử bạn bấm **chưa hiện** ở lần bấm trướ
 
 ### Chờ màn hình sẵn sàng
 
-Trước mỗi bước widget chờ theo thứ tự: route của bước (lần bấm ở bước trước đổi màn hình bất đồng bộ, tối đa 1,5 giây) → phần tử "đang tải" biến mất (tối đa 5 giây) → phần tử của bước. Phần tử "đang tải" mặc định là `[aria-busy="true"], mat-spinner, mat-progress-spinner, .compass-busy`; app dùng spinner riêng thì khai báo:
+Widget chỉ dẫn một bước khi thành phần chứa phần tử đã tải xong. Trước mỗi bước nó chờ theo thứ tự:
+
+1. Router chuyển trang xong (lần bấm ở bước trước mở màn hình mới; resolver hay lazy chunk chậm, tối đa 15 giây), rồi tới đúng route của bước (tối đa 3 giây).
+2. Phần tử của bước **sẵn sàng**, tối đa 10 giây:
+   - tìm thấy chắc chắn;
+   - không còn "đang tải" quanh nó: không nằm trong vùng `aria-busy`, không có chỉ báo tải đè lên nó, nằm trong cùng component với nó, hay trải rộng cả trang (thanh tải trên đầu trang, lớp phủ tải). Spinner nhỏ ở widget khác (bảng giá đang cập nhật) **không** làm tour chờ;
+   - đã đứng yên khoảng 150 ms (hết hiệu ứng mở, bố cục không còn nhảy), để popover trỏ đúng chỗ.
+   Hết giờ mà phần tử đã tìm chắc thì vẫn chỉ dẫn, không để tour kẹt.
+3. Chưa ở màn hình của bước: chờ ngắn (0,8 giây) xem phần tử có sẵn không (menu, khung chung), không có thì tự điều hướng rồi chờ như bước 2.
+
+Lần bấm được nhận ở pha capture của `document`: app chặn lan truyền sự kiện (`stopPropagation`), hay lớp trong suốt phủ lên nút (lần bấm rơi vào lớp phủ), tour vẫn sang bước sau ngay. Component xử lý ở `pointerdown` rồi gỡ phần tử (click không bao giờ tới) cũng được tính là đã bấm.
+
+Phần tử "đang tải" mặc định là `[aria-busy="true"], mat-spinner, mat-progress-spinner, mat-progress-bar[mode="indeterminate"], ngx-skeleton-loader, .compass-busy`; app dùng spinner riêng thì khai báo:
 
 ```yaml
 # compass.config.yaml

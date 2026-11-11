@@ -272,6 +272,72 @@ test('chờ spinner biến mất rồi mới tìm phần tử', async () => {
   }
 });
 
+test('chỉ dẫn khi thành phần tải xong: chờ hết đang tải quanh phần tử và phần tử đứng yên; spinner ở chỗ khác không chờ', async () => {
+  const { waitForReady } = await import('./resolver');
+  const original = Element.prototype.getBoundingClientRect;
+  const boxes = new Map<string, { left: number; top: number; width: number; height: number }>();
+  Element.prototype.getBoundingClientRect = function () {
+    const b = boxes.get((this as Element).id) ?? { left: 0, top: 0, width: 10, height: 10 };
+    return { ...b, right: b.left + b.width, bottom: b.top + b.height, x: b.left, y: b.top } as DOMRect;
+  };
+  try {
+    // Spinner trong cùng component với nút: chờ tới khi spinner biến mất
+    page(`<app-order-panel><mat-spinner id="sp"></mat-spinner><button id="buy" data-tour-id="buy">Mua</button></app-order-panel>`);
+    boxes.set('sp', { left: 500, top: 500, width: 20, height: 20 });
+    boxes.set('buy', { left: 0, top: 0, width: 60, height: 30 });
+    setTimeout(() => document.getElementById('sp')!.remove(), 120);
+    let started = Date.now();
+    const found = await waitForReady({ tourId: 'buy' }, { stableMs: 50, timeoutMs: 2000 });
+    assert.equal(found?.element.id, 'buy');
+    assert.ok(Date.now() - started >= 110, 'chờ spinner của component');
+
+    // Spinner nhỏ ở một widget khác (bảng giá đang tải): không chờ
+    page(`<app-price-board><mat-spinner id="sp2"></mat-spinner></app-price-board><app-order-panel><button id="sell" data-tour-id="sell">Bán</button></app-order-panel>`);
+    boxes.set('sp2', { left: 800, top: 600, width: 20, height: 20 });
+    started = Date.now();
+    assert.equal((await waitForReady({ tourId: 'sell' }, { stableMs: 50, timeoutMs: 2000 }))?.element.id, 'sell');
+    assert.ok(Date.now() - started < 500, 'spinner ở chỗ khác không làm chậm');
+
+    // Phần tử còn đang dịch chuyển (hiệu ứng mở, bố cục nhảy): chờ đứng yên
+    page(`<button id="move" data-tour-id="move">Đặt lệnh</button>`);
+    let x = 0;
+    const timer = setInterval(() => boxes.set('move', { left: (x += 10), top: 0, width: 60, height: 30 }), 20);
+    setTimeout(() => clearInterval(timer), 200);
+    started = Date.now();
+    assert.equal((await waitForReady({ tourId: 'move' }, { stableMs: 80, timeoutMs: 2000 }))?.element.id, 'move');
+    assert.ok(Date.now() - started >= 200, 'chờ hết dịch chuyển');
+
+    // Không bao giờ hết tải: hết giờ vẫn chỉ dẫn, không kẹt
+    page(`<div aria-busy="true"><button id="stuck" data-tour-id="stuck">Gửi</button></div>`);
+    assert.equal((await waitForReady({ tourId: 'stuck' }, { stableMs: 50, timeoutMs: 150 }))?.element.id, 'stuck');
+  } finally {
+    Element.prototype.getBoundingClientRect = original;
+  }
+});
+
+test('khóa hover kiểu TCBS: chuột rời khung bọc ngoài nút mở hay đi vào lớp nền của menu CDK đều không làm menu đóng', async () => {
+  const { lockHover } = await import('./hover-lock');
+  page(`<div class="relative"><div class="name">Test User</div><div class="absolute" id="trigger"></div></div>
+    <div class="cdk-overlay-container"><div class="cdk-overlay-backdrop"></div><div class="cdk-overlay-pane"><button id="item">Bảo mật</button></div></div>`);
+  let closed = 0;
+  document.querySelector('.relative')!.addEventListener('mouseleave', () => closed++);
+  // Menu tự đóng khi chuột đi vào lớp nền phủ trang (nằm chung khung overlay với menu)
+  document.querySelector('.cdk-overlay-backdrop')!.addEventListener('mouseenter', () => closed++);
+  const lock = lockHover(document.getElementById('trigger')!);
+  lock.hold(document.getElementById('item')!);
+  document.querySelector('.relative')!.dispatchEvent(new window.MouseEvent('mouseleave'));
+  assert.equal(closed, 0, 'khung bọc ngoài không nhận được sự kiện rời chuột');
+  document.querySelector('.cdk-overlay-backdrop')!.dispatchEvent(new window.MouseEvent('mouseenter'));
+  assert.equal(closed, 0, 'lớp nền không được coi là vùng menu');
+  let inMenu = 0;
+  document.getElementById('item')!.addEventListener('mouseenter', () => inMenu++);
+  document.getElementById('item')!.dispatchEvent(new window.MouseEvent('mouseenter'));
+  assert.equal(inMenu, 1, 'trong menu vẫn nhận sự kiện hover');
+  lock.release();
+  document.querySelector('.relative')!.dispatchEvent(new window.MouseEvent('mouseleave'));
+  assert.equal(closed, 1);
+});
+
 // ---------------------------------------------------------------------------
 // Giai đoạn 3: tour:verify thử từng bước và tự sửa locator
 // ---------------------------------------------------------------------------

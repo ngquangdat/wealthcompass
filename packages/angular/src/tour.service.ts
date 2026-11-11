@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { NavigationCancel, NavigationEnd, NavigationError, NavigationStart, Router } from '@angular/router';
 import { driver, type Driver } from 'driver.js';
 import type { Tour, ToolResultStatus } from '@wealthcompass/contracts';
 import {
@@ -7,6 +7,7 @@ import {
   describeLocator,
   isBlockedRoute,
   isUserOnly,
+  isVisible,
   lockHover,
   renderLiteMarkdown,
   resolveStep,
@@ -15,14 +16,20 @@ import {
   shouldSkipStep,
   simulateHover,
   stepsForLayout,
-  waitForIdle,
+  waitForReady,
   waitForRoute,
-  waitForStep,
   type HoverLock,
   type StepResolution,
 } from '@wealthcompass/core';
 import { COMPASS_CONFIG } from './compass.config';
 import { CompassApiService } from './compass-api.service';
+
+// Chờ phần tử của bước sẵn sàng (thành phần tải xong, đứng yên) tối đa chừng này khi đã ở đúng màn hình
+const READY_TIMEOUT_MS = 10000;
+// Chưa ở màn hình của bước: chờ ngắn xem phần tử có sẵn không (khung chung, menu) rồi mới tự điều hướng
+const OFF_ROUTE_PEEK_MS = 800;
+// Router đang chuyển trang (resolver, lazy chunk chậm): chờ tối đa chừng này
+const NAVIGATION_TIMEOUT_MS = 15000;
 
 export interface TourOutcome {
   tourId: string;
@@ -47,6 +54,20 @@ export class TourService {
   private detachClick: (() => void) | null = null;
   // Khóa hover đang giữ menu mở (bước hover lồng nhau: menu rồi menu con); nhả khi xong bước không-hover kế tiếp
   private hoverLocks: HoverLock[] = [];
+  // Router đang chuyển trang: bước sau chờ trang mới dựng xong rồi mới tìm phần tử
+  private navigating = false;
+
+  constructor() {
+    this.router.events.subscribe((e) => {
+      if (e instanceof NavigationStart) this.navigating = true;
+      else if (e instanceof NavigationEnd || e instanceof NavigationCancel || e instanceof NavigationError) this.navigating = false;
+    });
+  }
+
+  private async navigationSettled(timeoutMs = NAVIGATION_TIMEOUT_MS): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.navigating && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  }
 
   async start(input: Tour): Promise<TourOutcome> {
     this.stop();
@@ -179,19 +200,23 @@ export class TourService {
     const step = tour.steps[index];
     const isLast = index === tour.steps.length - 1;
 
-    // Thứ tự chờ: route (lần bấm ở bước trước đổi màn hình bất đồng bộ) → hết spinner → phần tử
-    if (step.route && index > 0 && !routeMatches(step.route, this.path())) await waitForRoute(step.route, () => this.path());
-    await waitForIdle(this.config.tours.busySelector);
+    // Thứ tự chờ: router chuyển trang xong (lần bấm ở bước trước) → đúng route → phần tử SẴN SÀNG: tìm thấy chắc chắn,
+    // thành phần quanh nó hết "đang tải" và đã đứng yên. Chỉ dẫn sớm hơn thì popover trỏ vào khung chưa dựng xong.
+    await this.navigationSettled();
+    if (step.route && index > 0 && !routeMatches(step.route, this.path())) await waitForRoute(step.route, () => this.path(), 3000);
+    await this.navigationSettled();
     if (run !== this.runId) return 'cancelled';
 
-    let found: StepResolution | null = await waitForStep(step, step.route ? 600 : 4000);
-    // Route có tham số (/orders/:id) không điều hướng được: chỉ chờ người dùng tự mở
-    const canNavigate = step.route && !step.route.includes(':') && this.path() !== step.route;
+    const ready = { busySelector: this.config.tours.busySelector, stableMs: 150 };
+    // Route có tham số (/orders/:id) không điều hướng được: chờ người dùng tự mở
+    const canNavigate = Boolean(step.route && !step.route.includes(':') && !routeMatches(step.route, this.path()));
+    let found: StepResolution | null = await waitForReady(step, { ...ready, timeoutMs: canNavigate ? OFF_ROUTE_PEEK_MS : READY_TIMEOUT_MS });
     if (!found?.confident && canNavigate) {
+      if (run !== this.runId) return 'cancelled';
       const ok = await this.router.navigateByUrl(step.route!);
       if (!ok) return 'missing';
-      await waitForIdle(this.config.tours.busySelector);
-      found = await waitForStep(step, 4000);
+      await this.navigationSettled();
+      found = await waitForReady(step, { ...ready, timeoutMs: READY_TIMEOUT_MS });
     }
     if (run !== this.runId) return 'cancelled';
     if (!found) return 'missing';
@@ -227,8 +252,8 @@ export class TourService {
         if (simulate) simulateHover(element);
         const lock = lockHover(element);
         this.hoverLocks.push(lock);
-        // Chờ mục của bước sau hiện ra trong menu rồi giữ nó; không thấy thì vẫn đi tiếp (bước sau tự báo)
-        const inside = next ? await waitForStep(next, 1500) : null;
+        // Chờ mục của bước sau hiện ra trong menu (hết hiệu ứng mở) rồi giữ nó; không thấy thì vẫn đi tiếp (bước sau tự báo)
+        const inside = next ? await waitForReady(next, { timeoutMs: 3000, stableMs: 100, busySelector: this.config.tours.busySelector }) : null;
         if (inside?.confident) lock.hold(inside.element);
         settle('next');
       };
@@ -262,20 +287,39 @@ export class TourService {
         },
       });
 
+      // Nghe ở pha capture trên document: app chặn lan truyền (stopPropagation) hay lớp trong suốt phủ lên phần tử
+      // (lần bấm/di chuột rơi vào lớp phủ, không vào phần tử) vẫn nhận ra người dùng đã thao tác đúng chỗ
+      const onTarget = (e: Event): boolean => {
+        const t = e.target;
+        if (t instanceof Element && t.closest('.driver-popover, .compass-popover')) return false;
+        if (t instanceof Node && element.contains(t)) return true;
+        const m = e as MouseEvent;
+        if (typeof m.clientX !== 'number' || !element.isConnected) return false;
+        const r = element.getBoundingClientRect();
+        return m.clientX >= r.left && m.clientX <= r.right && m.clientY >= r.top && m.clientY <= r.bottom;
+      };
+      const detach: Array<() => void> = [];
+      const listen = (type: string, handler: (e: Event) => void) => {
+        document.addEventListener(type, handler, true);
+        detach.push(() => document.removeEventListener(type, handler, true));
+      };
+      this.detachClick = () => detach.splice(0).forEach((d) => d());
+
       if (waitsForHover) {
-        const onEnter = () => void openMenu(false);
-        element.addEventListener('mouseenter', onEnter, { once: true });
-        this.detachClick = () => element.removeEventListener('mouseenter', onEnter);
-        // Chuột đã ở sẵn trên phần tử (vừa bấm bước trước ngay tại đó): không có mouseenter mới
-        if (element.matches(':hover')) onEnter();
+        const onMove = (e: Event) => onTarget(e) && void openMenu(false);
+        listen('mouseover', onMove);
+        listen('mousemove', onMove);
+        // Chuột đã ở sẵn trên phần tử (vừa bấm bước trước ngay tại đó): không có sự kiện chuột mới
+        if (element.matches(':hover')) void openMenu(false);
       }
       if (waitsForClick) {
-        const onClick = () => {
-          // Chờ app xử lý click (đổi route, đổi tab) rồi mới sang bước sau
-          setTimeout(() => settle('next'), 120);
-        };
-        element.addEventListener('click', onClick, { once: true });
-        this.detachClick = () => element.removeEventListener('click', onClick);
+        // Sang bước sau ngay sau khi app nhận lần bấm (bước sau tự chờ trang/thành phần mới sẵn sàng)
+        listen('click', (e) => onTarget(e) && setTimeout(() => settle('next'), 30));
+        // Component xử lý ở pointerdown rồi gỡ phần tử (click không bao giờ tới): phần tử biến mất sau lần nhấn là đã bấm
+        listen('pointerdown', (e) => {
+          if (!onTarget(e)) return;
+          setTimeout(() => !settled && (!element.isConnected || !isVisible(element)) && settle('next'), 400);
+        });
       }
     });
   }

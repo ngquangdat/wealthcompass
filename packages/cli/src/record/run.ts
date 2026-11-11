@@ -1,6 +1,6 @@
 import { exists, readText } from '@wealthcompass/tourdb';
 import { join } from 'node:path';
-import { featureMapSchema, type FeatureMap } from '@wealthcompass/contracts';
+import { featureMapSchema, type FeatureMap, type Layout } from '@wealthcompass/contracts';
 import { resolveLlmConfig } from '@wealthcompass/llm';
 import { describeLocator, isUsableLocator, routeMatches } from '@wealthcompass/core';
 import { featureIdOfRoute, loadConfig, scan } from '../scan';
@@ -21,8 +21,8 @@ export interface RecordOptions {
   dryRun: boolean;
   // Cấu hình LLM truyền sẵn (Studio có thể ghi đè trong phiên); không có thì đọc biến môi trường
   llm?: import('@wealthcompass/llm').LlmConfig | null;
-  // Ghi bản mobile: mở Chrome với khung nhìn điện thoại (--mobile)
-  mobile?: boolean;
+  // Thiết bị khi mở Chrome (--mobile, --tablet; mặc định desktop). Tour lưu theo bố cục thật lúc bấm (bề rộng khung nhìn).
+  device?: Layout;
 }
 
 // Mẫu route của tính năng khớp với đường dẫn thật (/orders/42 -> /orders/:id); ưu tiên khớp chính xác, rồi ít tham số nhất
@@ -97,7 +97,8 @@ export async function finishRecording(
   const draft = await draftTour({ id: opts.id, title: opts.title, steps: mapped, featureMap, featureId, purpose, llm });
   if (draft.note) log(`! ${draft.note}`);
 
-  const layout = layoutOfSteps(mapped);
+  // Bố cục theo bề rộng khung nhìn lúc bấm; bước không ghi được locator thì theo thiết bị đã chọn
+  const layout = layoutOfSteps(mapped) ?? opts.device;
   const opened = mapped.filter((s) => s.opensNext).length;
   if (opened) log(`  · ${opened} bước chỉ mở chỗ chứa bước sau (menu, mở rộng): khi chạy sẽ tự bỏ qua nếu bước sau đã hiện.`);
 
@@ -139,7 +140,8 @@ export async function recordTour(opts: RecordOptions): Promise<void> {
   const { config } = loadConfig(opts.config);
   const { recorder, browser } = await recordSession(opts.url, opts.about, {
     mobileBreakpoint: config.tours.mobileBreakpoint,
-    mobile: opts.mobile,
+    tabletBreakpoint: config.tours.tabletBreakpoint,
+    device: opts.device,
   });
   console.log('Đã mở Chrome. Đăng nhập, vào màn hình xuất phát, bấm "● Bắt đầu ghi" ở góc trái dưới, thao tác theo đúng luồng, rồi bấm "■ Dừng & lưu".');
   const closed = new Promise<void>((resolve) => browser.on('disconnected', () => resolve()));

@@ -2,7 +2,7 @@
 // Ở mức A, data-tour-id là nguồn chính; các chiến lược sau chỉ là lưới an toàn.
 
 import type { Layout, Locator, TourStep } from '@wealthcompass/contracts';
-import { DEFAULT_BUSY_SELECTOR, isVisible } from './locator-filters';
+import { DEFAULT_BUSY_SELECTOR, isVisible, layoutOfWidth } from './locator-filters';
 import { findByLocator } from './locator';
 
 export type MatchedBy = 'tour-id' | 'testid' | 'id' | 'aria-label';
@@ -121,14 +121,27 @@ export function resumeStep(tour: { startRoute: string; steps: Array<{ route?: st
 // Bố cục, bước điều kiện, chờ tải
 // ---------------------------------------------------------------------------
 
-// Cùng quy tắc với lúc ghi (locator.layout): hẹp hơn breakpoint là mobile
-export function currentLayout(mobileBreakpoint = 768, width = typeof window === 'undefined' ? 1280 : window.innerWidth): Layout {
-  return width < mobileBreakpoint ? 'mobile' : 'desktop';
+// Cùng quy tắc với lúc ghi (locator.layout): hẹp hơn mobileBreakpoint là mobile, tới dưới tabletBreakpoint là tablet
+export function currentLayout(mobileBreakpoint = 768, width = typeof window === 'undefined' ? 1280 : window.innerWidth, tabletBreakpoint = 1024): Layout {
+  return layoutOfWidth(width, mobileBreakpoint, tabletBreakpoint);
 }
 
-// Bước cho bố cục hiện tại: bản ghi riêng cho bố cục đó nếu có, không thì bản chính
-export function stepsForLayout<S>(tour: { steps: S[]; variants?: Partial<Record<Layout, S[]>> }, layout: Layout): S[] {
-  return tour.variants?.[layout] ?? tour.steps;
+// Thiếu bản cho bố cục hiện tại thì dùng bản gần nhất: máy tính bảng thường giống desktop hơn (menu ngang, bảng),
+// điện thoại không có bản riêng thì dùng bản chính
+const LAYOUT_FALLBACK: Record<Layout, Layout[]> = { desktop: ['desktop', 'tablet'], tablet: ['tablet', 'desktop'], mobile: ['mobile'] };
+
+type LayoutTour<S> = { steps: S[]; layout?: Layout; variants?: Partial<Record<Layout, S[]>> };
+
+// Bản tour (theo bố cục) dùng cho bố cục hiện tại: bản của chính bố cục đó (bản chính hoặc bản thêm), không có thì
+// bản gần nhất, cuối cùng là bản chính. Bản chính không ghi bố cục (tour cũ) được coi là desktop.
+export function layoutUsed<S>(tour: LayoutTour<S>, layout: Layout): Layout {
+  const main = tour.layout ?? 'desktop';
+  return LAYOUT_FALLBACK[layout].find((l) => l === main || tour.variants?.[l]) ?? main;
+}
+
+export function stepsForLayout<S>(tour: LayoutTour<S>, layout: Layout): S[] {
+  const used = layoutUsed(tour, layout);
+  return (used !== (tour.layout ?? 'desktop') && tour.variants?.[used]) || tour.steps;
 }
 
 // Bước mở chỗ chứa bước sau (nút menu mobile): bỏ qua khi phần tử của bước sau đã hiện chắc chắn

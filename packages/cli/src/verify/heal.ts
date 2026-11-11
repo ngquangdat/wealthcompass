@@ -42,6 +42,27 @@ export function applyHealing(data: ToursFile, input: HealInput): 'applied' | 'pr
   return 'applied';
 }
 
+// Đổi thiết bị của một bản tour (ghi trên desktop nhưng thật ra dành cho iPad...). Bố cục đích đã có bản thì hai bản
+// đổi chỗ cho nhau. Bản chính vẫn là mảng `steps` cũ, chỉ đổi nhãn; locator của các bước được gắn bố cục mới.
+export function relabelLayout(tour: RecordedTour, from: Layout, to: Layout): RecordedTour {
+  const main = mainLayout(tour);
+  const versions = new Map<Layout, TourStep[]>([[main, tour.steps]]);
+  for (const [l, steps] of Object.entries(tour.variants ?? {}) as Array<[Layout, TourStep[] | undefined]>) if (steps && l !== main) versions.set(l, steps);
+  const moving = versions.get(from);
+  if (!moving) throw new Error(`Tour không có bản ${from}`);
+  if (from === to) return tour;
+  const other = versions.get(to);
+  const relabel = (steps: TourStep[], layout: Layout) => steps.map((s) => (s.locator ? { ...s, locator: { ...s.locator, layout } } : s));
+  versions.delete(from);
+  versions.delete(to);
+  versions.set(to, relabel(moving, to));
+  if (other) versions.set(from, relabel(other, from));
+  const newMain = from === main ? to : other && to === main ? from : main;
+  const { variants: _v, ...rest } = tour;
+  const variants = Object.fromEntries([...versions].filter(([l]) => l !== newMain));
+  return { ...rest, layout: newMain, steps: versions.get(newMain)!, ...(Object.keys(variants).length ? { variants } : {}) };
+}
+
 // Người duyệt chấp nhận/bỏ đề xuất sửa locator (Studio)
 export function resolveProposal(data: ToursFile, id: string, key: string, layout: Layout | undefined, approve: boolean, today: string): void {
   const { steps, index } = locate(data, id, key, layout);

@@ -52,7 +52,7 @@ export class TourService {
     this.stop();
     const run = ++this.runId;
     // Bản của bố cục hiện tại (mobile có thể có thêm bước mở menu); thiếu thì dùng bản chính
-    const layout = currentLayout(this.config.tours.mobileBreakpoint);
+    const layout = currentLayout(this.config.tours.mobileBreakpoint, undefined, this.config.tours.tabletBreakpoint);
     const tour: Tour = { ...input, steps: stepsForLayout(input, layout) };
     this.active.set(tour);
     this.message.set('');

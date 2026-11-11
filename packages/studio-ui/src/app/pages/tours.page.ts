@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
-import type { RunState, TourDef, TourProposal, TourStep } from '../core/models';
+import type { RunState, TourDef, TourLayout, TourProposal, TourStep } from '../core/models';
 import { ProjectStore } from '../core/project.store';
 import { ToastService } from '../core/toast.service';
 import { IconComponent } from '../shared/icon.component';
@@ -31,7 +31,7 @@ interface Editing {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ui-page-header title="Tour" subtitle="Hướng dẫn từng bước trên giao diện. Ghi bằng thao tác thật hoặc soạn tay, rồi chạy thử trên web.">
-      <button class="btn" (click)="openVerify()" [disabled]="!tours().length" title="Chạy lại mọi tour trên web đang chạy, ở desktop và mobile"><ui-icon name="check" /> Kiểm tra tour</button>
+      <button class="btn" (click)="openVerify()" [disabled]="!tours().length" title="Chạy lại mọi tour trên web đang chạy, ở desktop và mobile (và iPad nếu tour có bản iPad)"><ui-icon name="check" /> Kiểm tra tour</button>
       <button class="btn" (click)="newBlank()"><ui-icon name="edit" /> Soạn tay</button>
       <button class="btn btn-primary" (click)="openRecord()"><ui-icon name="play" /> Ghi tour mới</button>
     </ui-page-header>
@@ -55,13 +55,21 @@ interface Editing {
               <span><b>{{ t.steps.length }}</b> bước</span>
               <span>bắt đầu ở <code>{{ t.startRoute }}</code></span>
               @if (featureTitle(t.feature); as f) { <span>dẫn tới <b>{{ f }}</b></span> }
-              @if (t.layouts?.length) { <span>bố cục: <b>{{ t.layouts!.join(' + ') }}</b></span> }
+              @if (t.source === 'recorded' && t.layouts?.length) {
+                <span class="devices">thiết bị:
+                  @for (l of t.layouts!; track l) {
+                    <select class="select select-sm" [ngModel]="l" (ngModelChange)="changeLayout(t, l, $event)" title="Bản này dành cho thiết bị nào. Chọn thiết bị đã có bản thì hai bản đổi chỗ cho nhau.">
+                      @for (d of devices; track d.id) { <option [value]="d.id">{{ d.label }}</option> }
+                    </select>
+                  }
+                </span>
+              } @else if (t.layouts?.length) { <span>thiết bị: <b>{{ deviceNames(t.layouts!) }}</b></span> }
               <span class="mono muted">{{ t.id }}</span>
             </div>
             @for (e of t.errors; track e) { <div class="err small">{{ e }}</div> }
             @for (p of t.proposals ?? []; track p.layout + p.key) {
               <div class="proposal small">
-                <div><ui-icon name="sparkles" [size]="12" /> <b>Bước {{ p.index + 1 }}</b> ({{ p.layout }}) có manh mối đã đổi: {{ p.changed.join(', ') }}. Phần tử nhạy cảm nên cần bạn duyệt.</div>
+                <div><ui-icon name="sparkles" [size]="12" /> <b>Bước {{ p.index + 1 }}</b> ({{ deviceName(p.layout) }}) có manh mối đã đổi: {{ p.changed.join(', ') }}. Phần tử nhạy cảm nên cần bạn duyệt.</div>
                 <div class="mono muted">{{ p.from }} → {{ p.to }}</div>
                 <div class="row">
                   <button class="btn btn-sm btn-primary" (click)="decide(t, p, true)">Dùng locator mới</button>
@@ -73,8 +81,8 @@ interface Editing {
           </div>
           <div class="t-actions">
             <button class="btn btn-sm" (click)="edit(t)"><ui-icon name="edit" [size]="13" /> {{ t.draft ? 'Duyệt' : 'Sửa' }}</button>
-            @if (t.source === 'recorded' && t.layouts && t.layouts.length < 2) {
-              <button class="btn btn-sm" (click)="openRecord(t)" [title]="'Ghi thêm bản cho bố cục ' + (t.layouts.includes('mobile') ? 'desktop' : 'mobile')"><ui-icon name="play" [size]="13" /> Ghi bản {{ t.layouts.includes('mobile') ? 'desktop' : 'mobile' }}</button>
+            @if (t.source === 'recorded' && missingDevice(t); as d) {
+              <button class="btn btn-sm" (click)="openRecord(t)" [title]="'Ghi thêm bản cho thiết bị còn thiếu, cùng id tour'"><ui-icon name="play" [size]="13" /> Ghi bản {{ deviceName(d) }}</button>
             }
             <button class="btn btn-sm" (click)="tryTour(t)" [disabled]="!t.valid" [title]="webUrl() ? '' : 'Bật web ở trang Chạy thử'"><ui-icon name="external" [size]="13" /> Chạy thử</button>
           </div>
@@ -109,7 +117,13 @@ interface Editing {
               <span class="hint">AI dựa vào câu này để viết chữ cho từng bước và câu hỏi mẫu.</span>
             </div>
             <div class="field"><label>Địa chỉ web</label><input class="input mono" [(ngModel)]="rec.url" /></div>
-            <label class="small" style="display:flex;gap:8px;align-items:center;margin:4px 0 10px"><input type="checkbox" [(ngModel)]="rec.mobile" /> Ghi bằng khung nhìn điện thoại (bố cục mobile). Cùng id tour thì lưu thành bản mobile của tour đó.</label>
+            <div class="field">
+              <label>Thiết bị</label>
+              <select class="select" [(ngModel)]="rec.device">
+                @for (d of devices; track d.id) { <option [value]="d.id">{{ d.label }} · {{ d.hint }}</option> }
+              </select>
+              <span class="hint">Chrome mở với khung nhìn của thiết bị này. Tour được lưu theo bố cục thật lúc bấm (bề rộng màn hình: dưới 768px là điện thoại, dưới 1024px là iPad). Cùng id tour thì lưu thành bản cho thiết bị đó.</span>
+            </div>
             <div class="alert info small"><ui-icon name="info" /><span>Chrome sẽ mở trên máy này. Đăng nhập, vào màn hình xuất phát, bấm <b>● Bắt đầu ghi</b> ở góc trái dưới, thao tác theo luồng, rồi bấm <b>■ Dừng & lưu</b>. Nút nhạy cảm (gửi, xác nhận...) bị chặn khi ghi nên không chạy thật.</span></div>
           } @else {
             <ui-log-console [lines]="recLogs()" height="260px" />
@@ -241,7 +255,9 @@ interface Editing {
     .list { display: flex; flex-direction: column; gap: 12px; }
     .tour { display: flex; align-items: flex-start; gap: 16px; padding: 16px 20px; }
     .t-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-    .meta { display: flex; flex-wrap: wrap; gap: 14px; color: var(--text-2); }
+    .meta { display: flex; flex-wrap: wrap; gap: 14px; color: var(--text-2); align-items: center; }
+    .devices { display: inline-flex; align-items: center; gap: 6px; }
+    .select-sm { height: 26px; padding: 0 24px 0 8px; font-size: 12px; width: auto; }
     .err { color: var(--danger-text); }
     .t-actions { display: flex; gap: 8px; }
     .scrim { position: fixed; inset: 0; background: rgba(16, 24, 40, .3); z-index: 50; }
@@ -280,7 +296,12 @@ export class ToursPage implements OnInit {
   protected readonly recBusy = signal(false);
   protected readonly recLogs = signal<string[]>([]);
   protected readonly webUrl = signal<string | null>(null);
-  protected rec = { id: '', about: '', feature: '', url: '', mobile: false };
+  protected rec: { id: string; about: string; feature: string; url: string; device: TourLayout } = { id: '', about: '', feature: '', url: '', device: 'desktop' };
+  protected readonly devices: Array<{ id: TourLayout; label: string; hint: string }> = [
+    { id: 'desktop', label: 'Máy tính', hint: 'cửa sổ Chrome thường' },
+    { id: 'tablet', label: 'iPad', hint: 'khung nhìn 820×1180' },
+    { id: 'mobile', label: 'Điện thoại', hint: 'khung nhìn 390×844' },
+  ];
   protected readonly job = signal<{ kind: 'verify' | 'rerecord'; title: string } | null>(null);
   protected readonly jobBusy = signal(false);
   protected readonly jobLogs = signal<string[]>([]);
@@ -386,10 +407,36 @@ export class ToursPage implements OnInit {
     }
   }
 
-  // Có tour: ghi thêm bản cho bố cục còn thiếu, cùng id
+  protected deviceName(l: TourLayout): string {
+    return this.devices.find((d) => d.id === l)?.label ?? l;
+  }
+
+  protected deviceNames(ls: TourLayout[]): string {
+    return ls.map((l) => this.deviceName(l)).join(' + ');
+  }
+
+  // Thiết bị chưa có bản (ưu tiên điện thoại, rồi iPad, rồi máy tính)
+  protected missingDevice(t: TourDef): TourLayout | null {
+    return (['mobile', 'tablet', 'desktop'] as TourLayout[]).find((l) => !t.layouts?.includes(l)) ?? null;
+  }
+
+  // Đổi thiết bị của một bản tour đã ghi; thiết bị đích đã có bản thì hai bản đổi chỗ
+  protected async changeLayout(t: TourDef, from: TourLayout, to: TourLayout): Promise<void> {
+    if (from === to) return;
+    try {
+      await this.api.post(`/api/tours/${encodeURIComponent(t.id)}/layout`, { from, to });
+      await this.load();
+      this.toast.success(t.layouts?.includes(to) ? `Đã đổi chỗ bản ${this.deviceName(from)} và ${this.deviceName(to)}.` : `Bản ${this.deviceName(from)} giờ là bản ${this.deviceName(to)}.`);
+    } catch (e) {
+      this.toast.error(e);
+      await this.load();
+    }
+  }
+
+  // Có tour: ghi thêm bản cho thiết bị còn thiếu, cùng id
   protected openRecord(tour?: TourDef): void {
-    const mobile = tour ? !tour.layouts?.includes('mobile') : false;
-    this.rec = { id: tour?.id ?? '', about: '', feature: tour?.feature ?? '', url: this.rec.url, mobile };
+    const device = tour ? (this.missingDevice(tour) ?? 'desktop') : 'desktop';
+    this.rec = { id: tour?.id ?? '', about: '', feature: tour?.feature ?? '', url: this.rec.url, device };
     this.recLogs.set([]);
     this.recording.set(true);
   }
@@ -398,7 +445,7 @@ export class ToursPage implements OnInit {
     this.recBusy.set(true);
     this.recLogs.set([]);
     try {
-      const res = await this.api.stream<{ id: string }>('/api/tours/record', { id: this.rec.id.trim(), about: this.rec.about, feature: this.rec.feature, url: this.rec.url.trim(), mobile: this.rec.mobile }, (l) => this.recLogs.update((x) => [...x, l]));
+      const res = await this.api.stream<{ id: string }>('/api/tours/record', { id: this.rec.id.trim(), about: this.rec.about, feature: this.rec.feature, url: this.rec.url.trim(), device: this.rec.device }, (l) => this.recLogs.update((x) => [...x, l]));
       await this.load();
       void this.store.refreshOverview();
       const t = this.tours().find((x) => x.id === res.id);
@@ -424,7 +471,7 @@ export class ToursPage implements OnInit {
   }
 
   // Ghi lại phần tử của một bước: Chrome mở ở màn hình của bước, lần bấm đầu tiên thay phần tử
-  protected async rerecord(id: string, key: string, layout?: 'desktop' | 'mobile'): Promise<void> {
+  protected async rerecord(id: string, key: string, layout?: TourLayout): Promise<void> {
     this.editing.set(null);
     this.jobLogs.set([]);
     this.job.set({ kind: 'rerecord', title: `Ghi lại bước ${key}` });

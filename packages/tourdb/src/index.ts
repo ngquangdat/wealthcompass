@@ -15,7 +15,7 @@ export * from './seed';
 
 export const TOUR_ID = /^[a-z0-9][a-z0-9-]{1,60}$/;
 const STEP_KEY = /^[\w-]{1,40}$/;
-const LAYOUTS = ['desktop', 'mobile'];
+const LAYOUTS = ['desktop', 'tablet', 'mobile'];
 
 interface Statement {
   get(...args: unknown[]): unknown;

@@ -59,14 +59,15 @@ export function writeTours(file: string, data: ToursFile, by: string, note?: str
 
 // Bố cục của một lần ghi: bố cục ghi trên đa số locator (mỗi locator ghi bề rộng khung nhìn lúc bấm)
 export function layoutOfSteps(steps: Array<{ locator?: Locator | null }>): Layout | undefined {
-  const counts = { mobile: 0, desktop: 0 };
+  const counts: Record<Layout, number> = { mobile: 0, tablet: 0, desktop: 0 };
   for (const s of steps) if (s.locator?.layout) counts[s.locator.layout]++;
-  if (!counts.mobile && !counts.desktop) return undefined;
-  return counts.mobile > counts.desktop ? 'mobile' : 'desktop';
+  // Hòa thì ưu tiên desktop, rồi tablet
+  const best = (['desktop', 'tablet', 'mobile'] as Layout[]).reduce((a, b) => (counts[b] > counts[a] ? b : a));
+  return counts[best] ? best : undefined;
 }
 
 // Gộp tour vào compass.tours.json. Không ghi đè tour đã có trừ khi --force; thứ tự khóa ổn định để diff gọn.
-// Cùng id nhưng ghi ở bố cục khác (tour bản desktop đã có, giờ ghi bằng --mobile): thêm vào `variants`, không cần --force.
+// Cùng id nhưng ghi ở bố cục khác (tour bản desktop đã có, giờ ghi bằng --mobile hoặc --tablet): thêm vào `variants`, không cần --force.
 export function mergeTourIntoToursFile(file: string, input: ToursMergeInput): { json: string; replaced: boolean; variant?: Layout } {
   const data = readToursFile(file);
   const existing = data.tours[input.id];
@@ -94,7 +95,7 @@ export function mergeTourIntoToursFile(file: string, input: ToursMergeInput): { 
   }
 
   if (existing && !input.force) {
-    throw new Error(`Tour "${input.id}" đã có trong ${file}. Dùng --force để ghi đè, đặt --id khác, hoặc ghi bản cho bố cục kia (--mobile).`);
+    throw new Error(`Tour "${input.id}" đã có trong ${file}. Dùng --force để ghi đè, đặt --id khác, hoặc ghi bản cho thiết bị khác (--mobile, --tablet).`);
   }
   const about = (input.purpose ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
   const tour: RecordedTour = {

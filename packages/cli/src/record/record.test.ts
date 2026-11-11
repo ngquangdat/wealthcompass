@@ -308,3 +308,49 @@ test('bước không có tourId: cảnh báo đang tìm theo selector, nêu tour
   assert.match(warn, /^! Bước 1 \(\/home\) không có tourId, tìm theo selector: button "Mua" · \.toolbar > button:nth-child\(2\)\./);
   assert.match(warn, /tourId "toolbar" là của vùng chứa bao ngoài nên không dùng/);
 });
+
+test('khung ghi: tạm dừng không ghi, Ghi hover biến lần bấm kế tiếp thành bước hover, Hủy bỏ hết để ghi lại', async () => {
+  const recorder = new Recorder({ evaluate: async () => undefined, url: () => 'http://x/home' } as unknown as Page);
+  const step = (text: string, advanceOn: 'click' | 'hover' = 'click') => ({ tourId: text, route: '/home', advanceOn, userOnly: false, tag: 'button', text });
+  await recorder.command('start');
+  recorder.onEvent(step('a'));
+  await recorder.command('togglePause');
+  assert.equal(recorder.state().paused, true);
+  recorder.onEvent(step('b'));
+  assert.equal(recorder.steps.length, 1, 'đang tạm dừng thì không ghi');
+  await recorder.command('togglePause');
+  await recorder.command('armHover');
+  assert.equal(recorder.state().hoverArmed, true);
+  recorder.onEvent(step('menu', 'hover'));
+  assert.equal(recorder.state().hoverArmed, false, 'ghi xong bước hover thì tự tắt');
+  assert.deepEqual(recorder.steps.map((s) => s.advanceOn), ['click', 'hover']);
+  await recorder.command('cancel');
+  assert.equal(recorder.recording, false);
+  assert.equal(recorder.steps.length, 0);
+  assert.equal(recorder.startRoute, null);
+  await recorder.command('start');
+  assert.equal(recorder.recording, true, 'hủy xong ghi lại được');
+});
+
+test('đổi thiết bị của bản tour: đổi nhãn, trùng bản có sẵn thì đổi chỗ; locator gắn bố cục mới', async () => {
+  const { relabelLayout } = await import('../verify/heal');
+  const { layoutOfSteps } = await import('./write');
+  const loc = (layout: 'desktop' | 'tablet' | 'mobile') => ({ ...sellButton, layout });
+  const desktop = [{ key: 's1', text: 'a', advanceOn: 'click' as const, locator: loc('desktop') }];
+  const mobile = [{ key: 's1', text: 'b', advanceOn: 'click' as const, locator: loc('mobile') }];
+  const tour = { title: 'T', startRoute: '/', layout: 'desktop' as const, steps: desktop, variants: { mobile } };
+  assert.equal(layoutOfSteps([{ locator: loc('tablet') }, { locator: loc('tablet') }, { locator: loc('desktop') }]), 'tablet');
+
+  const toTablet = relabelLayout(tour, 'desktop', 'tablet');
+  assert.equal(toTablet.layout, 'tablet');
+  assert.equal(toTablet.steps[0].text, 'a');
+  assert.equal(toTablet.steps[0].locator?.layout, 'tablet');
+  assert.equal(toTablet.variants?.mobile?.[0].text, 'b');
+
+  const swapped = relabelLayout(tour, 'mobile', 'desktop');
+  assert.equal(swapped.layout, 'mobile', 'bản chính (chữ a) giờ là bản điện thoại');
+  assert.equal(swapped.steps[0].text, 'a');
+  assert.equal(swapped.variants?.desktop?.[0].text, 'b');
+  assert.equal(swapped.variants?.desktop?.[0].locator?.layout, 'desktop');
+  assert.throws(() => relabelLayout(tour, 'tablet', 'desktop'), /không có bản tablet/);
+});

@@ -19,12 +19,15 @@ import {
   rowSignature,
   stripIconText,
   isStableToken,
+  layoutOfWidth,
   mostlyDigits,
 } from './locator-filters';
 
 export interface CaptureOptions {
   // Dưới bề rộng này coi là bố cục mobile
   mobileBreakpoint?: number;
+  // Từ mobileBreakpoint tới dưới bề rộng này là bố cục máy tính bảng
+  tabletBreakpoint?: number;
 }
 
 function cursorOf(element: Element): string {
@@ -281,7 +284,7 @@ export function captureLocator(clicked: Element, options: CaptureOptions = {}): 
     context: Object.fromEntries(Object.entries(context).filter(([, v]) => v !== undefined)),
     ...(css ? { css } : {}),
     rect: { x: round(rect.left / vw), y: round(rect.top / vh), w: round(rect.width / vw), h: round(rect.height / vh) },
-    layout: vw < (options.mobileBreakpoint ?? 768) ? 'mobile' : 'desktop',
+    layout: layoutOfWidth(vw, options.mobileBreakpoint, options.tabletBreakpoint),
     ...(list ? { list } : {}),
   };
 }

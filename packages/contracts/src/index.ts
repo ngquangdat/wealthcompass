@@ -44,7 +44,7 @@ export const locatorSchema = z.object({
   css: z.string().optional(),
   // Vị trí theo tỉ lệ khung nhìn; chỉ dùng để phân xử khi hòa điểm
   rect: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional(),
-  layout: z.enum(['mobile', 'desktop']).optional(),
+  layout: z.enum(['mobile', 'tablet', 'desktop']).optional(),
   // Phần tử nằm trong một dòng của danh sách lặp (bảng, @for, virtual scroll): mọi dòng có phần tử giống hệt
   // đều đúng, nên không coi các dòng khác là "đối thủ". Ghi hình dạng dòng, không ghi dòng cụ thể.
   list: z
@@ -99,12 +99,17 @@ export const tourStepSchema = z
   .refine((s) => Boolean(s.tourId || s.locator), { message: 'Bước tour cần tourId hoặc locator' });
 export type TourStep = z.infer<typeof tourStepSchema>;
 
-export const layoutSchema = z.enum(['mobile', 'desktop']);
+// Thiết bị/bố cục của một bản tour: điện thoại, máy tính bảng (iPad), máy tính
+export const layoutSchema = z.enum(['mobile', 'tablet', 'desktop']);
 export type Layout = z.infer<typeof layoutSchema>;
 
 // Cùng một tour ghi riêng cho từng bố cục: bố cục mobile thường có thêm bước mở menu, phần tử khác chỗ.
 // `steps` là bản chính; `variants` là bản cho bố cục khác. Widget chọn theo bề rộng màn hình, thiếu thì dùng `steps`.
-const tourVariantsSchema = z.object({ mobile: z.array(tourStepSchema).min(1).optional(), desktop: z.array(tourStepSchema).min(1).optional() });
+const tourVariantsSchema = z.object({
+  mobile: z.array(tourStepSchema).min(1).optional(),
+  tablet: z.array(tourStepSchema).min(1).optional(),
+  desktop: z.array(tourStepSchema).min(1).optional(),
+});
 
 export const tourSchema = z.object({
   id: z.string(),
@@ -287,9 +292,11 @@ export const compassConfigSchema = z.object({
     .object({
       // Dưới bề rộng này (px) là bố cục mobile; widget dùng cùng giá trị qua provideCompass({ tours })
       mobileBreakpoint: z.number().int().positive().default(768),
+      // Từ mobileBreakpoint tới dưới bề rộng này (px) là bố cục máy tính bảng (iPad dọc 768-834); rộng hơn là desktop
+      tabletBreakpoint: z.number().int().positive().default(1024),
       // Phần tử "đang tải" của app; engine chờ chúng biến mất rồi mới tìm phần tử của bước
       busySelector: z.string().optional(),
     })
-    .default({ mobileBreakpoint: 768 }),
+    .default({ mobileBreakpoint: 768, tabletBreakpoint: 1024 }),
 });
 export type CompassConfig = z.infer<typeof compassConfigSchema>;

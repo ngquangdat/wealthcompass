@@ -9,6 +9,7 @@ import { buildSafetyPolicy, isUserOnly } from './safety';
 
 export interface ProbeOptions {
   mobileBreakpoint?: number;
+  tabletBreakpoint?: number;
   busySelector?: string;
   userOnly?: string[];
   timeoutMs?: number;
@@ -47,7 +48,7 @@ export async function probeStep(steps: ProbeStep[], index: number, options: Prob
   if (step.tourId && !PIN.has(found.matchedBy)) drift.push('tourId');
   let proposed: Locator | undefined;
   if (step.locator) {
-    const fresh = captureLocator(found.element, { mobileBreakpoint: options.mobileBreakpoint });
+    const fresh = captureLocator(found.element, { mobileBreakpoint: options.mobileBreakpoint, tabletBreakpoint: options.tabletBreakpoint });
     drift.push(...locatorDrift(step.locator, fresh));
     if (drift.length) proposed = healLocator(step.locator, fresh);
   }

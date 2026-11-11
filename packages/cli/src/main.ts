@@ -6,7 +6,7 @@ import { pushTours } from './verify/push';
 import { enrich, resolveOnly } from './enrich';
 import { dirname, join, resolve } from 'node:path';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { toursFileSchema } from '@wealthcompass/contracts';
+import { layoutSchema, toursFileSchema } from '@wealthcompass/contracts';
 import { compassHome, exists, exportProject, importProject, seedDirFor, writeText } from '@wealthcompass/tourdb';
 import { CONFIG_NAME, dataRoot, migrateToStore, resolveConfigArg } from './project';
 import { readToursFile, writeTours } from './record/write';
@@ -20,6 +20,11 @@ import { resolveLlmConfig } from '@wealthcompass/llm';
 function arg(name: string, fallback?: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
   return i !== -1 ? process.argv[i + 1] : fallback;
+}
+
+// Thiết bị khi ghi: --mobile (điện thoại), --tablet (iPad); không có thì desktop
+function deviceFlag(): 'mobile' | 'tablet' | undefined {
+  return process.argv.includes('--mobile') ? 'mobile' : process.argv.includes('--tablet') ? 'tablet' : undefined;
 }
 
 const command = process.argv[2];
@@ -167,7 +172,7 @@ if (command === 'doctor' && arg('app')) {
     }
   }
   if (!url || !id) {
-    console.error('Cách dùng: compass tour:record --config <yaml> --url <địa chỉ web> --id <tour-id> [--title "..."] [--about "mô tả tính năng"] [--feature <id>] [--mobile] [--force] [--no-llm] [--dry-run]');
+    console.error('Cách dùng: compass tour:record --config <yaml> --url <địa chỉ web> --id <tour-id> [--title "..."] [--about "mô tả tính năng"] [--feature <id>] [--mobile | --tablet] [--force] [--no-llm] [--dry-run]');
     process.exit(1);
   }
   await recordTour({
@@ -180,7 +185,7 @@ if (command === 'doctor' && arg('app')) {
     force: process.argv.includes('--force'),
     noLlm: process.argv.includes('--no-llm'),
     dryRun: process.argv.includes('--dry-run'),
-    mobile: process.argv.includes('--mobile'),
+    device: deviceFlag(),
   });
 } else if (command === 'tour:export' || command === 'tour:import') {
   // Kho tour là SQLite (nhị phân): xuất ra JSON để xem/sửa tay các trường nâng cao (list.index, rowText, chữ bản mobile), rồi nhập lại
@@ -204,19 +209,19 @@ if (command === 'doctor' && arg('app')) {
   // Chạy lại mọi tour trên một bản web thật (staging), báo bước hỏng; --heal sửa locator đã lệch
   const url = arg('url');
   if (!url) {
-    console.error('Cách dùng: compass tour:verify --config <yaml> --url <gốc web> [--only id1,id2] [--layout desktop|mobile] [--heal] [--storage-state auth.json] [--screenshots <thư mục>] [--report report.json] [--strict] [--headed]');
+    console.error('Cách dùng: compass tour:verify --config <yaml> --url <gốc web> [--only id1,id2] [--layout desktop|tablet|mobile] [--heal] [--storage-state auth.json] [--screenshots <thư mục>] [--report report.json] [--strict] [--headed]');
     process.exit(1);
   }
   const layout = arg('layout');
-  if (layout && layout !== 'desktop' && layout !== 'mobile') {
-    console.error('--layout chỉ nhận desktop hoặc mobile');
+  if (layout && !layoutSchema.safeParse(layout).success) {
+    console.error('--layout chỉ nhận desktop, tablet hoặc mobile');
     process.exit(1);
   }
   const report = await verifyTours({
     config: resolveConfigArg(arg('config'), arg('app')),
     url,
     only: arg('only')?.split(',').map((s) => s.trim()).filter(Boolean),
-    layouts: layout ? [layout as 'desktop' | 'mobile'] : undefined,
+    layouts: layout ? [layoutSchema.parse(layout)] : undefined,
     heal: process.argv.includes('--heal'),
     storageState: arg('storage-state'),
     screenshots: arg('screenshots'),
@@ -240,10 +245,10 @@ if (command === 'doctor' && arg('app')) {
   const id = arg('id');
   const key = arg('step');
   if (!url || !id || !key) {
-    console.error('Cách dùng: compass tour:rerecord --config <yaml> --url <gốc web> --id <tour-id> --step <s1|s2...> [--mobile | --desktop]  (mặc định: bản chính của tour)');
+    console.error('Cách dùng: compass tour:rerecord --config <yaml> --url <gốc web> --id <tour-id> --step <s1|s2...> [--mobile | --tablet | --desktop]  (mặc định: bản chính của tour)');
     process.exit(1);
   }
-  const layout = process.argv.includes('--mobile') ? 'mobile' : process.argv.includes('--desktop') ? 'desktop' : undefined;
+  const layout = process.argv.includes('--desktop') ? 'desktop' : deviceFlag();
   await rerecordStep({ config: resolveConfigArg(arg('config'), arg('app')), url, id, key, layout });
 } else if (command === 'tour:push') {
   // Đưa tour lên kho tour của backend (có phiên bản); widget lấy tour từ đó, không cần deploy lại web

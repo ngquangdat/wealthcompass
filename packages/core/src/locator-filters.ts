@@ -2,6 +2,13 @@
 // Angular và các thư viện UI sinh id/class theo lần build hoặc lần render (_ngcontent-abc, mat-mdc-form-field-3,
 // cdk-overlay-12): dùng chúng thì tour hỏng ngay lần deploy sau.
 
+// Bố cục theo bề rộng khung nhìn (cùng quy tắc lúc ghi locator và lúc widget chọn bản tour):
+// hẹp hơn mobileBreakpoint là điện thoại, tới dưới tabletBreakpoint là máy tính bảng (iPad), còn lại là desktop
+export function layoutOfWidth(width: number, mobileBreakpoint = 768, tabletBreakpoint = 1024): 'mobile' | 'tablet' | 'desktop' {
+  if (width < mobileBreakpoint) return 'mobile';
+  return width < tabletBreakpoint ? 'tablet' : 'desktop';
+}
+
 const UNSTABLE_PREFIX = /^(_ng|ng-tns|ng-star|ng-trigger|ng-animat|ng-untouched|ng-touched|ng-pristine|ng-dirty|ng-valid|ng-invalid|ng-pending|mat-mdc-|mdc-|cdk-|mat-ripple|ng-reflect)/i;
 
 // Id/class ổn định: không có tiền tố sinh tự động, không chứa chuỗi số dài, không giống mã băm

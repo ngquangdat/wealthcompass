@@ -19,6 +19,8 @@ export interface CompassOptions {
 export interface TourOptions {
   // Dưới bề rộng này (px) dùng bản mobile của tour; nên trùng tours.mobileBreakpoint trong compass.config.yaml
   mobileBreakpoint?: number;
+  // Từ mobileBreakpoint tới dưới bề rộng này dùng bản máy tính bảng (iPad); nên trùng tours.tabletBreakpoint
+  tabletBreakpoint?: number;
   // Phần tử "đang tải" của app: engine chờ chúng biến mất rồi mới tìm phần tử của bước
   busySelector?: string;
 }
@@ -46,7 +48,7 @@ export function provideCompass(options: CompassOptions | (() => CompassOptions))
           suggestions: [],
           ...o,
           safety: buildSafetyPolicy(o.safety),
-          tours: { mobileBreakpoint: 768, busySelector: DEFAULT_BUSY_SELECTOR, ...o.tours },
+          tours: { mobileBreakpoint: 768, tabletBreakpoint: 1024, busySelector: DEFAULT_BUSY_SELECTOR, ...o.tours },
         };
       },
     },

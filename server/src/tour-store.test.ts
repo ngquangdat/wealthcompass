@@ -77,7 +77,7 @@ test('kho tour: ảnh chụp từng bước chỉ nhận PNG, gắn đường d�
   assert.equal((await upload('desktop', 's2', PNG)).statusCode, 204);
   assert.equal((await upload('mobile', 's1', PNG)).statusCode, 204);
   assert.equal((await upload('desktop', 's1', Buffer.from('<svg/>'))).statusCode, 400, 'không phải PNG');
-  assert.equal((await upload('tablet', 's1', PNG)).statusCode, 400, 'bố cục không hợp lệ');
+  assert.equal((await upload('watch', 's1', PNG)).statusCode, 400, 'bố cục không hợp lệ');
 
   const served = store.withShots(store.current('sell-bond')!.tour);
   assert.equal(served.steps[0].shot, undefined);

@@ -51,7 +51,7 @@ npx tsx packages/cli/src/main.ts tour:record --app ~/du-an/my-web --url https://
 | `--dry-run` | không | In YAML ra màn hình, **không ghi file** |
 | `--force` | không | Cho phép ghi đè tour trùng `--id` |
 | `--no-llm` | không | Không gọi LLM, chữ theo mẫu |
-| `--mobile` | không | Mở Chrome với khung nhìn điện thoại (390×844) để ghi bản mobile. Cùng `--id` với tour đã có bản desktop thì lưu thành `variants.mobile` của tour đó, không cần `--force` |
+| `--mobile` / `--tablet` | không | Mở Chrome với khung nhìn điện thoại (390×844) hoặc iPad (820×1180) để ghi bản cho thiết bị đó. Cùng `--id` với tour đã có bản khác thì lưu thành `variants.mobile`/`variants.tablet` của tour đó, không cần `--force` |
 
 ## 4. Quy trình từng bước
 
@@ -70,10 +70,11 @@ npx tsx packages/cli/src/main.ts tour:record --app ~/du-an/my-web --url https://
 Menu chỉ hiện khi di chuột (thanh menu desktop) không có lần bấm nào trên nút mở menu, nên phải báo cho công cụ:
 
 1. Di chuột vào nút mở menu (menu hiện ra).
-2. Giữ chuột ở đó và nhấn **Alt+H** (Mac: **⌥H**). Nút mở menu nhấp nháy viền đỏ và được ghi thành bước `hover`.
+2. Giữ chuột ở đó và nhấn rồi thả riêng phím **Alt** (Mac: **⌥**). Nút mở menu nhấp nháy viền đỏ và được ghi thành bước `hover`. Alt kèm phím khác (Alt+Tab...) hoặc kèm lần bấm chuột thì không tính.
+   Cách khác: bấm nút **Ghi hover** trên khung ghi, rồi bấm vào nút mở menu. Lần bấm đó chỉ chọn nút (bị chặn, app không chạy) và được ghi thành bước `hover`.
 3. Bấm mục trong menu như bình thường (ghi thành bước `click`). Menu nhiều tầng thì lặp lại bước 1-2 cho từng tầng.
 
-Phải dùng phím tắt vì đưa chuột xuống khung ghi để bấm nút thì menu đã đóng.
+Phím Alt tiện nhất vì chuột không phải rời nút mở menu; đưa chuột xuống khung ghi thì menu thường đã đóng, nên nút **Ghi hover** chỉ hợp với menu mở được lại khi chuột quay về nút.
 
 Lúc chạy tour, bước `hover` tô sáng nút mở menu và chờ người dùng di chuột vào. Khi menu mở, widget **khóa hover**: menu được giữ mở trong lúc tour tô sáng mục bên trong, dù chuột rời nút mở hay lớp phủ của tour che mất nó. Khóa được nhả ngay sau bước không-hover kế tiếp (mục trong menu đã được bấm), khi tour kết thúc hoặc bị đóng.
 
@@ -90,11 +91,14 @@ Khung ghi che mất phần tử cần bấm thì **nắm thanh tiêu đề "Weal
 | --- | --- |
 | **● Bắt đầu ghi** | Bắt đầu ghi (chỉ hiện khi chưa ghi). Màn hình hiện tại là điểm xuất phát |
 | **■ Dừng & lưu** | Kết thúc và chuyển sang bước soạn nội dung |
+| **❚❚ Tạm dừng / ▶ Tiếp tục** | Tạm dừng: lần bấm vẫn chạy thật nhưng **không được ghi** (vd. đóng thông báo, đăng nhập lại giữa chừng). Bấm **Tiếp tục** để ghi tiếp |
+| **✕ Hủy** | Bỏ mọi bước đã ghi và quay về **● Bắt đầu ghi** để ghi lại từ đầu (mô tả đã nhập được giữ). Đã có bước thì phải bấm hai lần |
+| **Ghi hover** | Lần bấm kế tiếp trên trang được ghi thành bước `hover` (lần bấm bị chặn). Xem phần menu hover ở trên |
 | **Tô sáng (không bấm): tắt/BẬT** | Công tắc. Khi **BẬT**, mọi lần bấm được ghi thành bước chỉ giải thích và **bị chặn, app không chạy gì**. Dùng khi muốn trỏ vào một con số hay một khu vực mà không chuyển màn hình. **Nhớ tắt lại** (bấm lần nữa) để tiếp tục thao tác bình thường; quên tắt thì app đứng yên vì mọi lần bấm đều bị chặn |
 
 ## 5. Điều gì được ghi, điều gì bị chặn
 
-- **Ghi lần bấm, và hover khi nhấn Alt+H**. Bấm trúng icon/chữ bên trong nút thì phần tử được ghi là chính cái nút. Web gắn `(click)` lên `div`/`span` thường (không `role`, không `href`): công cụ leo lên vùng bấm ngoài cùng còn `cursor: pointer`; bấm trúng icon không có chữ thì lấy mục gần nhất có chữ. Chữ gõ vào ô nhập, cuộn, kéo thả **không** được ghi.
+- **Ghi lần bấm, và hover khi nhấn riêng phím Alt hoặc dùng nút Ghi hover**. Bấm trúng icon/chữ bên trong nút thì phần tử được ghi là chính cái nút. Web gắn `(click)` lên `div`/`span` thường (không `role`, không `href`): công cụ leo lên vùng bấm ngoài cùng còn `cursor: pointer`; bấm trúng icon không có chữ thì lấy mục gần nhất có chữ. Chữ gõ vào ô nhập, cuộn, kéo thả **không** được ghi.
 - Bấm bình thường → ghi thành bước `click` (người dùng thật sẽ phải bấm vào đúng chỗ đó), và **app vẫn chạy bình thường** (đổi màn hình, đổi tab...). Đó là lý do cần ghi trên môi trường thử.
 - Bấm vào phần tử **nhạy cảm** (`tourRole="user-only"`, `data-sensitive`, ô mật khẩu, ô OTP) → ghi thành bước chỉ-tô-sáng (`next`) và **lần bấm bị chặn, không chạy thật**. Nhờ vậy ghi tour không vô tình đặt lệnh. Bước nhạy cảm nên là **bước cuối** của tour; nếu còn bước sau nó, công cụ in cảnh báo.
 - Bấm vào phần tử **không có manh mối nào dùng được** (không tên, không chữ, không thuộc tính ổn định, vd. một `div` trống) → bị bỏ qua (app vẫn chạy) và có cảnh báo. Thêm `aria-label` hoặc `tourId` cho phần tử đó nếu cần bước này.
@@ -143,11 +147,13 @@ Nút lặp trên mỗi dòng (mỗi dòng bảng có một nút **BÁN**, mỗi 
 - `column` (tiêu đề cột hoặc tên cột `mat-column-*`) cộng điểm cho ô đúng cột.
 - Muốn trỏ vào một dòng theo nội dung thì người duyệt thêm `"rowText": "VIC2025"`: chỉ chọn dòng chứa chữ đó (ưu tiên hơn `index`). Công cụ không tự ghi vì chữ trong dòng có thể là dữ liệu khách.
 
-### Bố cục web và mobile
+### Thiết bị: máy tính, iPad, điện thoại
 
-- Mỗi locator ghi `layout` theo bề rộng khung nhìn lúc bấm (dưới `tours.mobileBreakpoint`, mặc định 768px, là mobile).
-- Ghi bản chính như thường, rồi ghi lại **cùng `--id`** với `--mobile` (hoặc nút "Ghi bản mobile" trong Studio): tour có thêm `variants.mobile`. Widget chọn bản theo bề rộng màn hình; bố cục chưa ghi thì dùng bản chính.
-- Widget cần cùng breakpoint: `provideCompass({ ..., tours: { mobileBreakpoint: 768 } })`.
+- Mỗi locator ghi `layout` theo bề rộng khung nhìn lúc bấm: dưới `tours.mobileBreakpoint` (mặc định 768px) là `mobile`, dưới `tours.tabletBreakpoint` (mặc định 1024px) là `tablet`, còn lại là `desktop`. Tour được lưu theo bố cục của đa số bước, nên ghi bằng cửa sổ Chrome hẹp cũng ra đúng loại.
+- Ghi bản chính như thường, rồi ghi lại **cùng `--id`** với `--tablet` hoặc `--mobile` (Studio: chọn **Thiết bị** khi ghi, hoặc nút "Ghi bản iPad/Điện thoại"): tour có thêm `variants.tablet`/`variants.mobile`.
+- Widget chọn bản theo bề rộng màn hình. Thiếu bản cho thiết bị đang dùng thì: iPad dùng bản desktop, desktop dùng bản iPad, điện thoại dùng bản chính.
+- Ghi nhầm loại (vd. ghi trên máy tính nhưng tour dành cho iPad): ở trang **Tour** của Studio, dòng **thiết bị** của mỗi tour có ô chọn cho từng bản; đổi sang thiết bị khác là xong. Chọn thiết bị đã có bản thì hai bản đổi chỗ cho nhau.
+- Widget cần cùng breakpoint: `provideCompass({ ..., tours: { mobileBreakpoint: 768, tabletBreakpoint: 1024 } })`.
 
 ### Bước mở chỗ chứa (`skipIfNextVisible`)
 
@@ -161,6 +167,7 @@ Trước mỗi bước widget chờ theo thứ tự: route của bước (lần 
 # compass.config.yaml
 tours:
   mobileBreakpoint: 768
+  tabletBreakpoint: 1024
   busySelector: "app-loading, .page-spinner"
 ```
 
@@ -257,7 +264,7 @@ Nếu LLM trả sai định dạng hoặc sai số bước, công cụ thử l�
 | App không phản ứng khi bấm | Công tắc **Tô sáng** đang BẬT: bấm nút đó lần nữa để tắt |
 | `! Bỏ qua lần bấm vào <tag> ở /route: phần tử không có tên, chữ hay thuộc tính ổn định...` | Phần tử không có manh mối nào để tìm lại (vd. `div` trống). Bấm vào phần có chữ của mục đó, hoặc thêm `aria-label`/`tourId` |
 | `Không có bước nào nhận ra được, không có gì để lưu.` | Mọi lần bấm đều vào phần tử không có manh mối |
-| Menu hover đóng mất khi chạy tour | Bước mở menu chưa được ghi là `hover`: ghi lại và nhấn **Alt+H** khi chuột đang ở trên nút mở menu, hoặc đổi kiểu bước thành "Di chuột" ở trang Tour của Studio |
+| Menu hover đóng mất khi chạy tour | Bước mở menu chưa được ghi là `hover`: ghi lại và nhấn **Alt** khi chuột đang ở trên nút mở menu, hoặc đổi kiểu bước thành "Di chuột" ở trang Tour của Studio |
 | `Chưa bấm "Bắt đầu ghi".` / `Đóng trình duyệt trước khi ghi.` | Đã dừng hoặc đóng Chrome mà chưa bắt đầu ghi |
 | `! Chưa có feature-map.json (hãy chạy scan trước)...` | Chạy `npm run scan` trước. Không có thì không điền được nhãn, và không tự xác định được tính năng đích |
 | `! Không xác định được tính năng đích (dùng --feature <id>)...` | Màn hình lúc dừng không khớp tính năng nào. Dừng ở đúng màn hình đích, hoặc truyền `--feature` |
@@ -296,7 +303,7 @@ npx tsx packages/cli/src/main.ts tour:verify --app ~/du-an/my-web \
 | Cờ | Ý nghĩa |
 |---|---|
 | `--only id1,id2` | Chỉ kiểm các tour này |
-| `--layout desktop\|mobile` | Chỉ kiểm một bố cục |
+| `--layout desktop\|tablet\|mobile` | Chỉ kiểm một bố cục. Mặc định kiểm desktop và mobile, thêm tablet khi tour có bản iPad |
 | `--heal` | Ghi locator đã sửa vào kho tour (xem dưới) |
 | `--storage-state <file>` | Phiên đăng nhập do `tour:auth` lưu |
 | `--screenshots <thư mục>` | Chụp phần tử của từng bước tìm được (`<tour>/<bố cục>-<bước>.png`) cho `tour:push` |
@@ -321,7 +328,7 @@ Khi phần tử vẫn được tìm **chắc chắn** bằng các manh mối cò
 Phần tử của một bước đổi hẳn (không còn manh mối nào khớp) thì không cần ghi lại cả tour:
 
 ```bash
-npx tsx packages/cli/src/main.ts tour:rerecord --app ~/du-an/my-web --url http://localhost:4200 --id sell-bond --step s3 [--mobile]
+npx tsx packages/cli/src/main.ts tour:rerecord --app ~/du-an/my-web --url http://localhost:4200 --id sell-bond --step s3 [--mobile | --tablet]
 ```
 
 Chrome mở ở màn hình của bước và **đang ghi sẵn**: lần bấm đầu tiên trở thành phần tử mới của bước, rồi Chrome tự đóng. Chữ, khóa bước và thứ tự giữ nguyên; `healedAt` được ghi; phần tử mới nhạy cảm thì bước chuyển sang chỉ tô sáng. Bước ở route có tham số (`/orders/:id`) thì bạn tự mở tới màn hình đó và bấm **● Bắt đầu ghi** trước. Trong Studio: nút **Ghi lại phần tử** cạnh mỗi bước trong ngăn sửa tour, và nút **Ghi lại bước này** trong đề xuất.
@@ -391,7 +398,7 @@ API (cần `Authorization: Bearer <COMPASS_ADMIN_TOKEN>`; không đặt biến n
 - Bước mở chỗ chứa chỉ nhận ra trong cùng một màn hình (cùng route); mở menu rồi chuyển trang thì không đánh dấu.
 - Studio chỉ sửa chữ của bản chính; chữ của `variants.mobile` sửa bằng `tour:export` / `tour:import`.
 
-- Ghi **lần bấm** và **hover có chủ đích** (Alt+H); chưa ghi kéo thả, nhập liệu, phím tắt. Khóa hover không giữ được menu mà app tự đóng theo hẹn giờ hoặc khi cuộn trang.
+- Ghi **lần bấm** và **hover có chủ đích** (phím Alt hoặc nút Ghi hover); chưa ghi kéo thả, nhập liệu, phím tắt. Khóa hover không giữ được menu mà app tự đóng theo hẹn giờ hoặc khi cuộn trang.
 - Cần Chrome cài trên máy; chưa hỗ trợ Firefox/Safari.
 - Phần tử trong iframe khác origin hoặc shadow DOM đóng không bắt được; `tourId` sinh động (`[tourId]="item.id"`) không được quét nên cũng không dùng được.
 - Câu hỏi mẫu LLM sinh ra chưa được kiểm tra tự động với bộ test truy xuất; hãy đọc lại và thử vài câu thật.

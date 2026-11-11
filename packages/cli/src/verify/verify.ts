@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { writeText } from '@wealthcompass/tourdb';
 import { dirname, join, resolve } from 'node:path';
 import type { Layout, Locator, Tour, TourStep } from '@wealthcompass/contracts';
-import { routeMatches, stepsForLayout, type ProbeOptions, type ProbeResult } from '@wealthcompass/core';
+import { layoutUsed, routeMatches, stepsForLayout, type ProbeOptions, type ProbeResult } from '@wealthcompass/core';
 import { loadConfig } from '../scan';
 import { loadFeatureMap } from '../record/run';
 import { readToursFile, writeTours } from '../record/write';
@@ -33,6 +33,8 @@ export interface TourReport {
   layout: Layout;
   // Tour không có bản riêng cho bố cục này: chạy bản chính (như widget sẽ làm)
   fallback: boolean;
+  // Lượt chạy dùng bản của bố cục khác (fallback): bố cục của bản đó
+  usedLayout?: Layout;
   ok: boolean;
   steps: StepReport[];
 }
@@ -61,6 +63,8 @@ export interface VerifyDriver {
 
 export const VIEWPORTS: Record<Layout, { width: number; height: number; isMobile?: boolean; hasTouch?: boolean }> = {
   desktop: { width: 1280, height: 800 },
+  // iPad Air dọc
+  tablet: { width: 820, height: 1180, isMobile: true, hasTouch: true },
   mobile: { width: 390, height: 844, isMobile: true, hasTouch: true },
 };
 
@@ -68,7 +72,9 @@ export const VIEWPORTS: Record<Layout, { width: number; height: number; isMobile
 // bước "next" và bước nhạy cảm chỉ được tìm, không bấm.
 export async function verifyTour(driver: VerifyDriver, tour: Tour, layout: Layout, opts: { screenshots?: string } = {}): Promise<TourReport> {
   const steps = stepsForLayout(tour, layout);
-  const fallback = steps === tour.steps && (tour.layout ?? 'desktop') !== layout;
+  // Bố cục chưa có bản riêng: chạy bản gần nhất (tablet dùng bản desktop...)
+  const used = layoutUsed(tour, layout);
+  const fallback = used !== layout;
   const reports: StepReport[] = [];
   await driver.open(tour.startRoute);
   // Bị chuyển trang ngay từ đầu (thường là màn hình đăng nhập): báo rõ thay vì "không thấy phần tử"
@@ -113,7 +119,7 @@ export async function verifyTour(driver: VerifyDriver, tour: Tour, layout: Layou
     if (step.advanceOn === 'click' && !probe.userOnly) await driver.click();
     else if (step.advanceOn === 'hover') await driver.hover?.();
   }
-  return { id: tour.id, layout, fallback, ok: reports.every((r) => r.status === 'ok' || r.status === 'skipped'), steps: reports };
+  return { id: tour.id, layout, ...(fallback ? { usedLayout: used } : {}), fallback, ok: reports.every((r) => r.status === 'ok' || r.status === 'skipped'), steps: reports };
 }
 
 export interface VerifyOptions {
@@ -145,10 +151,13 @@ export async function verifyTours(opts: VerifyOptions, log: (msg: string) => voi
   if (!featureMap) throw new Error(`Chưa có ${config.discovery.out}: chạy \`scan\` trước.`);
   const tours = featureMap.tours.filter((t) => !opts.only?.length || opts.only.includes(t.id));
   if (!tours.length) throw new Error(opts.only?.length ? `Không có tour nào khớp --only ${opts.only.join(',')}` : 'Feature Map chưa có tour nào.');
-  const layouts = opts.layouts?.length ? opts.layouts : (['desktop', 'mobile'] as Layout[]);
+  // Mặc định kiểm desktop và mobile; tour có bản máy tính bảng thì kiểm thêm tablet
+  const layoutsOf = (tour: Tour): Layout[] =>
+    opts.layouts?.length ? opts.layouts : tour.layout === 'tablet' || tour.variants?.tablet ? ['desktop', 'tablet', 'mobile'] : ['desktop', 'mobile'];
   const base = opts.url.replace(/\/$/, '');
   const probeOptions: ProbeOptions = {
     mobileBreakpoint: config.tours.mobileBreakpoint,
+    tabletBreakpoint: config.tours.tabletBreakpoint,
     busySelector: config.tours.busySelector,
     userOnly: config.safety.userOnly,
     timeoutMs: opts.timeoutMs ?? 4000,
@@ -167,7 +176,7 @@ export async function verifyTours(opts: VerifyOptions, log: (msg: string) => voi
   const reports: TourReport[] = [];
   try {
     for (const tour of tours) {
-      for (const layout of layouts) {
+      for (const layout of layoutsOf(tour)) {
         const driver = await factory(layout);
         try {
           const report = await verifyTour(driver, tour, layout, { screenshots: opts.screenshots });
@@ -194,9 +203,9 @@ export async function verifyTours(opts: VerifyOptions, log: (msg: string) => voi
   let changedFile = false;
   for (const report of reports) {
     const def = recorded.tours[report.id];
-    // Lượt chạy bản chính ở bố cục kia: chỉ sửa khi bố cục của bản chính không được kiểm (tránh ghi đè bằng ảnh chụp sai khung nhìn)
-    const main = tours.find((t) => t.id === report.id)?.layout ?? 'desktop';
-    if (report.fallback && reports.some((r) => r.id === report.id && r.layout === main)) continue;
+    // Lượt chạy bản của bố cục khác: chỉ sửa khi bố cục của bản đó không được kiểm (tránh ghi đè bằng ảnh chụp sai khung nhìn)
+    const used = report.usedLayout ?? report.layout;
+    if (report.fallback && reports.some((r) => r.id === report.id && r.layout === used)) continue;
     for (const step of report.steps) {
       const proposed = step.proposed;
       if (!opts.heal || !proposed || !step.drift?.length || !def) continue;
@@ -204,8 +213,8 @@ export async function verifyTours(opts: VerifyOptions, log: (msg: string) => voi
         step.healed = applyHealing(recorded, {
           id: report.id,
           key: step.key,
-          // Lượt chạy bản chính ở bố cục kia (fallback) thì sửa bản chính
-          layout: report.fallback ? undefined : report.layout,
+          // Lượt chạy bản của bố cục khác (fallback) thì sửa bản đó
+          layout: report.usedLayout ?? report.layout,
           proposed,
           changed: step.drift,
           needsReview: Boolean(step.userOnly),

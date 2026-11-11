@@ -9,6 +9,7 @@ import {
   type CompassConfig,
   type Feature,
   type FeatureMap,
+  type Layout,
   type Target,
   type Tour,
 } from '@wealthcompass/contracts';
@@ -314,7 +315,7 @@ export function scan(configPath: string, options: ScanOptions = {}): ScanResult 
       warnings.push(`Tour "${tourId}" có ở cả overrides lẫn ${config.discovery.tours}; dùng bản trong overrides`);
       continue;
     }
-    const variants = Object.entries(def.variants ?? {}) as Array<['mobile' | 'desktop', typeof def.steps]>;
+    const variants = Object.entries(def.variants ?? {}) as Array<[Layout, typeof def.steps]>;
     const allSteps = [...def.steps, ...variants.flatMap(([, steps]) => steps)];
     const missing = [...new Set(allSteps.filter((s) => s.tourId && !s.locator && !targetRoute.has(s.tourId)).map((s) => s.tourId))];
     if (missing.length) {

@@ -52,8 +52,8 @@ export async function pushTours(opts: PushOptions, log: (msg: string) => void = 
 
     const dir = opts.shots ? join(opts.shots, tour.id) : null;
     if (!dir || !existsSync(dir)) continue;
-    for (const file of readdirSync(dir).filter((f) => /^(desktop|mobile)-[\w-]+\.png$/.test(f))) {
-      const [, layout, key] = /^(desktop|mobile)-([\w-]+)\.png$/.exec(file)!;
+    for (const file of readdirSync(dir).filter((f) => /^(desktop|tablet|mobile)-[\w-]+\.png$/.test(f))) {
+      const [, layout, key] = /^(desktop|tablet|mobile)-([\w-]+)\.png$/.exec(file)!;
       const shot = await doFetch(`${base}/admin/tours/${encodeURIComponent(tour.id)}/shots/${layout}/${key}`, {
         method: 'PUT',
         headers: { ...headers, 'Content-Type': 'image/png' },

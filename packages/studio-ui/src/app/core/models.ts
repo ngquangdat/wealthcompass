@@ -129,9 +129,12 @@ export interface TourStep {
   healedAt?: string;
 }
 
+// Thiết bị của một bản tour
+export type TourLayout = 'desktop' | 'tablet' | 'mobile';
+
 // Locator đề xuất bởi tour:verify cho bước nhạy cảm, chờ người duyệt
 export interface TourProposal {
-  layout: 'desktop' | 'mobile';
+  layout: TourLayout;
   key: string;
   index: number;
   text: string;
@@ -150,8 +153,8 @@ export interface TourDef {
   steps: TourStep[];
   // recorded: ghi bằng tour:record (compass.tours.json), không cần tourId
   source?: 'recorded';
-  // Bố cục đã ghi (bản chính trước), vd. ['desktop', 'mobile']
-  layouts?: Array<'desktop' | 'mobile'>;
+  // Thiết bị đã ghi (bản chính trước), vd. ['desktop', 'mobile']
+  layouts?: TourLayout[];
   proposals?: TourProposal[];
   draft: boolean;
   valid: boolean;

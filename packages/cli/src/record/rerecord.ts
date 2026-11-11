@@ -56,7 +56,8 @@ export async function rerecordStep(opts: RerecordOptions, log: (msg: string) => 
   const clicked = new Promise<RecordedStep>((resolve) => (first = resolve));
   const { recorder, browser } = await recordSession(opts.url.replace(/\/$/, '') + route, `Ghi lại bước ${opts.key}: ${old.text}`, {
     mobileBreakpoint: config.tours.mobileBreakpoint,
-    mobile: (opts.layout ?? mainLayout(tour)) === 'mobile',
+    tabletBreakpoint: config.tours.tabletBreakpoint,
+    device: opts.layout ?? mainLayout(tour),
     onStep: (s) => first(s),
   });
   if (direct) await recorder.start();

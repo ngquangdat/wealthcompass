@@ -3,6 +3,7 @@ import { chromium, type Browser, type BrowserContextOptions, type ElementHandle 
 import type { Layout, TourStep } from '@wealthcompass/contracts';
 import { routeMatches, type ProbeOptions, type ProbeResult } from '@wealthcompass/core';
 import { CAPTURE_SCRIPT } from '../record/capture.bundle';
+import { NAV_TIMEOUT_MS } from '../record/recorder';
 import { VIEWPORTS, type VerifyDriver } from './verify';
 
 // Chạy không giao diện (CI). CHROME_PATH chỉ định Chrome/Chromium; không có thì dùng Chromium của Playwright,
@@ -34,7 +35,7 @@ export async function playwrightDriver(browser: Browser, base: string, layout: L
 
   return {
     async open(path) {
-      await page.goto(base + path, { waitUntil: 'domcontentloaded' });
+      await page.goto(base + path, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
       await settle();
     },
     path: () => new URL(page.url()).pathname,
@@ -81,7 +82,7 @@ export async function saveLoginState(url: string, out: string, log: (msg: string
   const browser = await launchVerifyBrowser(false);
   const context = await browser.newContext({ viewport: null });
   const page = await context.newPage();
-  await page.goto(url);
+  await page.goto(url, { timeout: NAV_TIMEOUT_MS });
   log(`Đã mở Chrome. Đăng nhập bằng tài khoản kiểm thử rồi đóng Chrome; phiên được lưu vào ${out}.`);
   let saved = false;
   const closed = new Promise<void>((resolve) => browser.on('disconnected', () => resolve()));

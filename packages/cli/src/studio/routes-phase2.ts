@@ -4,13 +4,14 @@ import type { FastifyInstance } from 'fastify';
 import { YAMLMap, isMap, isScalar } from 'yaml';
 import { z } from 'zod';
 import { describeLocator } from '@wealthcompass/core';
+import { layoutSchema } from '@wealthcompass/contracts';
 import { loadConfig } from '../scan';
 import { analyzeGuards } from '../setup/guards';
 import { finishRecording } from '../record/run';
 import { recordSession } from '../record/recorder';
-import { layoutOfSteps, readToursFile, writeTours } from '../record/write';
+import { readToursFile, writeTours } from '../record/write';
 import { rerecordStep } from '../record/rerecord';
-import { mainLayout, resolveProposal } from '../verify/heal';
+import { mainLayout, relabelLayout, resolveProposal } from '../verify/heal';
 import { verifyTours } from '../verify/verify';
 import { readOverrides } from './overrides-edit';
 import { cachedScan, configPath, httpError, invalidateScan, llm, loadDoc, requireApp, stream } from './context';
@@ -174,7 +175,7 @@ export function registerPhase2(app: FastifyInstance): void {
         startRoute: def.startRoute,
         source: 'recorded',
         // Bố cục đã ghi: bản chính + các bản thêm (Studio chỉ sửa chữ của bản chính)
-        layouts: [def.layout ?? layoutOfSteps(def.steps) ?? 'desktop', ...Object.keys(def.variants ?? {})],
+        layouts: [mainLayout(def), ...Object.keys(def.variants ?? {}).filter((l) => l !== mainLayout(def))],
         steps: def.steps.map((s) => ({
           key: s.key,
           target: s.tourId ?? '',
@@ -280,6 +281,25 @@ export function registerPhase2(app: FastifyInstance): void {
     return { ok: true };
   });
 
+  // Đổi thiết bị của một bản tour đã ghi (vd. bản ghi trên desktop thật ra dành cho iPad); trùng bản có sẵn thì đổi chỗ
+  app.post('/api/tours/:id/layout', async (req) => {
+    const dir = requireApp();
+    const { id } = req.params as { id: string };
+    const body = z.object({ from: layoutSchema, to: layoutSchema }).parse(req.body);
+    const file = toursPath(dir);
+    const data = readToursFile(file);
+    const tour = data.tours[id];
+    if (!tour) throw httpError(404, `Không có tour ghi "${id}"`);
+    try {
+      data.tours[id] = relabelLayout(tour, body.from, body.to);
+    } catch (e) {
+      throw httpError(400, e instanceof Error ? e.message : String(e));
+    }
+    writeTours(file, data, 'studio', `Đổi bản ${body.from} thành ${body.to}`);
+    invalidateScan();
+    return { ok: true, layouts: [mainLayout(data.tours[id]), ...Object.keys(data.tours[id].variants ?? {})] };
+  });
+
   app.delete('/api/tours/:id', async (req) => {
     const dir = requireApp();
     const { id } = req.params as { id: string };
@@ -300,12 +320,14 @@ export function registerPhase2(app: FastifyInstance): void {
   // Ghi tour bằng Chrome thật trên máy dev; chạy tới khi người bấm "Dừng & lưu" trong khung ghi
   app.post('/api/tours/record', async (req, reply) => {
     const dir = requireApp();
-    const body = req.body as { id: string; about?: string; feature?: string; url: string; mobile?: boolean };
+    const body = z
+      .object({ id: z.string(), about: z.string().optional(), feature: z.string().optional(), url: z.string(), device: layoutSchema.default('desktop') })
+      .parse(req.body);
     if (!TOUR_ID.test(body.id)) throw httpError(400, 'Id tour chỉ gồm chữ thường, số và gạch nối');
-    const layout = body.mobile ? 'mobile' : 'desktop';
+    const layout = body.device;
     const existing = readToursFile(toursPath(dir)).tours[body.id];
-    // Tour đã có chỉ được ghi thêm bản cho bố cục còn thiếu (vd. đã có desktop, giờ ghi mobile)
-    const canAddVariant = existing && (existing.layout ?? layoutOfSteps(existing.steps) ?? 'desktop') !== layout && !existing.variants?.[layout];
+    // Tour đã có chỉ được ghi thêm bản cho thiết bị còn thiếu (vd. đã có desktop, giờ ghi iPad)
+    const canAddVariant = existing && mainLayout(existing) !== layout && !existing.variants?.[layout];
     if (loadDoc(overridesPath(dir)).hasIn(['tours', body.id]) || (existing && !canAddVariant)) throw httpError(400, `Tour "${body.id}" đã có bản ${layout}; chọn id khác`);
     if (!/^https?:\/\//.test(body.url)) throw httpError(400, 'Địa chỉ web không hợp lệ');
     await stream(reply, async (log) => {
@@ -313,7 +335,8 @@ export function registerPhase2(app: FastifyInstance): void {
       const { config } = loadConfig(configPath(dir));
       const { recorder, browser } = await recordSession(body.url, body.about ?? '', {
         mobileBreakpoint: config.tours.mobileBreakpoint,
-        mobile: body.mobile,
+        tabletBreakpoint: config.tours.tabletBreakpoint,
+        device: layout,
       });
       log('Đã mở Chrome. Đăng nhập, vào màn hình xuất phát, bấm "● Bắt đầu ghi" ở góc trái dưới, thao tác theo luồng, rồi bấm "■ Dừng & lưu".');
       const closed = new Promise<void>((r) => browser.on('disconnected', () => r()));
@@ -324,7 +347,7 @@ export function registerPhase2(app: FastifyInstance): void {
       log(`Đã ghi ${steps.length} lần bấm.`);
       const c = llm();
       await finishRecording(
-        { config: configPath(dir), url: body.url, id: body.id, title: undefined, feature: body.feature || undefined, about: body.about, force: false, noLlm: !c.apiKey, dryRun: false, llm: c.apiKey ? c : null },
+        { config: configPath(dir), url: body.url, id: body.id, title: undefined, feature: body.feature || undefined, about: body.about, device: layout, force: false, noLlm: !c.apiKey, dryRun: false, llm: c.apiKey ? c : null },
         { steps, startRoute, endRoute, purpose },
         log,
       );
@@ -350,7 +373,7 @@ export function registerPhase2(app: FastifyInstance): void {
   app.post('/api/tours/:id/steps/:key/proposal', async (req) => {
     const dir = requireApp();
     const { id, key } = req.params as { id: string; key: string };
-    const body = z.object({ approve: z.boolean(), layout: z.enum(['desktop', 'mobile']).optional() }).parse(req.body);
+    const body = z.object({ approve: z.boolean(), layout: layoutSchema.optional() }).parse(req.body);
     const file = toursPath(dir);
     const data = readToursFile(file);
     const tour = data.tours[id];
@@ -369,7 +392,7 @@ export function registerPhase2(app: FastifyInstance): void {
   app.post('/api/tours/:id/steps/:key/rerecord', async (req, reply) => {
     const dir = requireApp();
     const { id, key } = req.params as { id: string; key: string };
-    const body = z.object({ url: z.string().regex(/^https?:\/\//), layout: z.enum(['desktop', 'mobile']).optional() }).parse(req.body);
+    const body = z.object({ url: z.string().regex(/^https?:\/\//), layout: layoutSchema.optional() }).parse(req.body);
     const tour = readToursFile(toursPath(dir)).tours[id];
     if (!tour) throw httpError(404, `Không có tour "${id}"`);
     await stream(reply, async (log) => {

@@ -180,7 +180,8 @@ function componentHost(element: Element): Element | null {
   for (let el = element.parentElement; el && el !== document.body; el = el.parentElement) {
     if (!el.tagName.includes('-') || el.tagName === 'APP-ROOT') continue;
     const r = el.getBoundingClientRect();
-    if (r.width * r.height >= vw * vh * 0.8) return null;
+    // Component lớn (cả trang, cả cột) chứa nhiều widget độc lập: spinner của widget khác trong đó không liên quan
+    if (r.width * r.height >= vw * vh * 0.4) return null;
     return el;
   }
   return null;
@@ -193,23 +194,31 @@ function overlaps(a: DOMRect, b: DOMRect): boolean {
 // Phần tử của bước còn đang tải: nằm trong vùng aria-busy, hoặc có chỉ báo "đang tải" che lên nó, nằm trong cùng
 // component với nó, hay trải rộng cả trang (thanh tải trên đầu trang, lớp phủ tải). Spinner nhỏ ở chỗ khác không tính.
 export function isLoadingAround(element: Element, selector = DEFAULT_BUSY_SELECTOR, root: ParentNode = document): boolean {
-  if (element.closest('[aria-busy="true"]')) return true;
+  return loadingIndicatorAround(element, selector, root) !== null;
+}
+
+// Chỉ báo đang tải làm bước phải chờ (để ghi lý do chờ khi bật debug); null khi không có
+export function loadingIndicatorAround(element: Element, selector = DEFAULT_BUSY_SELECTOR, root: ParentNode = document): Element | null {
+  const busyBox = element.closest('[aria-busy="true"]');
+  if (busyBox) return busyBox;
   let indicators: Element[];
   try {
     indicators = Array.from(root.querySelectorAll(selector)).filter(isVisible);
   } catch {
-    return false;
+    return null;
   }
-  if (!indicators.length) return false;
+  if (!indicators.length) return null;
   const rect = element.getBoundingClientRect();
   const host = componentHost(element);
   const vw = window.innerWidth || 1;
-  return indicators.some((ind) => {
-    if (ind === element || ind.contains(element)) return true;
-    if (host && host.contains(ind)) return true;
-    const r = ind.getBoundingClientRect();
-    return r.width >= vw * 0.5 || overlaps(r, rect);
-  });
+  return (
+    indicators.find((ind) => {
+      if (ind === element || ind.contains(element)) return true;
+      if (host && host.contains(ind)) return true;
+      const r = ind.getBoundingClientRect();
+      return r.width >= vw * 0.5 || overlaps(r, rect);
+    }) ?? null
+  );
 }
 
 export interface ReadyOptions {
@@ -217,6 +226,13 @@ export interface ReadyOptions {
   busySelector?: string;
   // Phần tử phải đứng yên (vị trí, cỡ không đổi) chừng này ms: component đã dựng xong, không còn nhảy bố cục
   stableMs?: number;
+  // Báo lý do đang chờ mỗi khi lý do đổi (bật debug để biết bước chậm vì đâu)
+  trace?: (reason: string) => void;
+}
+
+function describe(el: Element): string {
+  const cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
+  return el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + cls;
 }
 
 // Chờ phần tử của bước SẴN SÀNG rồi mới chỉ dẫn: tìm thấy chắc chắn, không còn đang tải quanh nó, và đã đứng yên.
@@ -226,11 +242,20 @@ export async function waitForReady(
   options: ReadyOptions = {},
   root: ParentNode = document,
 ): Promise<StepResolution | null> {
-  const { timeoutMs = 8000, busySelector = DEFAULT_BUSY_SELECTOR, stableMs = 150 } = options;
+  const { timeoutMs = 8000, busySelector = DEFAULT_BUSY_SELECTOR, stableMs = 150, trace } = options;
   let seen: { element: Element; box: string; since: number } | null = null;
   let best: StepResolution | null = null;
+  let lastReason = '';
+  let wasReady = false;
+  const note = (reason: string) => {
+    if (trace && reason !== lastReason) trace(reason);
+    lastReason = reason;
+  };
   const ready = (r: StepResolution): boolean => {
-    if (!r.confident || isLoadingAround(r.element, busySelector, root)) {
+    const loading = r.confident ? loadingIndicatorAround(r.element, busySelector, root) : null;
+    if (!r.confident || loading) {
+      wasReady = false;
+      note(!r.confident ? `chưa chắc phần tử (${r.matchedBy}, điểm ${r.score ?? '?'})` : `đang tải quanh phần tử: ${describe(loading!)}`);
       seen = null;
       return false;
     }
@@ -238,14 +263,18 @@ export async function waitForReady(
     const box = `${Math.round(b.left)},${Math.round(b.top)},${Math.round(b.width)},${Math.round(b.height)}`;
     const now = Date.now();
     if (!seen || seen.element !== r.element || seen.box !== box) {
+      if (seen) note('phần tử còn dịch chuyển');
       seen = { element: r.element, box, since: now };
-      return stableMs <= 0;
+      wasReady = stableMs <= 0;
+      return wasReady;
     }
-    return now - seen.since >= stableMs;
+    wasReady = now - seen.since >= stableMs;
+    return wasReady;
   };
   const result = await waitFor(
     () => {
       const r = resolveStep(step, root);
+      if (!r) note('chưa thấy phần tử');
       if (r && (!best || r.confident || !best.confident)) best = r;
       return r;
     },
@@ -254,6 +283,7 @@ export async function waitForReady(
     ready,
     Math.max(40, Math.min(100, stableMs / 2)),
   );
+  if (trace && !wasReady) trace(`hết ${timeoutMs} ms, lý do cuối: ${lastReason || 'không rõ'}`);
   return result?.confident ? result : best;
 }
 

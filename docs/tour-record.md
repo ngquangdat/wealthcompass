@@ -276,6 +276,7 @@ Nếu LLM trả sai định dạng hoặc sai số bước, công cụ thử l�
 | App không phản ứng khi bấm | Công tắc **Tô sáng** đang BẬT: bấm nút đó lần nữa để tắt |
 | `! Bỏ qua lần bấm vào <tag> ở /route: phần tử không có tên, chữ hay thuộc tính ổn định...` | Phần tử không có manh mối nào để tìm lại (vd. `div` trống). Bấm vào phần có chữ của mục đó, hoặc thêm `aria-label`/`tourId` |
 | `Không có bước nào nhận ra được, không có gì để lưu.` | Mọi lần bấm đều vào phần tử không có manh mối |
+| Bước sau mãi mới hiện | Mở console của trình duyệt, chạy `localStorage.compassDebug = '1'` (hoặc thêm `?compassDebug=1` vào địa chỉ), chạy lại tour. Mỗi bước in thời gian và lý do chờ: router đang chuyển trang, chưa thấy/chưa chắc phần tử, `đang tải quanh phần tử: <chỉ báo>` (spinner nào làm chậm thì loại nó khỏi `busySelector` hoặc sửa app), phần tử còn dịch chuyển. Widget bản cũ (trước khi có "chờ thành phần sẵn sàng") chờ tới 5 giây khi có spinner bất kỳ trên trang: build lại web với widget mới |
 | Menu hover đóng mất khi chạy tour | Bước mở menu chưa được ghi là `hover`: ghi lại và nhấn **Alt** khi chuột đang ở trên nút mở menu, hoặc đổi kiểu bước thành "Di chuột" ở trang Tour của Studio |
 | `Chưa bấm "Bắt đầu ghi".` / `Đóng trình duyệt trước khi ghi.` | Đã dừng hoặc đóng Chrome mà chưa bắt đầu ghi |
 | `! Chưa có feature-map.json (hãy chạy scan trước)...` | Chạy `npm run scan` trước. Không có thì không điền được nhãn, và không tự xác định được tính năng đích |

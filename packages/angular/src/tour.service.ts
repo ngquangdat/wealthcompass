@@ -31,6 +31,16 @@ const OFF_ROUTE_PEEK_MS = 800;
 // Router đang chuyển trang (resolver, lazy chunk chậm): chờ tối đa chừng này
 const NAVIGATION_TIMEOUT_MS = 15000;
 
+// Ghi thời gian chờ từng bước ra console (tìm nguyên nhân bước hiện chậm): bật bằng localStorage.compassDebug = '1'
+// hoặc thêm ?compassDebug=1 vào địa chỉ trang
+function debugEnabled(): boolean {
+  try {
+    return localStorage.getItem('compassDebug') === '1' || /[?&]compassDebug=1\b/.test(location.search);
+  } catch {
+    return false;
+  }
+}
+
 export interface TourOutcome {
   tourId: string;
   status: 'completed' | 'cancelled' | 'failed';
@@ -199,6 +209,11 @@ export class TourService {
   private async runStep(tour: Tour, index: number, run: number): Promise<'next' | 'cancelled' | 'missing'> {
     const step = tour.steps[index];
     const isLast = index === tour.steps.length - 1;
+    const debug = debugEnabled();
+    const t0 = performance.now();
+    const log = (msg: string) => debug && console.info(`[WealthCompass] ${tour.id} bước ${index + 1}/${tour.steps.length} +${Math.round(performance.now() - t0)} ms: ${msg}`);
+    const trace = debug ? (reason: string) => log(`chờ: ${reason}`) : undefined;
+    log(`bắt đầu (route ${step.route ?? '-'}, đang ở ${this.path()}${this.navigating ? ', router đang chuyển trang' : ''})`);
 
     // Thứ tự chờ: router chuyển trang xong (lần bấm ở bước trước) → đúng route → phần tử SẴN SÀNG: tìm thấy chắc chắn,
     // thành phần quanh nó hết "đang tải" và đã đứng yên. Chỉ dẫn sớm hơn thì popover trỏ vào khung chưa dựng xong.
@@ -206,8 +221,9 @@ export class TourService {
     if (step.route && index > 0 && !routeMatches(step.route, this.path())) await waitForRoute(step.route, () => this.path(), 3000);
     await this.navigationSettled();
     if (run !== this.runId) return 'cancelled';
+    log(`xong chờ chuyển trang, đang ở ${this.path()}`);
 
-    const ready = { busySelector: this.config.tours.busySelector, stableMs: 150 };
+    const ready = { busySelector: this.config.tours.busySelector, stableMs: 150, trace };
     // Route có tham số (/orders/:id) không điều hướng được: chờ người dùng tự mở
     const canNavigate = Boolean(step.route && !step.route.includes(':') && !routeMatches(step.route, this.path()));
     let found: StepResolution | null = await waitForReady(step, { ...ready, timeoutMs: canNavigate ? OFF_ROUTE_PEEK_MS : READY_TIMEOUT_MS });
@@ -219,6 +235,7 @@ export class TourService {
       found = await waitForReady(step, { ...ready, timeoutMs: READY_TIMEOUT_MS });
     }
     if (run !== this.runId) return 'cancelled';
+    log(found ? `hiện bước (${found.matchedBy}${found.confident ? '' : ', không chắc'})` : 'không thấy phần tử');
     if (!found) return 'missing';
     // Chỉ báo bước tìm bằng locator: để biết tour nào đang dựa vào manh mối yếu trước khi nó hỏng hẳn
     if (found.matchedBy.startsWith('locator')) this.api.report({ event: 'tour_step', tourId: tour.id, stepKey: step.key ?? String(index), matchedBy: found.matchedBy, score: found.score, status: found.confident ? 'ok' : 'low_confidence' });
@@ -314,7 +331,11 @@ export class TourService {
       }
       if (waitsForClick) {
         // Sang bước sau ngay sau khi app nhận lần bấm (bước sau tự chờ trang/thành phần mới sẵn sàng)
-        listen('click', (e) => onTarget(e) && setTimeout(() => settle('next'), 30));
+        listen('click', (e) => {
+          if (!onTarget(e)) return;
+          log('người dùng đã bấm, sang bước sau');
+          setTimeout(() => settle('next'), 30);
+        });
         // Component xử lý ở pointerdown rồi gỡ phần tử (click không bao giờ tới): phần tử biến mất sau lần nhấn là đã bấm
         listen('pointerdown', (e) => {
           if (!onTarget(e)) return;

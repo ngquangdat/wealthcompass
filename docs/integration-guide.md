@@ -226,12 +226,19 @@ locale: vi
 discovery:
   entry: src/app/app.routes.ts                 # file khai báo mảng Routes gốc
   menu: src/app/shared/menu.config.ts          # tùy chọn
+  i18n: src/assets/i18n/vi.json                # tùy chọn: file dịch của web; bỏ trống thì tự tìm theo locale
   overrides: compass.overrides.yaml
   out: feature-map.json
 access:
   guards:
     authGuard: { requires: [] }
 ```
+
+**Web dùng i18n** (ngx-translate, transloco): route khai `data: { title: 'guest.t2' }`, menu khai nhãn bằng khóa, template viết `{{ 'guest.t2' | translate }}`. Scanner dịch các khóa này bằng file dịch của web trước khi dùng làm tiêu đề, nhãn menu, nhãn `tourId` và chữ trên màn hình (ngữ cảnh để LLM soạn mô tả và để tìm kiếm). Không khai `discovery.i18n` thì nó tự tìm `<locale>.json` ở `src/assets/i18n/`, `src/assets/locale(s)/`, `src/assets/lang/`, `public/i18n/`, `src/i18n/`. File lồng nhau (`{ "guest": { "t2": "..." } }`) hay phẳng (`{ "guest.t2": "..." }`) đều đọc được.
+
+- Khóa không có trong file dịch: tiêu đề dùng nhãn menu nếu có, và `scan` báo cảnh báo kèm ví dụ; chữ trên màn hình là khóa chưa dịch thì bị bỏ.
+- Chỉ dịch được khóa viết thẳng trong source. Khóa ghép lúc chạy (`'menu.' + item.key`) hoặc chữ đặt bằng `translate.instant(...)` trong TypeScript không dịch được; đặt tiêu đề cho các màn đó trong overrides.
+- Sau khi bật dịch, chạy lại `scan` rồi `enrich --redraft` (Studio: "Soạn lại … nháp chưa duyệt" ở trang Màn hình) để LLM soạn lại mô tả nháp của các màn trước đây chỉ có khóa. Mô tả đã duyệt thì sửa tay.
 
 An toàn phía client (selector `user-only` bổ sung, route tour không bao giờ được dẫn tới) khai trong `provideCompass({ safety: {...} })` ở bước 4.3, vì engine chạy trong trình duyệt. Mục `safety` trong file yaml của bản demo hiện chưa được dùng.
 
@@ -302,12 +309,13 @@ cd ~/wealthcompass
 npm run enrich -- --dry-run                 # xem LLM định viết gì, chưa ghi file
 npm run enrich                              # ghi vào compass.overrides.yaml
 npm run enrich -- --only iconnect.assets,money.deposit
+npm run enrich -- --redraft                 # soạn lại cả nháp LLM chưa duyệt (vd. sau khi bật dịch i18n)
 # web khác: npx tsx packages/cli/src/main.ts enrich --config duong/dan/compass.config.yaml
 ```
 
 Cách hoạt động:
 
-1. Chạy `scan`, tìm các màn hình thiếu `description`, `keywords` hoặc `sampleQuestions`. Chỉ **điền chỗ trống**, không bao giờ đè thứ đã viết (trong `route.data` hay overrides).
+1. Chạy `scan`, tìm các màn hình thiếu `description`, `keywords` hoặc `sampleQuestions`. Chỉ **điền chỗ trống**, không bao giờ đè thứ đã viết (trong `route.data` hay overrides). `--redraft` (Studio: nút "Soạn lại … nháp chưa duyệt" ở trang Màn hình) soạn lại thêm các trường LLM đã soạn mà còn trong `llmDraft`; trường người viết hoặc đã duyệt vẫn giữ nguyên.
 2. Với mỗi màn hình, gửi LLM: tiêu đề, đường dẫn menu, nhóm sản phẩm, **chữ tĩnh trong template** (tiêu đề, nhãn, tên nút, placeholder; bỏ phần nội suy `{{ }}`), phần đã có và danh sách trường cần soạn. Không gửi dữ liệu hiển thị trên màn hình khi chạy; mọi chuỗi qua lọc PII cả chiều gửi và chiều nhận.
 3. Gửi theo lô 6 màn hình mỗi lần. Kết quả được kiểm bằng schema; sai định dạng thì thử lại một lần rồi bỏ qua lô đó.
 4. LLM được dặn: chỉ dùng thông tin trong đầu vào, không bịa tính năng; **nếu đầu vào quá ít thì trả mô tả rỗng**. Màn hình như vậy được báo "không đủ thông tin để soạn" và bỏ qua thay vì đoán.

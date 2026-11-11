@@ -27,13 +27,23 @@ interface LooseNode {
   children?: LooseNode[];
 }
 
-// Lấy giá trị chuỗi tĩnh từ `attr="x"` hoặc `[attr]="'x'"`
+// Khóa i18n trong pipe dịch: {{ 'guest.t2' | translate }}, [title]="'menu.home' | transloco". Trình quét dịch khóa
+// bằng file dịch của web (vi.json); không có pipe thì phần nội suy bị bỏ như mọi biểu thức khác.
+const PIPE_KEY = /(['"])([A-Za-z_][\w-]*(?:\.[\w-]+)+)\1\s*\|\s*(?:translate|transloco)\b/g;
+
+function pipeKeys(raw: string): string[] {
+  return [...raw.matchAll(PIPE_KEY)].map((m) => m[2]);
+}
+
+// Lấy giá trị chuỗi tĩnh từ `attr="x"`, `[attr]="'x'"` hoặc khóa dịch `[attr]="'x' | translate"`
 function staticValue(attrs: Array<{ name: string; value: string }>, name: string): string | undefined {
   for (const attr of attrs) {
     if (attr.name === name) return attr.value;
     if (attr.name === `[${name}]`) {
       const match = attr.value.trim().match(/^(['"])(.*)\1$/);
       if (match) return match[2];
+      const key = pipeKeys(attr.value)[0];
+      if (key) return key;
     }
   }
   return undefined;
@@ -62,12 +72,18 @@ export function analyzeTemplate(html: string): TemplateInfo {
   };
 
   const visit = (node: LooseNode) => {
-    // Nút chữ: có value và không có tên thẻ
-    if (typeof node.value === 'string' && !node.name) addText(node.value);
+    // Nút chữ: có value và không có tên thẻ. Khóa dịch trong {{ 'x' | translate }} giữ lại để trình quét dịch.
+    if (typeof node.value === 'string' && !node.name) {
+      addText(node.value);
+      pipeKeys(node.value).forEach(addText);
+    }
     if (typeof node.name === 'string' && node.name && Array.isArray(node.attrs)) {
       if (SKIP_TEXT_IN.has(node.name)) return;
       tags.add(node.name);
       for (const attr of TEXT_ATTRS) addText(staticValue(node.attrs, attr));
+      // Directive dịch: <span translate="guest.t2"> hoặc [translate]="'guest.t2'"; khóa trong pipe ở thuộc tính bất kỳ
+      addText(staticValue(node.attrs, 'translate'));
+      for (const attr of node.attrs) if (attr.name.startsWith('[') || attr.value.includes('{{')) pipeKeys(attr.value).forEach(addText);
       const menu = node.attrs.find((a) => a.name === 'tourMenu' || a.name === '[tourMenu]');
       if (menu) {
         const route = staticValue(node.attrs, 'tourMenu');

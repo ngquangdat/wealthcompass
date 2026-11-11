@@ -17,6 +17,9 @@ export interface EnrichOptions {
   llm: LlmConfig | null;
   batchSize?: number;
   today?: string;
+  // Soạn lại cả các trường LLM đã soạn mà chưa ai duyệt (còn trong llmDraft), vd. sau khi tiêu đề/chữ trên màn hình
+  // được dịch từ khóa i18n. Trường người đã viết hoặc đã duyệt không bao giờ bị ghi đè.
+  redraft?: boolean;
 }
 
 export interface EnrichResult {
@@ -136,7 +139,19 @@ async function draftBatch(
 
 // Gộp bản nháp vào overrides, giữ nguyên chú thích và mọi thứ người đã viết.
 // Mỗi feature được ghi thêm khóa llmDraft liệt kê các trường do LLM soạn; scanner cảnh báo cho tới khi người xóa khóa này.
-export function mergeDrafts(file: string, drafts: Map<string, Draft>, today: string): { yaml: string; fields: Map<string, Field[]> } {
+// Trường do LLM soạn mà chưa duyệt, theo từng feature (khóa llmDraft trong overrides)
+export function draftFieldsOf(file: string): Map<string, Field[]> {
+  const out = new Map<string, Field[]>();
+  const text = exists(file) ? readText(file) : '';
+  const data = text.trim() ? (parseDocument(text).toJSON() as { features?: Record<string, { llmDraft?: unknown }> } | null) : null;
+  for (const [id, ov] of Object.entries(data?.features ?? {})) {
+    if (Array.isArray(ov?.llmDraft)) out.set(id, ov.llmDraft.filter((f): f is Field => ['description', 'keywords', 'sampleQuestions'].includes(String(f))));
+  }
+  return out;
+}
+
+// `redraft`: được ghi đè trường đang là nháp LLM chưa duyệt (có trong llmDraft); trường người viết vẫn giữ nguyên
+export function mergeDrafts(file: string, drafts: Map<string, Draft>, today: string, redraft = false): { yaml: string; fields: Map<string, Field[]> } {
   const existing = exists(file) ? readText(file) : '';
   const doc: Document = existing.trim() ? parseDocument(existing) : new Document({});
   if (doc.errors.length) throw new Error(`${file} không phải YAML hợp lệ: ${doc.errors[0].message}`);
@@ -159,8 +174,10 @@ export function mergeDrafts(file: string, drafts: Map<string, Draft>, today: str
     map.flow = false;
     // Chỉ tính các trường THỰC SỰ được ghi: trường người đã viết tay thì giữ nguyên và không đánh dấu nháp
     const fields: Field[] = [];
+    const draftNode = map.get('llmDraft', true);
+    const stillDraft = new Set<string>(redraft && isSeq(draftNode) ? ((draftNode as YAMLSeq).toJSON() as string[]) : []);
     for (const f of wanted) {
-      if (map.has(f) && !isEmptyNode(map.get(f, true))) continue;
+      if (map.has(f) && !isEmptyNode(map.get(f, true)) && !stillDraft.has(f)) continue;
       // Khóa tạo bằng doc.createNode để là nút Scalar (mới gắn được chú thích)
       map.set(doc.createNode(f), doc.createNode(draft[f]));
       fields.push(f);
@@ -201,9 +218,20 @@ export async function enrich(opts: EnrichOptions, log: (msg: string) => void = c
     if (unknown.length) throw new Error(`Không có feature: ${unknown.join(', ')}`);
   }
 
+  // Trường còn là nháp LLM chưa duyệt (llmDraft trong overrides): --redraft thì coi như trống để soạn lại
+  const draftsToRedo = opts.redraft ? draftFieldsOf(join(root, config.discovery.overrides)) : new Map<string, Field[]>();
   const todo = featureMap.features
     .filter((f) => !only || only.has(f.id))
-    .map((feature) => ({ feature, ctx: contexts[feature.id], gaps: findGaps(feature) }))
+    .map((f) => {
+      const redo = draftsToRedo.get(f.id) ?? [];
+      const feature: Feature = {
+        ...f,
+        ...(redo.includes('description') ? { description: '' } : {}),
+        ...(redo.includes('keywords') ? { keywords: [] } : {}),
+        ...(redo.includes('sampleQuestions') ? { sampleQuestions: [] } : {}),
+      };
+      return { feature, ctx: contexts[f.id], gaps: findGaps(feature) };
+    })
     .filter((x) => x.gaps.length > 0 && x.ctx);
 
   if (!todo.length) {
@@ -231,7 +259,7 @@ export async function enrich(opts: EnrichOptions, log: (msg: string) => void = c
   }
 
   const overridesFile = join(root, config.discovery.overrides);
-  const merged = mergeDrafts(overridesFile, all, opts.today ?? new Date().toISOString().slice(0, 10));
+  const merged = mergeDrafts(overridesFile, all, opts.today ?? new Date().toISOString().slice(0, 10), Boolean(opts.redraft));
   const drafted = [...merged.fields].map(([id, fields]) => ({ id, fields }));
 
   for (const d of drafted) log(`  ✎ ${d.id}: ${d.fields.join(', ')}`);

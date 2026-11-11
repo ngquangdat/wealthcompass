@@ -268,6 +268,9 @@ export const compassConfigSchema = z.object({
     // File route gốc; bắt buộc khi source là angular
     entry: z.string().optional(),
     menu: z.string().optional(),
+    // File dịch của web (ngx-translate/transloco, vd. src/assets/i18n/vi.json) để dịch khóa i18n trong title, menu,
+    // template. Bỏ trống: tự tìm theo locale ở các chỗ thường gặp (src/assets/i18n/<locale>.json...)
+    i18n: z.string().optional(),
     srcRoot: z.string().default('src'),
     overrides: z.string().default('compass.overrides.yaml'),
     // Kho tour (file SQLite): tour:record, Studio và backend cùng đọc/ghi file này; commit cùng dự án

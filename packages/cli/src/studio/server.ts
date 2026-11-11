@@ -183,9 +183,9 @@ export async function startStudio(opts: StudioOptions): Promise<{ url: string; c
 
   app.post('/api/features/enrich', async (req, reply) => {
     const dir = requireApp();
-    const { ids } = (req.body ?? {}) as { ids?: string[] };
+    const { ids, redraft } = (req.body ?? {}) as { ids?: string[]; redraft?: boolean };
     await stream(reply, async (log) => {
-      const res = await enrich({ config: configPath(dir), dryRun: false, only: ids, llm: llm() }, log);
+      const res = await enrich({ config: configPath(dir), dryRun: false, only: ids, llm: llm(), redraft: Boolean(redraft) }, log);
       return { drafted: res.drafted.length, skipped: res.skipped };
     });
   });

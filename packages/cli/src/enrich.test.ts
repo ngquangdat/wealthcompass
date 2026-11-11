@@ -165,3 +165,17 @@ test('mergeDrafts không đè trường người đã viết và giữ chú thí
   assert.match(out.yaml, /# giữ\n/);
   assert.match(out.yaml, /keywords:\n\s+- a b/);
 });
+
+test('mergeDrafts --redraft: chỉ ghi đè trường còn là nháp LLM chưa duyệt, giữ trường người viết', async () => {
+  const { draftFieldsOf } = await import('./enrich');
+  const dir = mkdtempSync(join(tmpdir(), 'compass-'));
+  const file = join(dir, 'o.yaml');
+  writeFileSync(file, 'features:\n  guest:\n    description: Màn hình guest.t2\n    keywords: [người viết]\n    llmDraft: [description]\n');
+  assert.deepEqual(draftFieldsOf(file).get('guest'), ['description']);
+  const draft = new Map([['guest', { description: 'Đổi số điện thoại đăng nhập', keywords: ['doi so dien thoai'] }]]);
+  assert.equal(mergeDrafts(file, draft, '2026-11-11').yaml.includes('Đổi số điện thoại'), false, 'không --redraft thì giữ nháp cũ');
+  const out = mergeDrafts(file, draft, '2026-11-11', true).yaml;
+  assert.match(out, /description: Đổi số điện thoại đăng nhập/);
+  assert.match(out, /người viết/);
+  assert.equal(out.includes('doi so dien thoai'), false, 'trường người viết không bị đè');
+});

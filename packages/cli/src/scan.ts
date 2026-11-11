@@ -14,6 +14,7 @@ import {
   type Tour,
 } from '@wealthcompass/contracts';
 import { scanRoutes, type ScannedLayout, type ScannedRoute } from './routes';
+import { loadTranslator } from './i18n';
 import { scanMenu } from './menu';
 import { MENU_TARGETS } from './template';
 import { menuTourId, routeMatches } from '@wealthcompass/core';
@@ -172,6 +173,31 @@ export function scan(configPath: string, options: ScanOptions = {}): ScanResult 
     writeIndex(sourceRoot, 'scan', fingerprint, index);
   }
 
+  // Khóa i18n (data.title: 'guest.t2', nhãn menu, {{ 'x' | translate }}) dịch bằng file dịch của web. Dịch sau chỉ mục:
+  // file dịch nằm trong source nên đổi nó thì chỉ mục cũng hết hiệu lực, còn bản dịch luôn lấy từ file hiện tại.
+  const i18n = noSource ? null : loadTranslator(sourceRoot, config.locale, config.discovery.i18n, warnings);
+  if (i18n) {
+    const tr = (s: string) => i18n.text(s);
+    // Chữ trên màn hình là khóa không có bản dịch: bỏ, chỉ làm nhiễu ngữ cảnh của LLM và tìm kiếm
+    const texts = (list: string[]) => [...new Set(list.filter((t) => !i18n.missing(t)).map(tr))];
+    routes = routes.map((r) => ({
+      ...r,
+      ...(typeof r.title === 'string' ? { title: tr(r.title) } : {}),
+      ...(typeof r.data['description'] === 'string' ? { data: { ...r.data, description: tr(r.data['description']) } } : {}),
+      uiText: texts(r.uiText),
+      targets: r.targets.map((t) => ({ ...t, ...(t.label ? { label: tr(t.label) } : {}), ...(t.hint ? { hint: tr(t.hint) } : {}) })),
+    }));
+    menu = new Map([...menu].map(([path, labels]) => [path, labels.map(tr)]));
+    const untranslated = routes.filter((r) => typeof r.title === 'string' && i18n.missing(r.title));
+    if (untranslated.length) {
+      warnings.push(
+        i18n.file
+          ? `${untranslated.length} route có title là khóa i18n không có trong ${i18n.file} (vd. ${untranslated[0].title} ở ${untranslated[0].path}): thêm bản dịch hoặc đặt title trong overrides`
+          : `${untranslated.length} route có title giống khóa i18n (vd. ${untranslated[0].title}) nhưng không tìm thấy file dịch: khai discovery.i18n (vd. src/assets/i18n/vi.json) trong compass.config.yaml`,
+      );
+    }
+  }
+
   // Khóa ổn định: nếu id sinh ra chưa có trong lock nhưng component cũ vẫn còn, coi là đổi tên route
   const lockFile = join(root, 'compass.lock.json');
   const lock: Lock = exists(lockFile) ? JSON.parse(readText(lockFile)) : { features: {} };
@@ -217,7 +243,9 @@ export function scan(configPath: string, options: ScanOptions = {}): ScanResult 
 
     // Thứ tự: overrides > title của route > nhãn menu (cuối đường dẫn menu). Dùng nhãn menu thay vì đường dẫn thô
     // vì người dùng nhìn thấy đúng chữ đó khi tìm trong menu.
-    const title = ov.title ?? r.title ?? menuPath.at(-1);
+    // title là khóa i18n chưa có bản dịch: nhãn menu (nếu có) dễ hiểu hơn chuỗi khóa
+    const routeTitle = r.title && i18n?.missing(r.title) && menuPath.length ? undefined : r.title;
+    const title = ov.title ?? routeTitle ?? menuPath.at(-1);
     if (title) routesWithTitle++;
     else warnings.push(`${r.sourceRef}: route ${r.path} thiếu title (data.title, nhãn menu hoặc overrides)`);
     const description = ov.description ?? (r.data['description'] as string | undefined) ?? '';

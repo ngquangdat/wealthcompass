@@ -159,6 +159,7 @@ if (command === 'doctor' && arg('app')) {
     dryRun: process.argv.includes('--dry-run'),
     only: resolveOnly(arg('only')),
     llm: resolveLlmConfig(),
+    redraft: process.argv.includes('--redraft'),
   });
 } else if (command === 'tour:record') {
   const id = arg('id');
@@ -269,6 +270,6 @@ if (command === 'doctor' && arg('app')) {
     dryRun: process.argv.includes('--dry-run'),
   });
 } else {
-  console.log('Cách dùng: wealthcompass studio [--app <dir>] | setup --app <dir> | init --url <web> [--name <tên>] | migrate --app <dir> | project:export --app <dir> | project:import --app <dir> | doctor --app <dir> | scan --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--dry-run] | tour:record ... | tour:verify ... | tour:auth ... | tour:rerecord ... | tour:push ... | tour:export [--file x.json] | tour:import --file x.json');
+  console.log('Cách dùng: wealthcompass studio [--app <dir>] | setup --app <dir> | init --url <web> [--name <tên>] | migrate --app <dir> | project:export --app <dir> | project:import --app <dir> | doctor --app <dir> | scan --config <compass.config.yaml> [--strict] | enrich --config <yaml> [--only id1,id2] [--redraft] [--dry-run] | tour:record ... | tour:verify ... | tour:auth ... | tour:rerecord ... | tour:push ... | tour:export [--file x.json] | tour:import --file x.json');
   process.exit(command ? 1 : 0);
 }

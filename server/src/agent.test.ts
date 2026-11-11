@@ -159,3 +159,29 @@ test('tour chỉ có locator (web chưa gắn tourId): vẫn được đề xu�
   assert.ok((await collect(['bond_account'])).some((e) => e.type === 'offer_tour' && e.tourId === 'sell-bond-loc'));
   await llm.close();
 });
+
+test('tìm kiếm: tiêu đề và mô tả của tour được tính cho màn hình đích, không khớp nhầm màn có chữ gần giống', async () => {
+  const { writeFileSync, mkdtempSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const map = structuredClone(store.featureMap);
+  const access = { requires: [], unknownGuards: [] };
+  const provenance = { source: ['static' as const], reviewed: true };
+  map.features.push(
+    { id: 'guest.forgot-password', route: { pattern: '/guest/forgot-password' }, title: 'Quên mật khẩu', description: 'Lấy lại mật khẩu bằng số điện thoại đã đăng ký.', keywords: ['quen mat khau'], menuPath: [], facets: {}, access, targets: [], sampleQuestions: [], tourIds: [], provenance },
+    { id: 'profile', route: { pattern: '/profile' }, title: 'Hồ sơ', description: '', keywords: [], menuPath: [], facets: {}, access, targets: [], sampleQuestions: [], tourIds: ['change-phone'], provenance },
+  );
+  map.tours.push({
+    id: 'change-phone',
+    title: 'Đổi số điện thoại',
+    description: 'Cập nhật số điện thoại nhận OTP',
+    startRoute: '/profile',
+    steps: [{ key: 's1', locator: { tag: 'button', role: 'button', name: 'Sửa', attrs: {}, context: {} }, text: 'Bấm **Sửa**.', advanceOn: 'next', route: '/profile' }],
+  });
+  const file = join(mkdtempSync(join(tmpdir(), 'compass-search-')), 'feature-map.json');
+  writeFileSync(file, JSON.stringify(map));
+  const s = new FeatureStore(file);
+  const top = s.search('đổi số điện thoại', []).results[0];
+  assert.equal(top?.id, 'profile');
+  assert.equal(top?.tours[0]?.id, 'change-phone');
+});

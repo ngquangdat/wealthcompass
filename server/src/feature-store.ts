@@ -92,8 +92,15 @@ export class FeatureStore {
     feature.menuPath.forEach((m) => add(m, 2));
     Object.values(feature.facets).forEach((v) => add(v, 1));
     add(feature.description, 1);
+    // Tour dẫn tới màn hình này: tiêu đề và mô tả của tour nói đúng việc người dùng muốn làm ("Đổi số điện thoại"),
+    // dù màn hình đích không có chữ đó (việc làm trong hộp thoại mở từ trang chủ, màn hình chung nhiều chức năng)
+    const tours = feature.tourIds.map((id) => this.map.tours.find((t) => t.id === id)).filter((t): t is Tour => Boolean(t));
+    for (const t of tours) {
+      add(t.title, 4);
+      if (t.description) add(t.description, 2);
+    }
     const phrase = normalizeVi(
-      [feature.title, ...feature.keywords, ...feature.sampleQuestions, ...feature.menuPath, feature.description].join(' | '),
+      [feature.title, ...feature.keywords, ...feature.sampleQuestions, ...feature.menuPath, feature.description, ...tours.flatMap((t) => [t.title, t.description ?? ''])].join(' | '),
     );
     return { feature, tokens, phrase, length: [...tokens.values()].reduce((a, b) => a + b, 0) };
   }
